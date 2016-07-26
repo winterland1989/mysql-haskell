@@ -1,10 +1,15 @@
 {-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE ExistentialQuantification #-}
+
+
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Database.MySQL.Protocol where
 
 import           Control.Monad
+import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
@@ -13,7 +18,9 @@ import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
 
-import Debug.Trace
+import Control.Exception (throwIO, Exception, SomeException, Exception(..))
+import Data.Typeable (Typeable, cast)
+import Data.String (IsString(..))
 
 --------------------------------------------------------------------------------
 -- | packet tyoe
@@ -42,70 +49,114 @@ instance Binary Packet where
 
 
 isERR :: Packet -> Bool
-isERR p = L.index (pBody p) 0 == 0xff
+isERR p = L.index (pBody p) 0 == 0xFF
 
 isOK :: Packet -> Bool
 isOK p  = L.index (pBody p) 0 == 0x00
 
 isEOF :: Packet -> Bool
-isEOF p = L.index (pBody p) 0 == 0xfe
+isEOF p = L.index (pBody p) 0 == 0xFE
 
-getFromPacket :: Binary a => Packet -> a
-getFromPacket (Packet _ _ body) = runGet get body
+-- | get packet inside IO, throw 'DecodePacketException' on fail parsing.
+-- here we choose stability over correctness by omit incomplete consumed case:
+-- if we successful parse a packet, then we don't care if there're bytes left.
+decodeFromPacket :: Binary a => Packet -> IO a
+decodeFromPacket (Packet _ _ body) = case decodeOrFail body of
+    Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
+    Right (_, _, r)            -> return r
 
-putToPacket :: Binary a => a -> Word8 -> Packet
-putToPacket payload seqN =
+getFromPacket :: Get a -> Packet -> IO a
+getFromPacket g (Packet _ _ body) = case runGetOrFail g body of
+    Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
+    Right (_, _, r)            -> return r
+
+encodeToPacket :: Binary a => a -> Word8 -> Packet
+encodeToPacket payload seqN =
     let s = encode payload
         l = L.length s
     in Packet (fromIntegral l) seqN s
 
 --------------------------------------------------------------------------------
--- general packets
+-- OK, ERR, EOF
 data OK = OK
     { okAffectedRows :: LenEncInt
     , okLastInsertID :: LenEncInt
     , okStatus       :: Word16
-    , okWarnings     :: Word16
+    , okWarningCnt   :: Word16
     } deriving (Show, Eq)
 
-data ERR = ERR
-    { errCode     :: !Word16
-    , errState    :: !L.ByteString
-    , errMsg      :: !L.ByteString
-    } deriving (Show, Eq)
+getOK :: Get OK
+getOK = do
+    w <- lookAhead getWord8
+    if w == 0x00
+    then OK <$> getLenEncInt
+            <*> getLenEncInt
+            <*> getWord16le
+            <*> getWord16le
+    else fail "wrong OK packet"
+
+putOK :: OK -> Put
+putOK (OK row lid status wcnt) = do
+    putWord8 0x00
+    putLenEncInt row
+    putLenEncInt lid
+    putWord16le status
+    putWord16le wcnt
 
 instance Binary OK where
     get = getOK
     put = putOK
 
-getOK :: Get OK
-getOK = do
-    w <- getWord8
-    if w == 0x00
-    then OK
-        <$> getLenEncInt
-        <*> getLenEncInt
-        <*> getWord16le
-        <*> getWord16le
-    else fail "wrong OK packet"
+data ERR = ERR
+    { errCode     :: !Word16
+    , errState    :: !ByteString
+    , errMsg      :: !ByteString
+    } deriving (Show, Eq)
 
-putOK :: OK -> Put
-putOK (OK row lid status warn) = do
-    putWord8 0x00
-    putLenEncInt row
-    putLenEncInt lid
+getERR :: Get ERR
+getERR = do
+    w <- lookAhead getWord8
+    if w == 0xFF
+    then ERR <$> getWord16le
+             <*  skip 1
+             <*> getByteString 5
+             <*> getRemainingByteString
+    else fail "wrong ERR packet"
+
+putERR :: ERR -> Put
+putERR (ERR code status msg) = do
+    putWord8 0xFF
+    putWord16le code
+    putWord8 35 -- '#'
+    putByteString status
+    putByteString msg
+
+instance Binary ERR where
+    get = getERR
+    put = putERR
+
+data EOF = EOF
+    { eofWarningCnt :: !Word16
+    , eofStatus     :: !Word16
+    } deriving (Show, Eq)
+
+getEOF :: Get EOF
+getEOF = do
+    w <- lookAhead getWord8
+    if w == 0xFE
+    then EOF <$> getWord16le
+             <*> getWord16le
+    else fail "wrong EOF packet"
+
+putEOF :: EOF -> Put
+putEOF (EOF wcnt status) = do
+    putWord8 0xFE
+    putWord16le wcnt
     putWord16le status
-    putWord16le warn
 
---
-getERR :: Int -> Get ERR
-getERR len = do
-    _  <- getWord8    -- todo verify this
-    c  <- getWord16le
-    skip 1
-    st  <- getLazyByteString 5
-    msg <- getLazyByteString $ fromIntegral (len - 9)
-    return (ERR c st msg)
+instance Binary EOF where
+    get = getEOF
+    put = putEOF
 
 --------------------------------------------------------------------------------
 -- Authentications
@@ -114,7 +165,7 @@ data Greeting = Greeting
     { protocol :: !Word8
     , version  :: !B.ByteString
     , tid      :: !Word32
-    , salt1    :: !B.ByteString --TODO rename
+    , salt1    :: !B.ByteString
     , caps     :: !Word16
     , lang     :: !Word8
     , status   :: !Word16
@@ -167,8 +218,8 @@ getAuth = do
     m <- getWord32le
     c <- getWord8
     skip 23
-    n <- getLazyByteStringNul --TODO buggy!
-    return $ Auth a m c (L.toStrict n) B.empty B.empty
+    n <- getByteStringNul
+    return $ Auth a m c n B.empty B.empty
 
 putAuth :: Auth -> Put
 putAuth (Auth cap m c n p s) = do
@@ -179,7 +230,7 @@ putAuth (Auth cap m c n p s) = do
     putByteString n >> putWord8 0
     putWord8 $ fromIntegral (B.length p)
     putByteString p
-    putByteString s -- TODO buggy
+    putByteString s
     putWord8 0
 
 instance Binary Auth where
@@ -194,7 +245,7 @@ data Command
     | COM_INIT_DB        !ByteString              --  0x02
     | COM_QUERY          !ByteString              --  0x03
     | COM_PING                                    --  0x0E
-    | COM_BINLOG_DUMP    !Word32 !Word32 !Word32 !ByteString
+    | COM_BINLOG_DUMP    !Word32 !Word16 !Word32 !ByteString
             -- ^ binlog-pos, flags(0x01), server-id, binlog-filename
     | COM_REGISTER_SLAVE !Word32 !LenEncBytes !LenEncBytes !LenEncBytes !Word16 !Word32 !Word32 --  0x15
             -- ^ server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
@@ -210,9 +261,9 @@ getCommand = do
         0x03  -> COM_QUERY . L.toStrict <$> getRemainingLazyByteString
         0x0E  -> pure COM_PING
         0x12  -> COM_BINLOG_DUMP
-                    <$> getWord32le <*> getWord32le <*> getWord32le <*> getRemainingByteString
+                    <$> getWord32le <*> getWord16le <*> getWord32le <*> getRemainingByteString
         0x15  -> COM_REGISTER_SLAVE
-                    <$> getWord32le <*> getLenEncoded <*> getLenEncoded <*> getLenEncoded
+                    <$> getWord32le <*> getLenEncBytes <*> getLenEncBytes <*> getLenEncBytes
                     <*> getWord16le <*> getWord32le <*> getWord32le
         _     -> pure COM_UNSUPPORTED
 
@@ -221,17 +272,18 @@ putCommand COM_QUIT              = putWord8 0x01
 putCommand (COM_INIT_DB db)      = putWord8 0x02 >> putByteString db
 putCommand (COM_QUERY q)         = putWord8 0x03 >> putByteString q
 putCommand COM_PING              = putWord8 0x0E
-putCommand (COM_BINLOG_DUMP pos flags mid fname) = do
-    putWord8 0x0C
+putCommand (COM_BINLOG_DUMP pos flags sid fname) = do
+    putWord8 0x12
     putWord32le pos
-    putWord32le flags
-    putWord32be mid
+    putWord16le flags
+    putWord32le sid
     putByteString fname
 putCommand (COM_REGISTER_SLAVE sid shost susr spass sport rrank mid) = do
+    putWord8 0x15
     putWord32le sid
-    putLenEncoded shost
-    putLenEncoded susr
-    putLenEncoded spass
+    putLenEncBytes shost
+    putLenEncBytes susr
+    putLenEncBytes spass
     putWord16le sport
     putWord32le rrank
     putWord32le mid
@@ -242,22 +294,189 @@ instance Binary Command where
     put = putCommand
 
 --------------------------------------------------------------------------------
+--  Resultset
+
+-- | A description of a field (column) of a table.
+data Field = Field
+    { -- fieldCatalog :: !LenEncBytes            -- ^ const 'def'
+      fieldDB ::         !LenEncBytes            -- ^ Database for table.
+    , fieldTable ::      !LenEncBytes            -- ^ Table of column, if column was a field.
+    , fieldOrigTable ::  !LenEncBytes            -- ^ Original table name, if table was an alias.
+    , fieldName ::       !LenEncBytes            -- ^ Name of column.
+    , fieldOrigName ::   !LenEncBytes            -- ^ Original column name, if an alias.
+    -- fieldFixedLen ::  !LenEncInt              -- ^ const '0x0C'
+    , fieldCharSet ::    !Word16                 -- ^ Character set number.
+    , fieldLength ::     !Word32                 -- ^ Width of column (create length).
+    , fieldType ::       !FieldType
+    , fieldFlags ::      !Word16                 -- ^ Div flags.
+    , fieldDecimals ::   !Word8                  -- ^ Number of decimals in field.
+    -- fieldfiller :: Word16                     -- const 0x00 0x00
+    } deriving (Show, Eq)
+
+
+getField :: Get Field
+getField = Field
+        <$> (skip 4                 -- const "def"
+         *> getLenEncBytes)         -- db
+        <*> getLenEncBytes          -- table
+        <*> getLenEncBytes          -- origTable
+        <*> getLenEncBytes          -- name
+        <*> getLenEncBytes          -- origName
+        <*  skip 1                  -- const 0x0c
+        <*> getWord16le             -- charset,
+        <*> getWord32le             -- length
+        <*> getFieldType            -- type
+        <*> getWord16le             -- flags
+        <*> getWord8                -- decimals
+        <* skip 2                   -- const 0x00 0x00
+
+putField :: Field -> Put
+putField (Field db tbl otbl name oname charset len typ flags dec) = do
+    putLenEncBytes (LenEncBytes "def")
+    putLenEncBytes db
+    putLenEncBytes tbl
+    putLenEncBytes otbl
+    putLenEncBytes name
+    putLenEncBytes oname
+    putWord16le charset
+    putWord32le len
+    putFieldType typ
+    putWord16le  flags
+    putWord8 dec
+    putWord16le 0X0000
+
+instance Binary Field where
+    get = getField
+    put = putField
+
+
+data FieldType
+    = DECIMAL     -- 0x00
+    | TINY        -- 0x01
+    | SHORT       -- 0x02
+    | LONG        -- 0x03
+    | FLOAT       -- 0x04
+    | DOUBLE      -- 0x05
+    | NULL        -- 0x06
+    | TIMESTAMP   -- 0x07
+    | LONGLONG    -- 0x08
+    | INT24       -- 0x09
+    | DATE        -- 0x0a
+    | TIME        -- 0x0b
+    | DATETIME    -- 0x0c
+    | YEAR        -- 0x0d
+    | NEWDATE     -- 0x0e
+    | VARCHAR     -- 0x0f
+    | BIT         -- 0x10
+    | TIMESTAMP2  -- 0x11
+    | DATETIME2   -- 0x12
+    | TIME2       -- 0x13
+    | NEWDECIMAL  -- 0xf6
+    | ENUM        -- 0xf7
+    | SET         -- 0xf8
+    | TINY_BLOB   -- 0xf9
+    | MEDIUM_BLOB -- 0xfa
+    | LONG_BLOB   -- 0xfb
+    | BLOB        -- 0xfc
+    | VAR_STRING  -- 0xfd
+    | STRING      -- 0xfe
+    | GEOMETRY    -- 0xff
+  deriving (Show, Eq)
+
+getFieldType :: Get FieldType
+getFieldType = do
+    w <- getWord8
+    case w of
+        0x00 -> pure DECIMAL
+        0x01 -> pure TINY
+        0x02 -> pure SHORT
+        0x03 -> pure LONG
+        0x04 -> pure FLOAT
+        0x05 -> pure DOUBLE
+        0x06 -> pure NULL
+        0x07 -> pure TIMESTAMP
+        0x08 -> pure LONGLONG
+        0x09 -> pure INT24
+        0x0a -> pure DATE
+        0x0b -> pure TIME
+        0x0c -> pure DATETIME
+        0x0d -> pure YEAR
+        0x0e -> pure NEWDATE
+        0x0f -> pure VARCHAR
+        0x10 -> pure BIT
+        0x11 -> pure TIMESTAMP2
+        0x12 -> pure DATETIME2
+        0x13 -> pure TIME2
+        0xf6 -> pure NEWDECIMAL
+        0xf7 -> pure ENUM
+        0xf8 -> pure SET
+        0xf9 -> pure TINY_BLOB
+        0xfa -> pure MEDIUM_BLOB
+        0xfb -> pure LONG_BLOB
+        0xfc -> pure BLOB
+        0xfd -> pure VAR_STRING
+        0xfe -> pure STRING
+        0xff -> pure GEOMETRY
+
+putFieldType :: FieldType -> Put
+putFieldType DECIMAL    = putWord8 0x00
+putFieldType TINY       = putWord8 0x01
+putFieldType SHORT      = putWord8 0x02
+putFieldType LONG       = putWord8 0x03
+putFieldType FLOAT      = putWord8 0x04
+putFieldType DOUBLE     = putWord8 0x05
+putFieldType NULL       = putWord8 0x06
+putFieldType TIMESTAMP  = putWord8 0x07
+putFieldType LONGLONG   = putWord8 0x08
+putFieldType INT24      = putWord8 0x09
+putFieldType DATE       = putWord8 0x0a
+putFieldType TIME       = putWord8 0x0b
+putFieldType DATETIME   = putWord8 0x0c
+putFieldType YEAR       = putWord8 0x0d
+putFieldType NEWDATE    = putWord8 0x0e
+putFieldType VARCHAR    = putWord8 0x0f
+putFieldType BIT        = putWord8 0x10
+putFieldType TIMESTAMP2 = putWord8 0x11
+putFieldType DATETIME2  = putWord8 0x12
+putFieldType TIME2      = putWord8 0x13
+putFieldType NEWDECIMAL = putWord8 0xf6
+putFieldType ENUM       = putWord8 0xf7
+putFieldType SET        = putWord8 0xf8
+putFieldType TINY_BLOB  = putWord8 0xf9
+putFieldType MEDIUM_BLOB= putWord8 0xfa
+putFieldType LONG_BLOB  = putWord8 0xfb
+putFieldType BLOB       = putWord8 0xfc
+putFieldType VAR_STRING = putWord8 0xfd
+putFieldType STRING     = putWord8 0xfe
+putFieldType GEOMETRY   = putWord8 0xff
+
+instance Binary FieldType where
+    get = getFieldType
+    put = putFieldType
+
+newtype TextRow = TextRow L.ByteString deriving (Show, Eq)
+newtype BinaryRow = BinaryRow L.ByteString deriving (Show, Eq)
+
+--------------------------------------------------------------------------------
 --  Helpers
 
 newtype LenEncBytes = LenEncBytes B.ByteString deriving (Show, Eq, Ord)
 
-instance Binary LenEncBytes where
-    put = putLenEncoded
-    get = getLenEncoded
+instance IsString LenEncBytes where
+    fromString = LenEncBytes . BC.pack
 
-putLenEncoded :: LenEncBytes -> Put
-putLenEncoded (LenEncBytes c) = do
+instance Binary LenEncBytes where
+    put = putLenEncBytes
+    get = getLenEncBytes
+
+putLenEncBytes :: LenEncBytes -> Put
+putLenEncBytes (LenEncBytes c) = do
         let l = B.length c
         putWord8 $ fromIntegral l
         putByteString c
 
-getLenEncoded :: Get LenEncBytes
-getLenEncoded = do
+getLenEncBytes :: Get LenEncBytes
+getLenEncBytes = do
     b <- lookAhead getWord8
     if b == 0xfb
     then getWord8 >> return (LenEncBytes B.empty)
@@ -311,20 +530,28 @@ getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
 --------------------------------------------------------------------------------
 -- default Capability Flags
 
-#define CLIENT_LONG_PASSWORD     0x00000001
-#define CLIENT_FOUND_ROWS        0x00000002
-#define CLIENT_LONG_FLAG         0x00000004
-#define CLIENT_CONNECT_WITH_DB   0x00000008
-
-#define CLIENT_IGNORE_SPACE      0x00000100
-#define CLIENT_PROTOCOL_41       0x00000200
-#define CLIENT_TRANSACTIONS      0x00002000
+#define CLIENT_LONG_PASSWORD 0x00000001
+#define CLIENT_FOUND_ROWS 0x00000002
+#define CLIENT_LONG_FLAG 0x00000004
+#define CLIENT_CONNECT_WITH_DB 0x00000008
+#define CLIENT_NO_SCHEMA 0x00000010
+#define CLIENT_COMPRESS 0x00000020
+#define CLIENT_ODBC 0x00000040
+#define CLIENT_LOCAL_FILES 0x00000080
+#define CLIENT_IGNORE_SPACE 0x00000100
+#define CLIENT_PROTOCOL_41 0x00000200
+#define CLIENT_INTERACTIVE 0x00000400
+#define CLIENT_SSL 0x00000800
+#define CLIENT_IGNORE_SIGPIPE 0x00001000
+#define CLIENT_TRANSACTIONS 0x00002000
+#define CLIENT_RESERVED 0x00004000
 #define CLIENT_SECURE_CONNECTION 0x00008000
-
-#define CLIENT_MULTI_RESULTS     0x00020000
-#define CLIENT_PS_MULTI_RESULTS  0x00040000
-#define CLIENT_PLUGIN_AUTH       0x00080000
-
+#define CLIENT_MULTI_STATEMENTS 0x00010000
+#define CLIENT_MULTI_RESULTS 0x00020000
+#define CLIENT_PS_MULTI_RESULTS 0x00040000
+#define CLIENT_PLUGIN_AUTH 0x00080000
+#define CLIENT_CONNECT_ATTRS 0x00100000
+#define CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA 0x00200000
 
 clientCap :: Word32
 clientCap =  CLIENT_LONG_PASSWORD
@@ -340,3 +567,42 @@ clientMaxPacketSize = 0x00ffffff :: Word32
 
 clientCharset :: Word8
 clientCharset = 0x21 :: Word8
+
+--------------------------------------------------------------------------------
+-- |the root exception type for all the mysql exceptions
+data MySQLException = forall e . Exception e => MySQLException e deriving Typeable
+instance Show MySQLException where show (MySQLException e) = show e
+instance Exception MySQLException
+
+mysqlExceptionToException :: Exception e => e -> SomeException
+mysqlExceptionToException = toException . MySQLException
+
+mysqlExceptionFromException :: Exception e => SomeException -> Maybe e
+mysqlExceptionFromException x = do
+    MySQLException a <- fromException x
+    cast a
+
+data NetworkException = NetworkException deriving (Typeable, Show)
+instance Exception NetworkException where
+    toException   = mysqlExceptionToException
+    fromException = mysqlExceptionFromException
+
+data DecodePacketException = DecodePacketException ByteString ByteOffset String deriving (Typeable, Show)
+instance Exception DecodePacketException where
+    toException   = mysqlExceptionToException
+    fromException = mysqlExceptionFromException
+
+data ERRException = ERRException ERR deriving (Typeable, Show)
+instance Exception ERRException where
+    toException   = mysqlExceptionToException
+    fromException = mysqlExceptionFromException
+
+data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
+instance Exception UnconsumedResultSet where
+    toException   = mysqlExceptionToException
+    fromException = mysqlExceptionFromException
+
+data AuthException = AuthException ERR deriving (Typeable, Show)
+instance Exception AuthException where
+    toException   = mysqlExceptionToException
+    fromException = mysqlExceptionFromException

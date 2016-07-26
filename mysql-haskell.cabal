@@ -14,19 +14,22 @@ cabal-version:       >=1.10
 
 
 library
-  exposed-modules:     
-                        Database.MySQL.Base
+  exposed-modules:      Database.MySQL.Base
+                    ,   Database.MySQL.Protocol
+                    ,   Database.MySQL.BinLog
+                    ,   Database.MySQL.BinLogProtocol
   -- other-modules:       
   -- other-extensions:    
   build-depends:        base >=4.8 && <5
                     ,   network
                     ,   io-streams
-                    ,   tcp-streams
-                    ,   wire-streams
+                    ,   tcp-streams   >= 0.2.3
+                    ,   wire-streams 
                     ,   binary
                     ,   bytestring
                     ,   text
                     ,   cryptonite
                     ,   memory
+                    ,   vector
 
   default-language:    Haskell2010
