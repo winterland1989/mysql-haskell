@@ -1,38 +1,36 @@
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE MultiWayIf          #-}
-{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE MultiWayIf        #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Database.MySQL.Base where
 
-import           Control.Exception        (Exception, bracketOnError, throw, throwIO)
+import           Control.Exception        (bracketOnError, throwIO)
 import           Control.Monad
+import qualified Crypto.Hash              as Crypto
+import qualified Data.Binary              as Binary
+import qualified Data.Binary.Put          as Binary
+import qualified Data.Bits                as Bit
+import qualified Data.ByteArray           as BA
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
-import qualified Data.ByteString.Char8    as BC
 import qualified Data.ByteString.Lazy     as L
-import qualified Crypto.Hash              as Crypto
-import qualified Data.ByteArray           as BA
-import qualified Data.Bits                as Bit
-import           Data.IORef               (IORef, newIORef, readIORef, writeIORef)
-import           Data.Typeable            (Typeable)
-import           Data.Word                (Word8)
+import           Data.IORef               (IORef, newIORef, readIORef,
+                                           writeIORef)
+import           Database.MySQL.Protocol
+import           Network.Socket           (HostName, PortNumber)
+import qualified Network.Socket           as N
 import           System.IO.Streams        (InputStream, OutputStream)
 import qualified System.IO.Streams        as Stream
 import qualified System.IO.Streams.Binary as Binary
-import qualified Data.Binary.Put as Binary
 import qualified System.IO.Streams.TCP    as TCP
-import qualified Network.Socket as N
-import           Network.Socket  (HostName, PortNumber)
-import           Database.MySQL.Protocol
-import qualified Data.Binary as Binary
 
 --------------------------------------------------------------------------------
 
 data MySQLConn = MySQLConn {
-        mysqlRead         :: !(InputStream  Packet)
-    ,   mysqlWrite        :: !(OutputStream Packet)
-    ,   mysqlCloseSocket  :: !(IO ())
-    ,   isConsumed        :: !(IORef Bool)
+        mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
+    ,   mysqlWrite       :: {-# UNPACK #-} !(OutputStream Packet)
+    ,   mysqlCloseSocket :: IO ()
+    ,   isConsumed       :: {-# UNPACK #-} !(IORef Bool)
     }
 
 data ConnInfo = ConnInfo
@@ -55,7 +53,7 @@ readPacket is = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet
         if len < 16777215 then return p else go len [bs]
     )
   where
-    go len acc = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet len' seqN bs) -> do
+    go len acc = Stream.read is >>= maybe (throwIO NetworkException) (\ (Packet len' seqN bs) -> do
             let !len'' = len + len'
                 acc' = bs:acc
             if len' < 16777215
@@ -85,9 +83,8 @@ connect ci@(ConnInfo host port _ _ _ tls) =
             p <- readPacket is'
             if isOK p
             then do
-                seqN <- newIORef 0
-                isConsumed <- newIORef True
-                return (MySQLConn is' os' (N.close sock) isConsumed)
+                consumed <- newIORef True
+                return (MySQLConn is' os' (N.close sock) consumed)
             else Stream.write Nothing os' >> decodeFromPacket p >>= throwIO . AuthException
   where
     mkAuth :: ConnInfo -> Greeting -> Auth
@@ -107,7 +104,7 @@ connect ci@(ConnInfo host port _ _ _ tls) =
     sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
 
 close :: MySQLConn -> IO ()
-close (MySQLConn _ os close _) = Stream.write Nothing os >> close
+close (MySQLConn _ os closeSocket _) = Stream.write Nothing os >> closeSocket
 
 query_ :: MySQLConn -> ByteString -> IO OK
 query_ conn qry = command conn (COM_QUERY qry)
@@ -116,7 +113,7 @@ ping :: MySQLConn -> IO OK
 ping = flip command COM_PING
 
 command :: MySQLConn -> Command -> IO OK
-command conn@(MySQLConn is os _ isConsumed) cmd = do
+command conn@(MySQLConn is os _ _) cmd = do
     guardUnconsumed conn
     writeCommand cmd os
     p <- readPacket is
@@ -130,32 +127,42 @@ command conn@(MySQLConn is os _ isConsumed) cmd = do
 -- [Row Data]
 -- [EOF]
 query :: MySQLConn -> ByteString -> IO ([Field], InputStream TextRow)
-query conn@(MySQLConn is os _ isConsumed) qry = do
+query conn@(MySQLConn is os _ consumed) qry = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
     p <- readPacket is
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
     else do
-        LenEncInt len <- decodeFromPacket p
+        len <- getFromPacket getLenEncInt p
         fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
         _ <- readPacket is -- eof packet, we don't verify this though
-        writeIORef isConsumed False
+        writeIORef consumed False
         rows <- Stream.makeInputStream $ do
-            p@(Packet _ _ bs) <- readPacket is
-            if  | isEOF p  -> writeIORef isConsumed True >> return Nothing
+            p <- readPacket is
+            if  | isEOF p  -> writeIORef consumed True >> return Nothing
                 | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
-                | otherwise -> (return (Just (TextRow bs)))
+                | otherwise -> Just <$> getFromPacket (getTextRow len) p
         return (fields, rows)
 
 guardUnconsumed :: MySQLConn -> IO ()
-guardUnconsumed conn@(MySQLConn _ _ _ isConsumed)= do
-    consumed <- readIORef isConsumed
-    unless consumed (throwIO UnconsumedResultSet)
+guardUnconsumed (MySQLConn _ _ _ consumed) = do
+    c <- readIORef consumed
+    unless c (throwIO UnconsumedResultSet)
+
 
 {-
-
 prepareStmt :: MySQLConn -> ByteString -> IO StmtId
+prepareStmt conn@(MySQLConn is os _ _) stmt = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_PREPARE stmt) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else do
+
+
+
 
 executeStmt :: MySQLConn -> StmtId -> IO ([Field], InputStream BinaryRow)
 executeStmt (MySQLConn is os _ seqN isConsumed) qry = do

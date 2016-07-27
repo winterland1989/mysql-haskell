@@ -18,7 +18,7 @@ import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
 
-import Control.Exception (throwIO, Exception, SomeException, Exception(..))
+import Control.Exception (throwIO, SomeException, Exception(..))
 import Data.Typeable (Typeable, cast)
 import Data.String (IsString(..))
 
@@ -76,11 +76,17 @@ encodeToPacket payload seqN =
         l = L.length s
     in Packet (fromIntegral l) seqN s
 
+putToPacket :: Put -> Word8 -> Packet
+putToPacket payload seqN =
+    let s = runPut payload
+        l = L.length s
+    in Packet (fromIntegral l) seqN s
+
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
 data OK = OK
-    { okAffectedRows :: LenEncInt
-    , okLastInsertID :: LenEncInt
+    { okAffectedRows :: Int
+    , okLastInsertID :: Int
     , okStatus       :: Word16
     , okWarningCnt   :: Word16
     } deriving (Show, Eq)
@@ -96,11 +102,11 @@ getOK = do
     else fail "wrong OK packet"
 
 putOK :: OK -> Put
-putOK (OK row lid status wcnt) = do
+putOK (OK row lid stat wcnt) = do
     putWord8 0x00
     putLenEncInt row
     putLenEncInt lid
-    putWord16le status
+    putWord16le stat
     putWord16le wcnt
 
 instance Binary OK where
@@ -124,11 +130,11 @@ getERR = do
     else fail "wrong ERR packet"
 
 putERR :: ERR -> Put
-putERR (ERR code status msg) = do
+putERR (ERR code stat msg) = do
     putWord8 0xFF
     putWord16le code
     putWord8 35 -- '#'
-    putByteString status
+    putByteString stat
     putByteString msg
 
 instance Binary ERR where
@@ -149,10 +155,10 @@ getEOF = do
     else fail "wrong EOF packet"
 
 putEOF :: EOF -> Put
-putEOF (EOF wcnt status) = do
+putEOF (EOF wcnt stat) = do
     putWord8 0xFE
     putWord16le wcnt
-    putWord16le status
+    putWord16le stat
 
 instance Binary EOF where
     get = getEOF
@@ -204,12 +210,12 @@ instance Binary Greeting where
     put = putGreeting
 
 data Auth = Auth
-    { acaps     :: !Word32
-    , maxPacket :: !Word32
-    , charset   :: !Word8
-    , name      :: !ByteString
-    , password  :: !ByteString
-    , schema    :: !ByteString
+    { authCaps      :: !Word32
+    , authMaxPacket :: !Word32
+    , authCharset   :: !Word8
+    , authName      :: !ByteString
+    , authPassword  :: !ByteString
+    , authSchema    :: !ByteString
     } deriving (Show, Eq)
 
 getAuth :: Get Auth
@@ -247,8 +253,14 @@ data Command
     | COM_PING                                    --  0x0E
     | COM_BINLOG_DUMP    !Word32 !Word16 !Word32 !ByteString
             -- ^ binlog-pos, flags(0x01), server-id, binlog-filename
-    | COM_REGISTER_SLAVE !Word32 !LenEncBytes !LenEncBytes !LenEncBytes !Word16 !Word32 !Word32 --  0x15
+    | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 --  0x15
             -- ^ server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
+    | COM_STMT_PREPARE   !ByteString              -- 0x16
+    | COM_STMT_EXECUTE                            -- 0x17
+    | COM_STMT_SEND_LONG_DATA                     -- 0x18
+    | COM_STMT_CLOSE                              -- 0x19
+    | COM_STMT_RESET                              -- 0x1A
+    | COM_STMT_FETCH                              -- 0x1C
     | COM_UNSUPPORTED
    deriving (Show, Eq)
 
@@ -298,12 +310,12 @@ instance Binary Command where
 
 -- | A description of a field (column) of a table.
 data Field = Field
-    { -- fieldCatalog :: !LenEncBytes            -- ^ const 'def'
-      fieldDB ::         !LenEncBytes            -- ^ Database for table.
-    , fieldTable ::      !LenEncBytes            -- ^ Table of column, if column was a field.
-    , fieldOrigTable ::  !LenEncBytes            -- ^ Original table name, if table was an alias.
-    , fieldName ::       !LenEncBytes            -- ^ Name of column.
-    , fieldOrigName ::   !LenEncBytes            -- ^ Original column name, if an alias.
+    { -- fieldCatalog :: !ByteString            -- ^ const 'def'
+      fieldDB ::         !ByteString            -- ^ Database for table.
+    , fieldTable ::      !ByteString            -- ^ Table of column, if column was a field.
+    , fieldOrigTable ::  !ByteString            -- ^ Original table name, if table was an alias.
+    , fieldName ::       !ByteString            -- ^ Name of column.
+    , fieldOrigName ::   !ByteString            -- ^ Original column name, if an alias.
     -- fieldFixedLen ::  !LenEncInt              -- ^ const '0x0C'
     , fieldCharSet ::    !Word16                 -- ^ Character set number.
     , fieldLength ::     !Word32                 -- ^ Width of column (create length).
@@ -332,7 +344,7 @@ getField = Field
 
 putField :: Field -> Put
 putField (Field db tbl otbl name oname charset len typ flags dec) = do
-    putLenEncBytes (LenEncBytes "def")
+    putLenEncBytes "def"
     putLenEncBytes db
     putLenEncBytes tbl
     putLenEncBytes otbl
@@ -381,7 +393,7 @@ data FieldType
     | VAR_STRING  -- 0xfd
     | STRING      -- 0xfe
     | GEOMETRY    -- 0xff
-  deriving (Show, Eq)
+  deriving (Show, Eq, Enum)
 
 getFieldType :: Get FieldType
 getFieldType = do
@@ -417,6 +429,7 @@ getFieldType = do
         0xfd -> pure VAR_STRING
         0xfe -> pure STRING
         0xff -> pure GEOMETRY
+        _    -> fail $ "wrong FieldType: " ++ show w
 
 putFieldType :: FieldType -> Put
 putFieldType DECIMAL    = putWord8 0x00
@@ -454,61 +467,56 @@ instance Binary FieldType where
     get = getFieldType
     put = putFieldType
 
-newtype TextRow = TextRow L.ByteString deriving (Show, Eq)
-newtype BinaryRow = BinaryRow L.ByteString deriving (Show, Eq)
+newtype TextRow   = TextRow   { runTextRow   :: [Maybe ByteString] } deriving (Show, Eq)
+newtype BinaryRow = BinaryRow { runBinaryRow :: [Maybe ByteString] } deriving (Show, Eq)
+
+getTextRow :: Int -> Get TextRow
+getTextRow fieldCnt = TextRow <$> (replicateM fieldCnt $ do
+        p <- lookAhead getWord8
+        if p == 0x79
+        then getWord8 >> return Nothing
+        else Just <$> getLenEncBytes
+    )
 
 --------------------------------------------------------------------------------
 --  Helpers
 
-newtype LenEncBytes = LenEncBytes B.ByteString deriving (Show, Eq, Ord)
-
-instance IsString LenEncBytes where
-    fromString = LenEncBytes . BC.pack
-
-instance Binary LenEncBytes where
-    put = putLenEncBytes
-    get = getLenEncBytes
-
-putLenEncBytes :: LenEncBytes -> Put
-putLenEncBytes (LenEncBytes c) = do
+putLenEncBytes :: ByteString -> Put
+putLenEncBytes c = do
         let l = B.length c
         putWord8 $ fromIntegral l
         putByteString c
 
-getLenEncBytes :: Get LenEncBytes
+getLenEncBytes :: Get ByteString
 getLenEncBytes = do
     b <- lookAhead getWord8
     if b == 0xfb
-    then getWord8 >> return (LenEncBytes B.empty)
+    then getWord8 >> return B.empty
     else do
-        (LenEncInt len) <- getLenEncInt
+        len <- getLenEncInt
         str <- getByteString len
-        return (LenEncBytes str)
+        return str
 
-newtype LenEncInt = LenEncInt Int deriving (Show, Eq, Ord)
+newtype LenEncInt = LenEncInt { runLenEncInt :: Int } deriving (Show, Eq, Ord)
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
 --
-getLenEncInt:: Get LenEncInt
+getLenEncInt:: Get Int
 getLenEncInt = getWord8 >>= word2Len
   where
     word2Len l
-         | l <  0xfb  = return (LenEncInt (fromIntegral l))
-         | l == 0xfc  = LenEncInt . fromIntegral <$> getWord16le
-         | l == 0xfd  = LenEncInt . fromIntegral <$> getWord24le
-         | l == 0xfe  = LenEncInt . fromIntegral <$> getWord64le
+         | l <  0xfb  = return (fromIntegral l)
+         | l == 0xfc  = fromIntegral <$> getWord16le
+         | l == 0xfd  = fromIntegral <$> getWord24le
+         | l == 0xfe  = fromIntegral <$> getWord64le
          | otherwise = fail $ "invalid length val " ++ show l
 
-putLenEncInt:: LenEncInt -> Put
-putLenEncInt (LenEncInt x)
+putLenEncInt:: Int -> Put
+putLenEncInt x
          | x <  251      = putWord8    (fromIntegral x)
          | x < 65536     = putWord16le (fromIntegral x)
          | x < 16777216  = putWord24le (fromIntegral x)
          | otherwise     = putWord64le (fromIntegral x)
-
-instance Binary LenEncInt where
-    get = getLenEncInt
-    put = putLenEncInt
 
 putWord24le :: Int -> Put
 putWord24le v = do
@@ -520,6 +528,17 @@ getWord24le = do
     a <- fromIntegral <$> getWord16le
     b <- fromIntegral <$> getWord8
     return $! a .|. (b `shiftL` 16)
+
+putWord48le :: Word64 -> Put
+putWord48le v = do
+    putWord32le $ fromIntegral v
+    putWord16le $ fromIntegral (v `shiftR` 32)
+
+getWord48le :: Get Word64
+getWord48le = do
+    a <- fromIntegral <$> getWord32le
+    b <- fromIntegral <$> getWord16le
+    return $! a .|. (b `shiftL` 32)
 
 getByteStringNul :: Get ByteString
 getByteStringNul = L.toStrict <$> getLazyByteStringNul
