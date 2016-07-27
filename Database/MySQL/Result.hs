@@ -18,7 +18,7 @@
 -- a 'Double' might lose precision if representing a 'LongLong', the
 -- two are /not/ considered compatible.
 
-module Database.MySQL.Simple.Result
+module Database.MySQL.Result
     (
       Result(..)
     , ResultError(..)

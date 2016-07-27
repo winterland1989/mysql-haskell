@@ -1,5 +1,3 @@
-
-
 {-# LANGUAGE CPP, DeriveDataTypeable, DeriveFunctor, FlexibleInstances,
     OverloadedStrings #-}
 

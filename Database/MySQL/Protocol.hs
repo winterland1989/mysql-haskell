@@ -2,8 +2,6 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ExistentialQuantification #-}
-
-
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Database.MySQL.Protocol where
