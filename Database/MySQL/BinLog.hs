@@ -16,14 +16,13 @@ import           Data.Word                     (Word32)
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol
 import           Database.MySQL.Protocol
+import           Database.MySQL.MySQLValue
 import           System.IO.Streams             (InputStream, OutputStream)
 import qualified System.IO.Streams             as Stream
 import qualified System.IO.Streams.Binary      as Binary
-import qualified System.IO.Streams.TCP         as TCP
 
 
 type SlaveID = Word32
-
 
 registerPesudoSlave :: MySQLConn -> SlaveID -> IO OK
 registerPesudoSlave conn sid = command conn (COM_REGISTER_SLAVE sid "" "" "" 0 0 0)
@@ -80,13 +79,10 @@ isCheckSumEnabled conn = do
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just (TextRow rows) ->
-            if last rows == Just "CRC32"
-            then do
+        Just [_, MySQLText "CRC32"] -> do
                 query_ conn "SET @master_binlog_checksum= @@global.binlog_checksum"
                 return True
-            else return False
-        Nothing -> return False
+        _ -> return False
 
 -- | Return True if rpl_semi_sync_master_enabled = ON. Only for MySQL > 5.5
 --
@@ -96,10 +92,7 @@ isSemiSyncEnabled conn = do
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just (TextRow rows) ->
-            if last rows == Just "ON"
-            then do
-                query_ conn "SET @rpl_semi_sync_slave = 1"
-                return True
-            else return False
-        Nothing -> return False
+        Just [_, MySQLText "ON"] -> do
+            query_ conn "SET @rpl_semi_sync_slave = 1"
+            return True
+        _ -> return False

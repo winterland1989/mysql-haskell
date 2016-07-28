@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.IORef               (IORef, newIORef, readIORef,
                                            writeIORef)
 import           Database.MySQL.Protocol
+import           Database.MySQL.MySQLValue
 import           Network.Socket           (HostName, PortNumber)
 import qualified Network.Socket           as N
 import           System.IO.Streams        (InputStream, OutputStream)
@@ -126,7 +127,7 @@ command conn@(MySQLConn is os _ _) cmd = do
 -- [EOF]
 -- [Row Data]
 -- [EOF]
-query :: MySQLConn -> ByteString -> IO ([Field], InputStream TextRow)
+query :: MySQLConn -> ByteString -> IO ([Field], InputStream [MySQLValue])
 query conn@(MySQLConn is os _ consumed) qry = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
@@ -142,7 +143,7 @@ query conn@(MySQLConn is os _ consumed) qry = do
             p <- readPacket is
             if  | isEOF p  -> writeIORef consumed True >> return Nothing
                 | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getTextRow len) p
+                | otherwise -> Just <$> getFromPacket (getTextRow fields) p
         return (fields, rows)
 
 guardUnconsumed :: MySQLConn -> IO ()

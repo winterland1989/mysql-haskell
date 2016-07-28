@@ -18,7 +18,7 @@ library
                     ,   Database.MySQL.Protocol
                     ,   Database.MySQL.BinLog
                     ,   Database.MySQL.BinLogProtocol
-                    ,   Database.MySQL.Result
+                    ,   Database.MySQL.MySQLValue
 
   -- other-modules:       
   -- other-extensions:    
@@ -34,7 +34,9 @@ library
                     ,   memory
                     ,   vector
                     ,   time          >= 1.5.0
-                    ,   attoparsec
+                    ,   scientific
+                    ,   bytestring-lexing
+                    ,   reinterpret-cast 
                     ,   blaze-builder
                     ,   blaze-textual
 

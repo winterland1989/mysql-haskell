@@ -164,7 +164,7 @@ data TableMapEvent = TableMapEvent
     , tmeColumnCnt  :: !Int
     , tmeColumnDef  :: !ByteString
     , tmeColumeMeta :: !ByteString
-    , tmeNullMask   :: !ByteString
+    , tmeNullMap    :: !ByteString
     } deriving (Show, Eq)
 
 getTableMapEvent :: FormatDescription -> Get TableMapEvent
@@ -183,6 +183,16 @@ getTableMapEvent fmt = do
     columnMeta <- getLenEncBytes
     nullmap <- getByteString ((cc + 7) `div` 8)
     return (TableMapEvent tid flgs schema table cc columnDef columnMeta nullmap)
+
+data DeleteRowsEvent = DeleteRowsEvent
+    { dreTableId     :: !Word64
+    , dreFlags       :: !Word8
+    -- , dreExtraData   :: !RowsEventExtraData
+    , dreColumnCnt   :: !Int
+    , drePresentMap  :: !ByteString
+    , dreRowData     :: ![ByteString]
+    }
+
 
 --------------------------------------------------------------------------------
 -- | exception tyoe
