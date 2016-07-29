@@ -16,7 +16,6 @@ import           Data.Word                     (Word32)
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol
 import           Database.MySQL.Protocol
-import           Database.MySQL.MySQLValue
 import           System.IO.Streams             (InputStream, OutputStream)
 import qualified System.IO.Streams             as Stream
 import qualified System.IO.Streams.Binary      as Binary

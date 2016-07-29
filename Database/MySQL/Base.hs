@@ -17,7 +17,6 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.IORef               (IORef, newIORef, readIORef,
                                            writeIORef)
 import           Database.MySQL.Protocol
-import           Database.MySQL.MySQLValue
 import           Network.Socket           (HostName, PortNumber)
 import qualified Network.Socket           as N
 import           System.IO.Streams        (InputStream, OutputStream)
@@ -152,8 +151,7 @@ guardUnconsumed (MySQLConn _ _ _ consumed) = do
     unless c (throwIO UnconsumedResultSet)
 
 
-{-
-prepareStmt :: MySQLConn -> ByteString -> IO StmtId
+prepareStmt :: MySQLConn -> ByteString -> IO (StmtPrepareOK, [Field])
 prepareStmt conn@(MySQLConn is os _ _) stmt = do
     guardUnconsumed conn
     writeCommand (COM_STMT_PREPARE stmt) os
@@ -161,18 +159,42 @@ prepareStmt conn@(MySQLConn is os _ _) stmt = do
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
     else do
+        stmtOK@(StmtPrepareOK stmtId colCnt paramCnt _) <- getFromPacket getStmtPrepareOK p
+        paramDef <- replicateM paramCnt $ (decodeFromPacket <=< readPacket) is
+        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
+        _ <- replicateM colCnt (readPacket is)
+        _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
+        return (stmtOK, paramDef)
 
+closeStmt :: MySQLConn -> StmtID -> IO ()
+closeStmt (MySQLConn _ os _ _) stmtId = do
+    writeCommand (COM_STMT_CLOSE stmtId) os
 
+executeStmt :: MySQLConn -> StmtID -> [Field] -> [MySQLValue] -> IO ([Field], InputStream [MySQLValue])
+executeStmt conn@(MySQLConn is os _ consumed) stmtId paramDef params = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_EXECUTE stmtId paramDef params) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else do
+        len <- getFromPacket getLenEncInt p
+        fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+        _ <- readPacket is -- eof packet, we don't verify this though
+        writeIORef consumed False
+        rows <- Stream.makeInputStream $ do
+            p <- readPacket is
+            if  | isEOF p  -> writeIORef consumed True >> return Nothing
+                | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
+                | isOK  p  -> Just <$> getFromPacket (getBinaryRow fields len) p
+                | otherwise -> throwIO (UnexpectedPacket p)
+        return (fields, rows)
 
-
-executeStmt :: MySQLConn -> StmtId -> IO ([Field], InputStream BinaryRow)
-executeStmt (MySQLConn is os _ seqN isConsumed) qry = do
-    unless <$> readIORef isConsumed <*> throwIO ResultUnconsumed
-    Stream.write qry os
-    p <- Binary.decodeFromStream is
-    if isERR p then throwIO ...
-    else let LenEncInt len = decodeFromPacket p
-        field <- decodeFromPacket p . Binary.decodeFromStream is
-
--}
+resetStmt :: MySQLConn -> StmtID -> IO ()
+resetStmt (MySQLConn is os _ consumed) stmtId = do
+    writeCommand (COM_STMT_RESET stmtId) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else writeIORef consumed True
 
