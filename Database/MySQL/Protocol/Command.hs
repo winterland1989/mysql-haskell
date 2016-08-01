@@ -16,7 +16,7 @@ import   Data.ByteString       (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
 import           Database.MySQL.Protocol.Packet
-import           Database.MySQL.Protocol.Field
+import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue
 import Debug.Trace
 
@@ -35,7 +35,7 @@ data Command
     | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 --  0x15
             -- ^ server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
     | COM_STMT_PREPARE   !ByteString              -- 0x16
-    | COM_STMT_EXECUTE   !StmtID ![Field] ![MySQLValue]    -- 0x17
+    | COM_STMT_EXECUTE   !StmtID ![ColumnDef] ![MySQLValue]    -- 0x17
             -- ^ paramDef, stmtId, params
     | COM_STMT_SEND_LONG_DATA                     -- 0x18
     | COM_STMT_CLOSE     !StmtID                        -- 0x19
@@ -49,8 +49,8 @@ getCommand = do
     cmdId <- getWord8
     case cmdId of
         0x01  -> pure COM_QUIT
-        0x02  -> COM_INIT_DB . L.toStrict <$> getRemainingLazyByteString
-        0x03  -> COM_QUERY . L.toStrict <$> getRemainingLazyByteString
+        0x02  -> COM_INIT_DB <$> getRemainingByteString
+        0x03  -> COM_QUERY   <$> getRemainingByteString
         0x0E  -> pure COM_PING
         0x12  -> COM_BINLOG_DUMP
                     <$> getWord32le <*> getWord16le <*> getWord32le <*> getRemainingByteString
@@ -84,13 +84,14 @@ putCommand (COM_STMT_EXECUTE stmtId fields params) = do
     putWord8 0x17
     putWord32le stmtId
     putWord8 0x00 -- we only use @CURSOR_TYPE_NO_CURSOR@ here
-    putWord32le 0  -- const 0
+    putWord32le 1 -- const 1
     unless (null params) $ do
         putByteString (makeNullMap params)
         putWord8 0x01    -- always use new-params-bound-flag
         let fts = map fieldType fields
         forM_ fts $ \ t -> put t >> putWord8 0x00 -- always use signed
-        forM_ fields put
+        forM_ params putBinaryField
+
 putCommand (COM_STMT_CLOSE stmtId) = putWord8 0x19 >> putWord32le stmtId
 putCommand (COM_STMT_RESET stmtId) = putWord8 0x1A >> putWord32le stmtId
 putCommand COM_UNSUPPORTED       = fail "unsupported command"

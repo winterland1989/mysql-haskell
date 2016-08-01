@@ -106,9 +106,6 @@ connect ci@(ConnInfo host port _ _ _ tls) =
 close :: MySQLConn -> IO ()
 close (MySQLConn _ os closeSocket _) = Stream.write Nothing os >> closeSocket
 
-query_ :: MySQLConn -> ByteString -> IO OK
-query_ conn qry = command conn (COM_QUERY qry)
-
 ping :: MySQLConn -> IO OK
 ping = flip command COM_PING
 
@@ -121,12 +118,15 @@ command conn@(MySQLConn is os _ _) cmd = do
     then decodeFromPacket p >>= throwIO . ERRException
     else decodeFromPacket p
 
+execute :: MySQLConn -> ByteString -> IO OK
+execute conn qry = command conn (COM_QUERY qry)
+
 -- [Result Set Header] we simpilify it here, omit extra info
--- [Field]
+-- [ColumnDef]
 -- [EOF]
 -- [Row Data]
 -- [EOF]
-query :: MySQLConn -> ByteString -> IO ([Field], InputStream [MySQLValue])
+query :: MySQLConn -> ByteString -> IO ([ColumnDef], InputStream [MySQLValue])
 query conn@(MySQLConn is os _ consumed) qry = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
@@ -140,6 +140,7 @@ query conn@(MySQLConn is os _ consumed) qry = do
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
             p <- readPacket is
+            print p
             if  | isEOF p  -> writeIORef consumed True >> return Nothing
                 | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
                 | otherwise -> Just <$> getFromPacket (getTextRow fields) p
@@ -151,7 +152,7 @@ guardUnconsumed (MySQLConn _ _ _ consumed) = do
     unless c (throwIO UnconsumedResultSet)
 
 
-prepareStmt :: MySQLConn -> ByteString -> IO (StmtPrepareOK, [Field])
+prepareStmt :: MySQLConn -> ByteString -> IO (StmtPrepareOK, [ColumnDef])
 prepareStmt conn@(MySQLConn is os _ _) stmt = do
     guardUnconsumed conn
     writeCommand (COM_STMT_PREPARE stmt) os
@@ -170,8 +171,17 @@ closeStmt :: MySQLConn -> StmtID -> IO ()
 closeStmt (MySQLConn _ os _ _) stmtId = do
     writeCommand (COM_STMT_CLOSE stmtId) os
 
-executeStmt :: MySQLConn -> StmtID -> [Field] -> [MySQLValue] -> IO ([Field], InputStream [MySQLValue])
-executeStmt conn@(MySQLConn is os _ consumed) stmtId paramDef params = do
+executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
+executeStmt conn@(MySQLConn is os _ consumed) stmtId params = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_EXECUTE stmtId params) os
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p ->  decodeFromPacket p
+        | otherwise -> throwIO (UnexpectedPacket p)
+
+queryStmt :: MySQLConn -> StmtID -> [ColumnDef] -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
+queryStmt conn@(MySQLConn is os _ consumed) stmtId paramDef params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stmtId paramDef params) os
     p <- readPacket is

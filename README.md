@@ -3,16 +3,13 @@ mysql-haskell
 
 `mysql-haskell` is a mysql driver written entirely in haskell by Winterland at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based mysql middlewares.
 
-What's done:
+Roadmap:
 
 - [x] username/password authenticate
 - [x] text protocol decoding
 - [x] binary protocol decoding
 - [x] binlog listening
 - [x] basic binlog parsing
-
-Roadmap:
-
 - [ ] support some new binary types: `TIMESTAMP2/DATETIME2...`
 - [ ] full binlog parsing 
 - [ ] comprehensive testsuit and benchmark
@@ -55,9 +52,11 @@ Reference
 
 [Mysql official site](https://dev.mysql.com/doc/internals/en/) provided intensive document, but without following project, `mysql-haskell` may not be written at all:
 
-[go mysql toolkit](https://github.com/siddontang/go-mysql)
-[python binlog parser](https://github.com/noplay/python-mysql-replication)
-[ruby binlog parser](https://github.com/jeremycole/mysql_binlog)
++ [go mysql toolkit](https://github.com/siddontang/go-mysql)
+
++ [python binlog parser](https://github.com/noplay/python-mysql-replication)
+
++ [ruby binlog parser](https://github.com/jeremycole/mysql_binlog)
 
 License
 -------

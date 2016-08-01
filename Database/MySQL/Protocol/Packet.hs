@@ -162,8 +162,6 @@ instance Binary EOF where
 --------------------------------------------------------------------------------
 --  Helpers
 
-type NullBitMap = ByteString
-
 putLenEncBytes :: ByteString -> Put
 putLenEncBytes c = do
         let l = B.length c
@@ -180,10 +178,8 @@ getLenEncBytes = do
         str <- getByteString len
         return str
 
-newtype LenEncInt = LenEncInt { runLenEncInt :: Int } deriving (Show, Eq, Ord)
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
---
 getLenEncInt:: Get Int
 getLenEncInt = getWord8 >>= word2Len
   where
@@ -228,8 +224,6 @@ getByteStringNul = L.toStrict <$> getLazyByteStringNul
 
 getRemainingByteString :: Get ByteString
 getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
-
-
 
 --------------------------------------------------------------------------------
 -- |the root exception type for all the mysql exceptions

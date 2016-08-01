@@ -2,40 +2,42 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
-module Database.MySQL.Protocol.Field where
+module Database.MySQL.Protocol.ColumnDef where
 
 import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
 import           Data.ByteString.Char8 as BC
+import           Data.Bits ((.&.))
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
 --  Resultset
 
 -- | A description of a field (column) of a table.
-data Field = Field
+data ColumnDef = ColumnDef
     { -- fieldCatalog :: !ByteString            -- ^ const 'def'
-      fieldDB ::         !ByteString            -- ^ Database for table.
-    , fieldTable ::      !ByteString            -- ^ Table of column, if column was a field.
-    , fieldOrigTable ::  !ByteString            -- ^ Original table name, if table was an alias.
-    , fieldName ::       !ByteString            -- ^ Name of column.
-    , fieldOrigName ::   !ByteString            -- ^ Original column name, if an alias.
-    -- fieldFixedLen ::  !LenEncInt              -- ^ const '0x0C'
-    , fieldCharSet ::    !Word16                 -- ^ Character set number.
-    , fieldLength ::     !Word32                 -- ^ Width of column (create length).
-    , fieldType ::       !FieldType
-    , fieldFlags ::      !Word16                 -- ^ Div flags.
-    , fieldDecimals ::   !Word8                  -- ^ Number of decimals in field.
-    -- fieldfiller :: Word16                     -- const 0x00 0x00
+      columnDB ::         !ByteString            -- ^ Database for table.
+    , columnTable ::      !ByteString            -- ^ Table of column, if column was a field.
+    , columnOrigTable ::  !ByteString            -- ^ Original table name, if table was an alias.
+    , columnName ::       !ByteString            -- ^ Name of column.
+    , columnOrigName ::   !ByteString            -- ^ Original column name, if an alias.
+    -- columnFixedLen ::  !LenEncInt              -- ^ const '0x0C'
+    , columnCharSet ::    !Word16                 -- ^ Character set number.
+    , columnLength ::     !Word32                 -- ^ Width of column (create length).
+    , columnType ::       !FieldType
+    , columnFlags ::      !Word16                 -- ^ Div flags.
+    , columnDecimals ::   !Word8                  -- ^ Number of decimals in field.
+    -- columnfiller :: Word16                     -- const 0x00 0x00
     } deriving (Show, Eq)
 
 
-getField :: Get Field
-getField = Field
+getField :: Get ColumnDef
+getField = ColumnDef
         <$> (skip 4                 -- const "def"
          *> getLenEncBytes)         -- db
         <*> getLenEncBytes          -- table
@@ -50,8 +52,8 @@ getField = Field
         <*> getWord8                -- decimals
         <* skip 2                   -- const 0x00 0x00
 
-putField :: Field -> Put
-putField (Field db tbl otbl name oname charset len typ flags dec) = do
+putField :: ColumnDef -> Put
+putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
     putLenEncBytes "def"
     putLenEncBytes db
     putLenEncBytes tbl
@@ -65,7 +67,7 @@ putField (Field db tbl otbl name oname charset len typ flags dec) = do
     putWord8 dec
     putWord16le 0X0000
 
-instance Binary Field where
+instance Binary ColumnDef where
     get = getField
     put = putField
 
@@ -175,3 +177,39 @@ instance Binary FieldType where
     get = getFieldType
     put = putFieldType
 
+--------------------------------------------------------------------------------
+--  Field flags
+
+#define NOT_NULL_FLAG         1
+#define PRI_KEY_FLAG          2
+#define UNIQUE_KEY_FLAG       4
+#define MULT_KEY_FLAG         8
+#define BLOB_FLAG             16
+#define UNSIGNED_FLAG         32
+#define ZEROFILL_FLAG         64
+#define BINARY_FLAG           128
+#define ENUM_FLAG             256
+#define AUTO_INCREMENT_FLAG   512
+#define TIMESTAMP_FLAG        1024
+#define SET_FLAG              2048
+#define NO_DEFAULT_VALUE_FLAG 4096
+#define PART_KEY_FLAG         16384
+#define NUM_FLAG              32768
+
+flagNotNull, flagPrimaryKey, flagUniqueKey, flagMultipleKey, flagBlob, flagUnsigned, flagZeroFill :: Word16 -> Bool
+flagBinary, flagEnum, flagAutoIncrement, flagTimeStamp, flagSet, flagNoDefaultValue, flagPartKey, flagNumeric :: Word16 -> Bool
+flagNotNull        flags = flags .&. NOT_NULL_FLAG         == NOT_NULL_FLAG
+flagPrimaryKey     flags = flags .&. PRI_KEY_FLAG          == PRI_KEY_FLAG
+flagUniqueKey      flags = flags .&. UNIQUE_KEY_FLAG       == UNIQUE_KEY_FLAG
+flagMultipleKey    flags = flags .&. MULT_KEY_FLAG         == MULT_KEY_FLAG
+flagBlob           flags = flags .&. BLOB_FLAG             == BLOB_FLAG
+flagUnsigned       flags = flags .&. UNSIGNED_FLAG         == UNSIGNED_FLAG
+flagZeroFill       flags = flags .&. ZEROFILL_FLAG         == ZEROFILL_FLAG
+flagBinary         flags = flags .&. BINARY_FLAG           == BINARY_FLAG
+flagEnum           flags = flags .&. ENUM_FLAG             == ENUM_FLAG
+flagAutoIncrement  flags = flags .&. AUTO_INCREMENT_FLAG   == AUTO_INCREMENT_FLAG
+flagTimeStamp      flags = flags .&. TIMESTAMP_FLAG        == TIMESTAMP_FLAG
+flagSet            flags = flags .&. SET_FLAG              == SET_FLAG
+flagNoDefaultValue flags = flags .&. NO_DEFAULT_VALUE_FLAG == NO_DEFAULT_VALUE_FLAG
+flagPartKey        flags = flags .&. PART_KEY_FLAG         == PART_KEY_FLAG
+flagNumeric        flags = flags .&. NUM_FLAG              == NUM_FLAG

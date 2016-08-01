@@ -13,7 +13,6 @@ import           Data.Binary.Get
 import           Data.Binary.Put
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
-import qualified Data.ByteString.Lazy  as L
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -34,28 +33,27 @@ putGreeting :: Greeting -> Put
 putGreeting (Greeting p v t s1 c l st s2) = do
     putWord8 p
     putByteString v
-    putWord8 0
+    putWord8 0x00
     putWord32le t
     putByteString s1
     putWord16le c
     putWord8 l
     putWord16le st
-    replicateM_ 13 $ putWord8 0
+    replicateM_ 13 (putWord8 0x00)
     putByteString s2
 
 getGreeting :: Get Greeting
-getGreeting = do
-    p  <- getWord8
-    v  <- getLazyByteStringNul
-    t  <- getWord32le
-    s1 <- getLazyByteStringNul
-    c  <- getWord16le
-    l  <- getWord8
-    st <- getWord16le
-    skip 13
-    s2 <- getLazyByteStringNul
-    _ <- getLazyByteStringNul
-    return $ Greeting p (L.toStrict v) t (L.toStrict s1) c l st $ L.toStrict s2
+getGreeting = Greeting
+    <$> getWord8
+    <*> getByteStringNul
+    <*> getWord32le
+    <*> getByteStringNul
+    <*> getWord16le
+    <*> getWord8
+    <*> getWord16le
+    <*  skip 13
+    <*> getByteStringNul
+    <*  getByteStringNul
 
 instance Binary Greeting where
     get = getGreeting
@@ -84,12 +82,12 @@ putAuth (Auth cap m c n p s) = do
     putWord32le cap
     putWord32le m
     putWord8 c
-    replicateM_ 23 (putWord8 0)
-    putByteString n >> putWord8 0
+    replicateM_ 23 (putWord8 0x00)
+    putByteString n >> putWord8 0x00
     putWord8 $ fromIntegral (B.length p)
     putByteString p
     putByteString s
-    putWord8 0
+    putWord8 0x00
 
 instance Binary Auth where
     get = getAuth
