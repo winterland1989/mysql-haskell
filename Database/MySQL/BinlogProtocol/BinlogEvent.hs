@@ -5,7 +5,7 @@
 
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
-module Database.MySQL.BinLogProtocol where
+module Database.MySQL.BinLogProtocol.BinLogEvent where
 
 import           Control.Monad
 import           Control.Applicative
@@ -107,8 +107,6 @@ getFromBinLogEvent g (BinLogEvent _ _ _ _ __ _ body _ ) =
 --------------------------------------------------------------------------------
 -- | BinLogEvent item type
 
-
-
 data FormatDescription = FormatDescription
     { fdVersion      :: !Word16
     , fdMySQLVersion :: !ByteString
@@ -192,7 +190,6 @@ data DeleteRowsEvent = DeleteRowsEvent
     , drePresentMap  :: !ByteString
     , dreRowData     :: ![ByteString]
     }
-
 
 --------------------------------------------------------------------------------
 -- | exception tyoe

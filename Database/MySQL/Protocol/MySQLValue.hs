@@ -9,7 +9,7 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : PORTABLE
 
-This module provide
+This module provide both text and binary row decoder/encoder machinery.
 
 -}
 
@@ -66,12 +66,12 @@ data MySQLValue
 
 getMySQLValueType :: MySQLValue -> (FieldType, Word8)
 getMySQLValueType (MySQLDecimal      _)  = (MYSQL_TYPE_DECIMAL  , 0x00)
-getMySQLValueType (MySQLInt8U        _)  = (MYSQL_TYPE_LONG     , 0x01)
-getMySQLValueType (MySQLInt8         _)  = (MYSQL_TYPE_LONG     , 0x00)
-getMySQLValueType (MySQLInt16U       _)  = (MYSQL_TYPE_LONGLONG , 0x01)
-getMySQLValueType (MySQLInt16        _)  = (MYSQL_TYPE_LONGLONG , 0x00)
-getMySQLValueType (MySQLInt32U       _)  = (MYSQL_TYPE_LONGLONG , 0x01)
-getMySQLValueType (MySQLInt32        _)  = (MYSQL_TYPE_LONGLONG , 0x00)
+getMySQLValueType (MySQLInt8U        _)  = (MYSQL_TYPE_TINY     , 0x01)
+getMySQLValueType (MySQLInt8         _)  = (MYSQL_TYPE_TINY     , 0x00)
+getMySQLValueType (MySQLInt16U       _)  = (MYSQL_TYPE_SHORT    , 0x01)
+getMySQLValueType (MySQLInt16        _)  = (MYSQL_TYPE_SHORT    , 0x00)
+getMySQLValueType (MySQLInt32U       _)  = (MYSQL_TYPE_LONG     , 0x01)
+getMySQLValueType (MySQLInt32        _)  = (MYSQL_TYPE_LONG     , 0x00)
 getMySQLValueType (MySQLInt64U       _)  = (MYSQL_TYPE_LONGLONG , 0x01)
 getMySQLValueType (MySQLInt64        _)  = (MYSQL_TYPE_LONGLONG , 0x00)
 getMySQLValueType (MySQLFloat        _)  = (MYSQL_TYPE_FLOAT    , 0x00)
@@ -185,8 +185,8 @@ getTextRow fs = forM fs $ \ f -> do
 getBinaryField :: ColumnDef -> Get MySQLValue
 getBinaryField f
     | t == MYSQL_TYPE_NULL              = pure MySQLNull
-    | t == MYSQL_TYPE_DECIMAL           = fail "Database.MySQL.MySQLValue: unsupported type MYSQL_TYPE_DECIMAL"
-    | t == MYSQL_TYPE_NEWDECIMAL        = fail "Database.MySQL.MySQLValue: unsupported type MYSQL_TYPE_NEWDECIMAL"
+    | t == MYSQL_TYPE_DECIMAL
+        || t == MYSQL_TYPE_NEWDECIMAL   = feedLenEncBytes t MySQLDecimal fracLexer
     | t == MYSQL_TYPE_TINY              = if isUnsigned then MySQLInt8U <$> getWord8
                                                         else MySQLInt8  <$> getInt8
     | t == MYSQL_TYPE_SHORT             = if isUnsigned then MySQLInt16U <$> getWord16le
@@ -214,17 +214,16 @@ getBinaryField f
                                                     d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
                                                     td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
                                                     pure $ MySQLDateTime (LocalTime d td)
-                                                _ -> fail $ "Database.MySQL.MySQLValue: wrong TIMESTAMP/DATETIME length"
+                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIMESTAMP/DATETIME length"
 
-
-    | t == MYSQL_TYPE_TIMESTAMP2        = fail "Database.MySQL.MySQLValue: unsupported type MYSQL_TYPE_TIMESTAMP2"
-    | t == MYSQL_TYPE_DATETIME2         = fail "Database.MySQL.MySQLValue: unsupported type MYSQL_TYPE_DATETIME2"
+    | t == MYSQL_TYPE_TIMESTAMP2        = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIMESTAMP2"
+    | t == MYSQL_TYPE_DATETIME2         = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_DATETIME2"
     | t == MYSQL_TYPE_DATE
         || t == MYSQL_TYPE_NEWDATE      = do n <- getLenEncInt
                                              case n of
                                                 0 -> pure $ MySQLDate (fromGregorian 0 0 0)
                                                 4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
-                                                _ -> fail $ "Database.MySQL.MySQLValue: wrong DATE/NEWDATE length"
+                                                _ -> fail "Database.MySQL.MySQLValue: wrong DATE/NEWDATE length"
 
     | t == MYSQL_TYPE_TIME              = do n <- getLenEncInt
                                              case n of
@@ -238,9 +237,9 @@ getBinaryField f
                                                     _ <- getWord8  -- we ignore sign here because 'TimeOfDay' doesn't support,
                                                     _ <- getWord32le   -- we also ignore the day part
                                                     MySQLTime <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8)
-                                                _ -> fail $ "Database.MySQL.MySQLValue: wrong TIME length"
+                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIME length"
 
-    | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.MySQLValue: unsupported type MYSQL_TYPE_TIME2"
+    | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIME2"
     | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
         || t == MYSQL_TYPE_BIT
@@ -258,6 +257,7 @@ getBinaryField f
     isUnsigned = flagUnsigned (columnFlags f)
     isText = columnCharSet f /= 63
     -- please check https://github.com/jeremycole/mysql_binlog
+    fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
     getYear :: Get Integer
     getYear = fromIntegral <$> getWord16le
     getInt8' :: Get Int
@@ -270,39 +270,49 @@ getBinaryField f
         ms <- fromIntegral <$> getWord32le :: Get Int
         pure $! (realToFrac s + realToFrac ms / 1000 :: Double)
 
+    feedLenEncBytes typ con parser = do
+        bs <- getLenEncBytes
+        case parser bs of
+            Just v -> return (con v)
+            Nothing -> fail $ "Database.MySQL.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
+
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
 putBinaryField :: MySQLValue -> Put
 putBinaryField (MySQLDecimal    n) = putBuilder (scientificBuilder n)
+putBinaryField (MySQLInt8U      n) = putWord8 n
+putBinaryField (MySQLInt8       n) = putWord8 (fromIntegral n)
+putBinaryField (MySQLInt16U     n) = putWord16le n
+putBinaryField (MySQLInt16      n) = putInt16le n
+putBinaryField (MySQLInt32U     n) = putWord32le n
 putBinaryField (MySQLInt32      n) = putInt32le n
+putBinaryField (MySQLInt64U     n) = putWord64le n
 putBinaryField (MySQLInt64      n) = putInt64le n
+putBinaryField (MySQLFloat      x) = putFloatle x
 putBinaryField (MySQLDouble     x) = putDoublele x
-putBinaryField (MySQLDateTime  (LocalTime date (TimeOfDay h m s))) = do let (yyyy, mm, dd) = toGregorian date
-                                                                        let (s', s'') = decodeFloat (realToFrac s :: Double)
-                                                                        putWord16le (fromIntegral yyyy)
-                                                                        putWord8 (fromIntegral mm)
-                                                                        putWord8 (fromIntegral dd)
-                                                                        putWord8 (fromIntegral h)
-                                                                        putWord8 (fromIntegral m)
-                                                                        putWord8 (fromIntegral s')
-                                                                        putWord32le (fromIntegral s'')
+putBinaryField (MySQLYear       n) = putWord16le n
+putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
+                                                           putBinaryDay date
+                                                           putBinaryTime time
+putBinaryField (MySQLDate   d)    = putBinaryDay d
+putBinaryField (MySQLTime   t)    = putBinaryTime t
+putBinaryField (MySQLBytes    bs) = putLenEncBytes bs
+putBinaryField (MySQLText      t) = putLenEncBytes (T.encodeUtf8 t)
+putBinaryField MySQLNull          = return ()
 
-putBinaryField (MySQLDate   d) = do let (yyyy, mm, dd) = toGregorian d
-                                    putWord16le (fromIntegral yyyy)
-                                    putWord8 (fromIntegral mm)
-                                    putWord8 (fromIntegral dd)
+putBinaryDay :: Day -> Put
+putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
+                    putWord16le (fromIntegral yyyy)
+                    putWord8 (fromIntegral mm)
+                    putWord8 (fromIntegral dd)
 
-
-putBinaryField (MySQLTime   (TimeOfDay h m s)) = do let (s', s'') = decodeFloat (realToFrac s :: Double)
-                                                    putWord8 (fromIntegral h)
-                                                    putWord8 (fromIntegral m)
-                                                    putWord8 (fromIntegral s')
-                                                    putWord64le (fromIntegral s'')
-
-
-putBinaryField (MySQLBytes     bs) = putByteString bs
-putBinaryField (MySQLText       t) = putByteString (T.encodeUtf8 t)
-putBinaryField MySQLNull           = return ()
+putBinaryTime :: TimeOfDay -> Put
+putBinaryTime (TimeOfDay hh mm ss) = do let sInt = floor ss
+                                            sFrac = floor $ (ss - realToFrac sInt) * 1000000
+                                        putWord8 (fromIntegral hh)
+                                        putWord8 (fromIntegral mm)
+                                        putWord8 sInt
+                                        putWord64le sFrac
 
 --------------------------------------------------------------------------------
 -- | Binary row encoder
@@ -344,3 +354,7 @@ makeNullMap values = B.pack (go values 0x00 0)
                                   in pos' `seq` byte' `seq` go vs byte' pos'
 
     go (_        :vs) byte pos = let pos' = pos + 1 in pos' `seq` go vs byte pos'
+
+--------------------------------------------------------------------------------
+-- TODO: add helpers to parse MYSQL_TYPE_GEOMETRY
+-- reference: https://github.com/felixge/node-mysql/blob/master/lib/protocol/Parser.js

@@ -22,7 +22,8 @@ library
                     ,   Database.MySQL.Protocol.Packet
                     ,   Database.MySQL.Protocol.MySQLValue
                     ,   Database.MySQL.BinLog
-                    ,   Database.MySQL.BinLogProtocol
+                    ,   Database.MySQL.BinLogProtocol.BinLogEvent
+                    ,   Database.MySQL.BinLogProtocol.BinLogValue
 
   -- other-modules:       
   -- other-extensions:    

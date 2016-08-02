@@ -11,14 +11,10 @@ import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
-import           Data.Bits
 import   Data.ByteString       (ByteString)
-import qualified Data.ByteString.Char8 as BC
-import qualified Data.ByteString.Lazy  as L
 import           Database.MySQL.Protocol.Packet
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue
-import Debug.Trace
 
 --------------------------------------------------------------------------------
 --  Commands
@@ -35,7 +31,7 @@ data Command
     | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 --  0x15
             -- ^ server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
     | COM_STMT_PREPARE   !ByteString              -- 0x16
-    | COM_STMT_EXECUTE   !StmtID ![ColumnDef] ![MySQLValue]    -- 0x17
+    | COM_STMT_EXECUTE   !StmtID ![MySQLValue]    -- 0x17
             -- ^ paramDef, stmtId, params
     | COM_STMT_SEND_LONG_DATA                     -- 0x18
     | COM_STMT_CLOSE     !StmtID                        -- 0x19
@@ -80,20 +76,20 @@ putCommand (COM_REGISTER_SLAVE sid shost susr spass sport rrank mid) = do
     putWord32le rrank
     putWord32le mid
 putCommand (COM_STMT_PREPARE stmt) = putWord8 0x16 >> putByteString stmt
-putCommand (COM_STMT_EXECUTE stmtId fields params) = do
+putCommand (COM_STMT_EXECUTE stid params) = do
     putWord8 0x17
-    putWord32le stmtId
+    putWord32le stid
     putWord8 0x00 -- we only use @CURSOR_TYPE_NO_CURSOR@ here
     putWord32le 1 -- const 1
     unless (null params) $ do
         putByteString (makeNullMap params)
         putWord8 0x01    -- always use new-params-bound-flag
-        let fts = map fieldType fields
-        forM_ fts $ \ t -> put t >> putWord8 0x00 -- always use signed
+        let fts = map getMySQLValueType params
+        forM_ fts $ \ (t, s) -> putFieldType t >> putWord8 s
         forM_ params putBinaryField
 
-putCommand (COM_STMT_CLOSE stmtId) = putWord8 0x19 >> putWord32le stmtId
-putCommand (COM_STMT_RESET stmtId) = putWord8 0x1A >> putWord32le stmtId
+putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid
+putCommand (COM_STMT_RESET stid) = putWord8 0x1A >> putWord32le stid
 putCommand COM_UNSUPPORTED       = fail "unsupported command"
 
 instance Binary Command where

@@ -14,7 +14,8 @@ import           Data.IORef                    (writeIORef)
 import           Data.Typeable                 (Typeable)
 import           Data.Word                     (Word32)
 import           Database.MySQL.Base
-import           Database.MySQL.BinLogProtocol
+import           Database.MySQL.Connection
+import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.Protocol
 import           System.IO.Streams             (InputStream, OutputStream)
 import qualified System.IO.Streams             as Stream
@@ -79,7 +80,7 @@ isCheckSumEnabled conn = do
     Stream.skipToEof is
     case row of
         Just [_, MySQLText "CRC32"] -> do
-                query_ conn "SET @master_binlog_checksum= @@global.binlog_checksum"
+                execute conn "SET @master_binlog_checksum= @@global.binlog_checksum"
                 return True
         _ -> return False
 
@@ -92,6 +93,6 @@ isSemiSyncEnabled conn = do
     Stream.skipToEof is
     case row of
         Just [_, MySQLText "ON"] -> do
-            query_ conn "SET @rpl_semi_sync_slave = 1"
+            execute conn "SET @rpl_semi_sync_slave = 1"
             return True
         _ -> return False
