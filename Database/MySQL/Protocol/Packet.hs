@@ -208,6 +208,17 @@ getWord24le = do
     b <- fromIntegral <$> getWord8
     return $! a .|. (b `shiftL` 16)
 
+putWord48le :: Word64 -> Put
+putWord48le v = do
+    putWord32le $ fromIntegral v
+    putWord16le $ fromIntegral (v `shiftR` 32)
+
+getWord48le :: Get Word64
+getWord48le = do
+    a <- fromIntegral <$> getWord32le
+    b <- fromIntegral <$> getWord16le
+    return $! a .|. (b `shiftL` 32)
+
 getByteStringNul :: Get ByteString
 getByteStringNul = L.toStrict <$> getLazyByteStringNul
 

@@ -70,7 +70,7 @@ connect ci@(ConnInfo host port _ _ _ tls) =
   where
     mkAuth :: ConnInfo -> Greeting -> Auth
     mkAuth (ConnInfo _ _ db user pass _) greet =
-        let salt = salt1 greet `B.append` salt2 greet
+        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
             scambleBuf = scramble salt pass
         in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
 

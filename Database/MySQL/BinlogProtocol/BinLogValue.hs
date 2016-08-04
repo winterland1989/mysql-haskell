@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE BangPatterns #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -18,36 +19,29 @@ This module provide both text and binary row decoder/encoder machinery.
 
 module Database.MySQL.BinLogProtocol.BinLogValue where
 
-import Control.Monad
-import qualified Data.ByteString.Lex.Integral   as LexInt
-import qualified Data.ByteString.Lex.Fractional as LexFrac
-import Data.Text (Text)
-import qualified Data.Text.Encoding as T
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as B
-import qualified Data.ByteString.Char8 as BC
-import Data.Scientific (Scientific)
-import Data.ByteString.Builder.Scientific (scientificBuilder)
-import qualified Blaze.Text as Textual
 import Data.Bits
-import Data.Fixed (Pico)
 import Data.Word
 import Data.Int
-import Data.Time.Format (defaultTimeLocale, formatTime)
-import Data.Time.Calendar (Day, fromGregorian, toGregorian)
-import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 import Data.Binary.Get
 import Data.Binary.Put
 import Database.MySQL.BinLogProtocol.BinLogMeta
 import Database.MySQL.Protocol.Packet
-import Database.MySQL.Protocol.MySQLValue
+import Database.MySQL.Protocol.MySQLValue (isBitSet, BitMap)
+import Debug.Trace
 
 -- | This data type DOES NOT try to parse binlog values into detailed haskell values.
 -- Because you may not want to waste performance in situations like database middleware.
 --
 data BinLogValue
-    = BinLogFloat      !Float
+    = BinLogTiny       !Word8
+    | BinLogShort      !Word16
+    | BinLogInt24      !Word32
+    | BinLogLong       !Word32
+    | BinLogLongLong   !Word64
+    | BinLogFloat      !Float
     | BinLogDouble     !Double
     | BinLogBit        !Word64          -- ^ a 64bit bitmap.
     | BinLogTimeStamp  !Word32          -- ^ a utc timestamp, note 0 doesn't mean @1970-01-01 00:00:00@,
@@ -55,22 +49,28 @@ data BinLogValue
     | BinLogTimeStamp2 !Word32 !Word32  -- ^ like 'BinLogTimeStamp' with an addtional microseconds field.
     | BinLogDateTime   !Word16 !Word8 !Word8 !Word8 !Word8 !Word8         -- ^ YYYY MM DD hh mm ss
     | BinLogDateTime2  !Word16 !Word8 !Word8 !Word8 !Word8 !Word8 !Word32 -- ^ YYYY MM DD hh mm ss microsecond
-    | BinLogDate       !Word16 !Word8 !Word8                              -- ^ YYYY MM DD
-    | BinLogTime       !Word8  !Word16 !Word8 !Word8                      -- ^ sign(1= non-negative, 0= negative) hh mm ss
-    | BinLogTime2      !Word8  !Word16 !Word8 !Word8 !Word32              -- ^ sign(1= non-negative, 0= negative) hh mm ss microsecond
-    | BinLogYear       !Word16                                            -- ^ year value, 0 stand for '0000'
-    | BinLogNewDecimal !Integer !Integer                                  -- ^ integeral part, fractional part
-    | BinLogEnum       !Word16                                            -- ^ enum indexing value
-    | BinLogSet        !Word64                                            -- ^ set indexing 64bit bitmap.
+    | BinLogDate       !Word16 !Word8 !Word8                   -- ^ YYYY MM DD
+    | BinLogTime       !Word8  !Word16 !Word8 !Word8           -- ^ sign(1= non-negative, 0= negative) hh mm ss
+    | BinLogTime2      !Word8  !Word16 !Word8 !Word8 !Word32   -- ^ sign(1= non-negative, 0= negative) hh mm ss microsecond
+    | BinLogYear       !Word16                                 -- ^ year value, 0 stand for '0000'
+    | BinLogNewDecimal !Word8  !Integer !Integer               -- ^ sign(1= non-negative, 0= negative) integeral part, fractional part
+    | BinLogEnum       !Word16                                 -- ^ enum indexing value
+    | BinLogSet        !Word64                                 -- ^ set indexing 64bit bitmap.
     | BinLogBlob       !ByteString
-    | BinLogString     !ByteString                                        -- ^ no attempt to do charset decoding here
+    | BinLogString     !ByteString                             -- ^ no attempt to do charset decoding here
     | BinLogGeometry   !ByteString
     | BinLogNull
+  deriving (Show, Eq)
 
 --------------------------------------------------------------------------------
 -- | BinLog protocol decoder
 --
 getBinLogField :: BinLogMeta -> Get BinLogValue
+getBinLogField BINLOG_TYPE_TINY                = BinLogTiny     <$> getWord8
+getBinLogField BINLOG_TYPE_SHORT               = BinLogShort    <$> getWord16le
+getBinLogField BINLOG_TYPE_INT24               = BinLogInt24    <$> getWord24le
+getBinLogField BINLOG_TYPE_LONG                = BinLogLong     <$> getWord32le
+getBinLogField BINLOG_TYPE_LONGLONG            = BinLogLongLong <$> getWord64le
 getBinLogField (BINLOG_TYPE_FLOAT  size      ) = BinLogFloat <$> getFloatle
 getBinLogField (BINLOG_TYPE_DOUBLE size      ) = BinLogDouble <$> getDoublele
 getBinLogField (BINLOG_TYPE_BIT    bits bytes) = BinLogBit <$> getBits bits bytes
@@ -104,7 +104,7 @@ getBinLogField (BINLOG_TYPE_DATE             ) = do i <- getWord24le
 -- 8385959 stand for @838:59:59@
 getBinLogField (BINLOG_TYPE_TIME             ) = do i <- getWord24le
                                                     let i' =  fromIntegral i :: Int32
-                                                        sign = if i' >= 0 then 0 else 1
+                                                        sign = if i' >= 0 then 1 else 0
                                                         ui = abs i
                                                     let (h, ui')     = ui     `quotRem` 10000
                                                         (m, s)       = ui'    `quotRem` 100
@@ -170,10 +170,7 @@ getBinLogField (BINLOG_TYPE_YEAR             ) = do y <- getWord8
 -- Decimal representation in binlog seems to be as follows:
 --
 -- 1st bit - sign such that set == +, unset == -
--- every 4 bytes represent 9 digits in big-endian order, so that
--- if you print the values of these quads as big-endian integers one after
--- another, you get the whole number string representation in decimal. What
--- remains is to put a sign and a decimal dot.
+-- every 4 bytes represent 9 digits in big-endian order.
 --
 -- 80 00 00 05 1b 38 b0 60 00 means:
 --
@@ -187,31 +184,36 @@ getBinLogField (BINLOG_TYPE_YEAR             ) = do y <- getWord8
 -- if there're < 9 digits at first, it will be compressed into suitable length words
 -- following a simple lookup table.
 --
-getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do let i = fromIntegral (precision - scale)
-                                                                  (ucI, cI) = i `quotRem` digitsPerInteger
-                                                                  (ucF, cF) = scale `quotRem` digitsPerInteger
-                                                                  ucISize = fromIntegral (ucI `shiftL` 2)
-                                                                  ucFSize = fromIntegral (ucF `shiftL` 2)
-                                                                  cISize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cI)
-                                                                  cFSize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cF)
-                                                                  len = ucISize + cISize + ucFSize + cFSize
+getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do
+    let i = fromIntegral (precision - scale)
+        (ucI, cI) = i `quotRem` digitsPerInteger
+        (ucF, cF) = scale `quotRem` digitsPerInteger
+        ucISize = fromIntegral (ucI `shiftL` 2)
+        ucFSize = fromIntegral (ucF `shiftL` 2)
+        cISize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cI)
+        cFSize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cF)
+        len = ucISize + cISize + ucFSize + cFSize
 
-                                                              buf <- getByteString (fromIntegral len)
+    buf <- getByteString (fromIntegral len)
 
-                                                              let fb = buf `B.unsafeIndex` 0
-                                                                  sign = if fb .&. 0x80 /= 0 then 0 else -1
-                                                                  buf' = if sign == 0 then buf
-                                                                                      else B.map (xor 0xFF) buf
+    let fb = (trace (show buf) buf) `B.unsafeIndex` 0
+        sign = if fb .&. 0x80 == 0x80 then 1 else 0
+        buf' = (fb `xor` 0x80) `B.cons` B.tail buf
+        buf'' = if sign == 1 then buf'
+                            else B.map (xor 0xFF) buf'
 
-                                                                  iPart = fromIntegral (getCompressed cISize (B.unsafeTake cISize buf'))
-                                                                        + getUncompressed ucI (B.unsafeDrop cISize buf')
+        iPart = fromIntegral (getCompressed cISize (B.unsafeTake cISize buf'')) * (blockSize ^ ucI)
+              + getUncompressed ucI (B.unsafeDrop cISize buf'')
 
-                                                                  fPart = getUncompressed ucF (B.unsafeTake ucFSize buf')
-                                                                        + fromIntegral (getCompressed cFSize (B.unsafeDrop ucFSize buf'))
+    let buf''' = B.unsafeDrop (ucISize + cISize) buf''
 
-                                                              pure (BinLogNewDecimal iPart fPart)
+        fPart = getUncompressed ucF (B.unsafeTake ucFSize buf''') * (10 ^ cF)
+              + fromIntegral (getCompressed cFSize (B.unsafeDrop ucFSize buf'''))
+
+    pure (BinLogNewDecimal sign iPart fPart)
   where
     digitsPerInteger = 9
+    blockSize = fromIntegral $ (10 :: Int32) ^ (9 :: Int)
     sizeTable = B.pack [0, 1, 1, 2, 2, 3, 3, 4, 4, 4]
 
     getCompressed :: Int -> ByteString -> Word64
@@ -224,7 +226,7 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do let i = fromIntegr
     getUncompressed 0 _ = 0
     getUncompressed x bs = let v = getCompressed 4 (B.unsafeTake 4 bs)
                                x' = x - 1
-                           in fromIntegral v * (1e9 ^ x) + getUncompressed x' (B.unsafeDrop 4 bs)
+                           in fromIntegral v * (blockSize ^ x') + getUncompressed x' (B.unsafeDrop 4 bs)
 
 
 getBinLogField (BINLOG_TYPE_ENUM     size    ) = if | size == 1 -> BinLogEnum . fromIntegral <$> getWord8
@@ -281,14 +283,10 @@ getBits bits bytes = do
             | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: wrong bit length size: " ++ show bytes
 
   where
-    getWord40le, getWord48le, getWord56le :: Get Word64
+    getWord40le, getWord56le :: Get Word64
     getWord40le = do
         a <- fromIntegral <$> getWord32le
         b <- fromIntegral <$> getWord8
-        return $! a .|. (b `shiftL` 32)
-    getWord48le = do
-        a <- fromIntegral <$> getWord32le
-        b <- fromIntegral <$> getWord16le
         return $! a .|. (b `shiftL` 32)
     getWord56le = do
         a <- fromIntegral <$> getWord32le
@@ -298,23 +296,23 @@ getBits bits bytes = do
 --------------------------------------------------------------------------------
 -- | BinLog row decoder
 --
-getBinLogRow :: [BinLogMeta] -> Int -> Get [BinLogValue]
-getBinLogRow metas flen = do
-    _ <- getWord8           -- 0x00
-    let maplen = (flen + 7 + 2) `shiftR` 3
+getBinLogRow :: [BinLogMeta] -> ByteString -> Get [BinLogValue]
+getBinLogRow metas pmap = do
+    let plen = B.foldl' (\acc word8 -> acc + popCount word8) 0 pmap
+        maplen = (plen + 7) `shiftR` 3
     nullmap <- getByteString maplen
-    go metas nullmap (0 :: Int)
+    go metas nullmap 0 pmap 0
   where
-    go [] _       _        = pure []
-    go (f:fs) nullmap pos = do
-        r <- if isNull nullmap pos
-                then return BinLogNull
-                else getBinLogField f
-        let pos' = pos + 1
-        rest <- pos' `seq` go fs nullmap pos'
-        return (r `seq` rest `seq` (r : rest))
-
-    isNull nullmap pos =
-        let (i, j) = (pos + 2) `quotRem` 8
-        in (nullmap `B.unsafeIndex` i) `testBit` j
-
+    go :: [BinLogMeta] -> BitMap -> Int -> BitMap -> Int -> Get [BinLogValue]
+    go [] _       _   _          _       = pure []
+    go (f:fs) nullmap !nullpos pmap !ppos  =
+        if isBitSet pmap ppos
+        then do
+            r <- if isBitSet nullmap nullpos
+                    then return BinLogNull
+                    else getBinLogField f
+            let nullpos' = nullpos + 1
+                ppos' = ppos + 1
+            rest <- go fs nullmap nullpos' pmap ppos'
+            return (rest `seq` (r : rest))
+        else go fs nullmap nullpos pmap (ppos + 1)

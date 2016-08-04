@@ -19,14 +19,14 @@ import           Database.MySQL.Protocol.Packet
 -- Authentications
 
 data Greeting = Greeting
-    { protocol :: !Word8
-    , version  :: !B.ByteString
-    , tid      :: !Word32
-    , salt1    :: !B.ByteString
-    , caps     :: !Word16
-    , lang     :: !Word8
-    , status   :: !Word16
-    , salt2    :: !B.ByteString
+    { greetingProtocol :: !Word8
+    , greetingVersion  :: !B.ByteString
+    , greetingTid      :: !Word32
+    , greetingSalt1    :: !B.ByteString
+    , greetingCaps     :: !Word16
+    , greetingLang     :: !Word8
+    , greetingStatus   :: !Word16
+    , greetingSalt2    :: !B.ByteString
     } deriving (Show, Eq)
 
 putGreeting :: Greeting -> Put

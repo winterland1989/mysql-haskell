@@ -12,11 +12,14 @@ import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Bits
+import           Data.ByteString         (ByteString)
 import qualified Data.ByteString         as B
 import qualified Data.ByteString.Unsafe  as B
-import           Data.ByteString.Char8   as BC
+import qualified Data.ByteString.Char8   as BC
 import qualified Data.ByteString.Lazy    as L
 import           Database.MySQL.Protocol
+import           Database.MySQL.BinLogProtocol.BinLogMeta
+import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Data.Vector.Unboxed (Vector)
 
 
@@ -99,8 +102,14 @@ getBinLogEvent checksum semi = do
     return (BinLogEvent ts typ sid size pos flgs body ack)
 
 getFromBinLogEvent :: Get a -> BinLogEvent -> IO a
-getFromBinLogEvent g (BinLogEvent _ _ _ _ __ _ body _ ) =
+getFromBinLogEvent g (BinLogEvent _ typ _ _ _ _ body _ ) =
     case runGetOrFail g body of
+        Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
+        Right (_, _, r)            -> return r
+
+getFromBinLogEvent' :: (BinLogEventType -> Get a) -> BinLogEvent -> IO a
+getFromBinLogEvent' g (BinLogEvent _ typ _ _ _ _ body _ ) =
+    case runGetOrFail (g typ) body of
         Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
         Right (_, _, r)            -> return r
 
@@ -112,7 +121,8 @@ data FormatDescription = FormatDescription
     , fdMySQLVersion :: !ByteString
     , fdCreateTime   :: !Word32
     -- , eventHeaderLen :: !Word8  -- const 19
-    , eventHeaderLenVector :: !ByteString
+    , fdEventHeaderLenVector :: !ByteString  -- ^ a array indexed by Binlog Event Type - 1
+                                             -- to extract the length of the event specific header.
     } deriving (Show, Eq)
 
 getFormatDescription :: Get FormatDescription
@@ -123,7 +133,7 @@ getFormatDescription = FormatDescription <$> getWord16le
                                          <*> (L.toStrict <$> getRemainingLazyByteString)
 
 eventHeaderLen :: FormatDescription -> BinLogEventType -> Word8
-eventHeaderLen fmt typ = B.unsafeIndex (eventHeaderLenVector fmt) (fromEnum typ)
+eventHeaderLen fd typ = B.unsafeIndex (fdEventHeaderLenVector fd) (fromEnum typ - 1)
 
 data RotateEvent = RotateEvent
     { rePos :: !Word64, reFileName :: !ByteString } deriving (Show, Eq)
@@ -133,12 +143,12 @@ getRotateEvent = RotateEvent <$> getWord64le <*> getRemainingByteString
 
 
 data QueryEvent = QueryEvent
-    { qeSlaveProxyId :: !Word32
-    , qeExecTime     :: !Word32
-    , qeErrCode      :: !Word16
-    , qeStatusVars   :: !ByteString
-    , qeSchemaName   :: !ByteString
-    , qeQuery        :: !L.ByteString
+    { qSlaveProxyId :: !Word32
+    , qExecTime     :: !Word32
+    , qErrCode      :: !Word16
+    , qStatusVars   :: !ByteString
+    , qSchemaName   :: !ByteString
+    , qQuery        :: !L.ByteString
     } deriving (Show, Eq)
 
 getQueryEvent :: Get QueryEvent
@@ -155,19 +165,19 @@ getQueryEvent = do
     return (QueryEvent pid tim ecode svar schema qry)
 
 data TableMapEvent = TableMapEvent
-    { tmeTableId    :: !Word64
-    , tmeFlags      :: !Word16
-    , tmeSchemaName :: !ByteString
-    , tmeTableName  :: !ByteString
-    , tmeColumnCnt  :: !Int
-    , tmeColumnDef  :: !ByteString
-    , tmeColumeMeta :: !ByteString
-    , tmeNullMap    :: !ByteString
+    { tmTableId    :: !Word64
+    , tmFlags      :: !Word16
+    , tmSchemaName :: !ByteString
+    , tmTableName  :: !ByteString
+    , tmColumnCnt  :: !Int
+    , tmColumnType :: ![FieldType]
+    , tmColumnMeta :: ![BinLogMeta]
+    , tmNullMap    :: !ByteString
     } deriving (Show, Eq)
 
 getTableMapEvent :: FormatDescription -> Get TableMapEvent
-getTableMapEvent fmt = do
-    let hlen = eventHeaderLen fmt TABLE_MAP_EVENT
+getTableMapEvent fd = do
+    let hlen = eventHeaderLen fd TABLE_MAP_EVENT
     tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
     flgs <- getWord16le
     slen <- getWord8
@@ -177,19 +187,66 @@ getTableMapEvent fmt = do
     table <- getByteString (fromIntegral tlen)
     _ <- getWord8 -- 0x00
     cc <- getLenEncInt
-    columnDef <- getByteString cc
-    columnMeta <- getLenEncBytes
+    colTypBS <- getByteString cc
+    let typs = map word8ToFieldType (B.unpack colTypBS)
+    colMetaBS <- getLenEncBytes
+
+    metas <- case runGetOrFail (forM typs getBinLogMeta) (L.fromStrict colMetaBS) of
+        Left (buf, offset, errmsg) -> fail errmsg
+        Right (_, _, r)            -> return r
+
     nullmap <- getByteString ((cc + 7) `div` 8)
-    return (TableMapEvent tid flgs schema table cc columnDef columnMeta nullmap)
+    return (TableMapEvent tid flgs schema table cc typs metas nullmap)
 
 data DeleteRowsEvent = DeleteRowsEvent
-    { dreTableId     :: !Word64
-    , dreFlags       :: !Word8
-    -- , dreExtraData   :: !RowsEventExtraData
-    , dreColumnCnt   :: !Int
-    , drePresentMap  :: !ByteString
-    , dreRowData     :: ![ByteString]
-    }
+    { deleteTableId     :: !Word64
+    , deleteFlags       :: !Word16
+    -- , deleteExtraData   :: !RowsEventExtraData
+    , deleteColumnCnt   :: !Int
+    , deletePresentMap  :: !ByteString
+    , deleteRowData     :: ![BinLogValue]
+    } deriving (Show, Eq)
+
+getDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get DeleteRowsEvent
+getDeleteRowEvent fd tme typ = do
+    let hlen = eventHeaderLen fd typ
+    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
+    flgs <- getWord16le
+    when (typ == DELETE_ROWS_EVENTv2) $ do
+        extraLen <- getWord16le
+        void $ getByteString (fromIntegral extraLen - 2)
+    colCnt <- getLenEncInt
+    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    pmap <- getByteString plen
+    let pmap' = if B.null pmap
+                then B.empty
+                else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
+    DeleteRowsEvent tid flgs colCnt pmap' <$> getBinLogRow (tmColumnMeta tme) pmap'
+
+data WriteRowsEvent = WriteRowsEvent
+    { insertTableId     :: !Word64
+    , insertFlags       :: !Word16
+    -- , insertExtraData   :: !RowsEventExtraData
+    , insertColumnCnt   :: !Int
+    , insertPresentMap  :: !ByteString
+    , insertRowData     :: ![BinLogValue]
+    } deriving (Show, Eq)
+
+getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
+getWriteRowEvent fd tme typ = do
+    let hlen = eventHeaderLen fd typ
+    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
+    flgs <- getWord16le
+    when (typ == WRITE_ROWS_EVENTv2) $ do
+        extraLen <- getWord16le
+        void $ getByteString (fromIntegral extraLen - 2)
+    colCnt <- getLenEncInt
+    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    pmap <- getByteString plen
+    let pmap' = if B.null pmap
+                then B.empty
+                else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
+    WriteRowsEvent tid flgs colCnt pmap' <$> getBinLogRow (tmColumnMeta tme) pmap'
 
 --------------------------------------------------------------------------------
 -- | exception tyoe

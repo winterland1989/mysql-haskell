@@ -35,7 +35,12 @@ import Data.Binary.Get
 import Database.MySQL.Protocol.ColumnDef
 
 data BinLogMeta
-    = BINLOG_TYPE_FLOAT       !Word8                -- size
+    = BINLOG_TYPE_TINY
+    | BINLOG_TYPE_SHORT
+    | BINLOG_TYPE_INT24
+    | BINLOG_TYPE_LONG
+    | BINLOG_TYPE_LONGLONG
+    | BINLOG_TYPE_FLOAT       !Word8                -- size
     | BINLOG_TYPE_DOUBLE      !Word8                -- size
     | BINLOG_TYPE_BIT         !Word16 !Word8         -- bits, bytes
     | BINLOG_TYPE_TIMESTAMP
@@ -52,49 +57,55 @@ data BinLogMeta
     | BINLOG_TYPE_BLOB        !Word8                -- length size
     | BINLOG_TYPE_STRING      !Word16               -- meta length(if < 256, then length is 8bit, if > 256 then length is 16bit)
     | BINLOG_TYPE_GEOMETRY    !Word8                -- length size
+  deriving (Show, Eq)
 
 getBinLogMeta :: FieldType -> Get BinLogMeta
-getBinLogMeta MYSQL_TYPE_FLOAT           = BINLOG_TYPE_FLOAT <$> getWord8
-getBinLogMeta MYSQL_TYPE_DOUBLE          = BINLOG_TYPE_DOUBLE <$> getWord8
-getBinLogMeta MYSQL_TYPE_BIT             = do nbits <- getWord8
-                                              nbytes <- getWord8
-                                              let nbits' = (fromIntegral nbytes * 8) + fromIntegral nbits
-                                                  nbytes' = fromIntegral $ (nbits' + 7) `div` 8
-                                              pure $! BINLOG_TYPE_BIT nbits' nbytes'
+getBinLogMeta MYSQL_TYPE_TINY       = pure BINLOG_TYPE_TINY
+getBinLogMeta MYSQL_TYPE_SHORT      = pure BINLOG_TYPE_SHORT
+getBinLogMeta MYSQL_TYPE_INT24      = pure BINLOG_TYPE_INT24
+getBinLogMeta MYSQL_TYPE_LONG       = pure BINLOG_TYPE_LONG
+getBinLogMeta MYSQL_TYPE_LONGLONG   = pure BINLOG_TYPE_LONGLONG
+getBinLogMeta MYSQL_TYPE_FLOAT      = BINLOG_TYPE_FLOAT <$> getWord8
+getBinLogMeta MYSQL_TYPE_DOUBLE     = BINLOG_TYPE_DOUBLE <$> getWord8
+getBinLogMeta MYSQL_TYPE_BIT        = do nbits <- getWord8
+                                         nbytes <- getWord8
+                                         let nbits' = (fromIntegral nbytes * 8) + fromIntegral nbits
+                                             nbytes' = fromIntegral $ (nbits' + 7) `div` 8
+                                         pure $! BINLOG_TYPE_BIT nbits' nbytes'
 
-getBinLogMeta MYSQL_TYPE_TIMESTAMP       = pure BINLOG_TYPE_TIMESTAMP
-getBinLogMeta MYSQL_TYPE_DATETIME        = pure BINLOG_TYPE_DATETIME
-getBinLogMeta MYSQL_TYPE_DATE            = pure BINLOG_TYPE_DATE
-getBinLogMeta MYSQL_TYPE_TIME            = pure BINLOG_TYPE_TIME
-getBinLogMeta MYSQL_TYPE_TIMESTAMP2      = BINLOG_TYPE_TIMESTAMP2 <$> getWord8
-getBinLogMeta MYSQL_TYPE_DATETIME2       = BINLOG_TYPE_DATETIME2 <$> getWord8
-getBinLogMeta MYSQL_TYPE_TIME2           = BINLOG_TYPE_TIME2 <$> getWord8
-getBinLogMeta MYSQL_TYPE_YEAR            = pure BINLOG_TYPE_YEAR
-getBinLogMeta MYSQL_TYPE_NEWDECIMAL      = BINLOG_TYPE_NEWDECIMAL <$> getWord8 <*> getWord8
-getBinLogMeta MYSQL_TYPE_VARCHAR         = BINLOG_TYPE_STRING <$> getWord16le
-getBinLogMeta MYSQL_TYPE_VAR_STRING      = BINLOG_TYPE_STRING <$> getWord16le
-getBinLogMeta MYSQL_TYPE_STRING          = do low <- getWord8
-                                              high <- getWord8
-                                              -- http://bugs.mysql.com/37426
-                                              if high > 0
-                                              then if (high .&. 0x30) /= 0x30
-                                                  then case  word8ToFieldType (high .|. 0x30) of
-                                                      MYSQL_TYPE_STRING ->
-                                                          let len = fromIntegral $ (high .&. 0x30) `xor` 0x30
-                                                              len' = len `shiftL` 4 .|. fromIntegral low
-                                                          in pure $! BINLOG_TYPE_STRING len'
-                                                      _                 ->
-                                                          let len = fromIntegral high `shiftL` 8 :: Word16
-                                                              len' = len .|. fromIntegral low
-                                                          in pure $! BINLOG_TYPE_STRING len'
-                                                  else case word8ToFieldType high of
-                                                      MYSQL_TYPE_SET     -> let nbits = fromIntegral low `shiftL` 3
-                                                                                nbytes = fromIntegral $ (nbits + 7) `shiftR` 8
-                                                                            in pure (BINLOG_TYPE_SET nbits nbytes)
-                                                      MYSQL_TYPE_ENUM    -> pure (BINLOG_TYPE_ENUM low)
-                                                      MYSQL_TYPE_STRING  -> pure (BINLOG_TYPE_STRING (fromIntegral low))
-                                              else pure (BINLOG_TYPE_STRING (fromIntegral low))
+getBinLogMeta MYSQL_TYPE_TIMESTAMP  = pure BINLOG_TYPE_TIMESTAMP
+getBinLogMeta MYSQL_TYPE_DATETIME   = pure BINLOG_TYPE_DATETIME
+getBinLogMeta MYSQL_TYPE_DATE       = pure BINLOG_TYPE_DATE
+getBinLogMeta MYSQL_TYPE_TIME       = pure BINLOG_TYPE_TIME
+getBinLogMeta MYSQL_TYPE_TIMESTAMP2 = BINLOG_TYPE_TIMESTAMP2 <$> getWord8
+getBinLogMeta MYSQL_TYPE_DATETIME2  = BINLOG_TYPE_DATETIME2 <$> getWord8
+getBinLogMeta MYSQL_TYPE_TIME2      = BINLOG_TYPE_TIME2 <$> getWord8
+getBinLogMeta MYSQL_TYPE_YEAR       = pure BINLOG_TYPE_YEAR
+getBinLogMeta MYSQL_TYPE_NEWDECIMAL = BINLOG_TYPE_NEWDECIMAL <$> getWord8 <*> getWord8
+getBinLogMeta MYSQL_TYPE_VARCHAR    = BINLOG_TYPE_STRING <$> getWord16le
+getBinLogMeta MYSQL_TYPE_VAR_STRING = BINLOG_TYPE_STRING <$> getWord16le
+getBinLogMeta MYSQL_TYPE_STRING     = do low <- getWord8
+                                         high <- getWord8
+                                         -- http://bugs.mysql.com/37426
+                                         if high > 0
+                                         then if (high .&. 0x30) /= 0x30
+                                             then case  word8ToFieldType (high .|. 0x30) of
+                                                 MYSQL_TYPE_STRING ->
+                                                     let len = fromIntegral $ (high .&. 0x30) `xor` 0x30
+                                                         len' = len `shiftL` 4 .|. fromIntegral low
+                                                     in pure $! BINLOG_TYPE_STRING len'
+                                                 _                 ->
+                                                     let len = fromIntegral high `shiftL` 8 :: Word16
+                                                         len' = len .|. fromIntegral low
+                                                     in pure $! BINLOG_TYPE_STRING len'
+                                             else case word8ToFieldType high of
+                                                 MYSQL_TYPE_SET     -> let nbits = fromIntegral low `shiftL` 3
+                                                                           nbytes = fromIntegral $ (nbits + 7) `shiftR` 8
+                                                                       in pure (BINLOG_TYPE_SET nbits nbytes)
+                                                 MYSQL_TYPE_ENUM    -> pure (BINLOG_TYPE_ENUM low)
+                                                 MYSQL_TYPE_STRING  -> pure (BINLOG_TYPE_STRING (fromIntegral low))
+                                         else pure (BINLOG_TYPE_STRING (fromIntegral low))
 
-getBinLogMeta MYSQL_TYPE_BLOB            = BINLOG_TYPE_BLOB <$> getWord8
-getBinLogMeta MYSQL_TYPE_GEOMETRY        = BINLOG_TYPE_GEOMETRY <$> getWord8
-getBinLogMeta t                          = fail $ "Database.MySQL.BinLogProtocol.BinLogMeta: impossible type in binlog: " ++ show t
+getBinLogMeta MYSQL_TYPE_BLOB       = BINLOG_TYPE_BLOB <$> getWord8
+getBinLogMeta MYSQL_TYPE_GEOMETRY   = BINLOG_TYPE_GEOMETRY <$> getWord8
+getBinLogMeta t                     = fail $ "Database.MySQL.BinLogProtocol.BinLogMeta: impossible type in binlog: " ++ show t

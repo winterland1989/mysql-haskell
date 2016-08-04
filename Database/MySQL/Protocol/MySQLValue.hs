@@ -29,8 +29,7 @@ import qualified Data.ByteString.Char8 as BC
 import Data.Scientific (Scientific)
 import Data.ByteString.Builder.Scientific (scientificBuilder)
 import qualified Blaze.Text as Textual
-import qualified Data.Bits as Bit
-import Data.Bits ((.|.))
+import Data.Bits
 import Data.Fixed (Pico)
 import Data.Word
 import Data.Int
@@ -321,7 +320,7 @@ putBinaryTime (TimeOfDay hh mm ss) = do let sInt = floor ss
 getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
 getBinaryRow fields flen = do
     _ <- getWord8           -- 0x00
-    let maplen = (flen + 7 + 2) `Bit.shiftR` 3
+    let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
     go fields nullmap (0 :: Int)
   where
@@ -334,11 +333,22 @@ getBinaryRow fields flen = do
         rest <- pos' `seq` go fs nullmap pos'
         return (r `seq` rest `seq` (r : rest))
 
-    isNull nullmap pos =
+    isNull nullmap pos =  -- This 'isNull' is special for offset = 2
         let (i, j) = (pos + 2) `quotRem` 8
-        in (nullmap `B.unsafeIndex` i) `Bit.testBit` j
+        in (nullmap `B.unsafeIndex` i) `testBit` j
 
+-- | We use a 'ByteString' to present a bitmap here, every bit inside a byte is mapped to
+-- a column, the mapping order is following:
+-- byteString: head -> tail
+-- column:     left -> right
+--
 type BitMap = ByteString
+
+-- | test if a position is set
+isBitSet :: BitMap -> Int -> Bool
+isBitSet bitmap pos =
+    let (i, j) = pos `quotRem` 8
+    in (bitmap `B.unsafeIndex` i) `testBit` j
 
 -- | make a nullmap for params without offset.
 --
@@ -350,7 +360,7 @@ makeNullMap values = B.pack (go values 0x00 0)
     go vs             byte   8  = byte : go vs 0x00 0
     go []             byte   _  = [byte]
     go (MySQLNull:vs) byte pos  = let pos' = pos + 1
-                                      byte' = byte .|. Bit.bit pos
+                                      byte' = byte .|. bit pos
                                   in pos' `seq` byte' `seq` go vs byte' pos'
 
     go (_        :vs) byte pos = let pos' = pos + 1 in pos' `seq` go vs byte pos'

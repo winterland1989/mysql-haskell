@@ -72,7 +72,6 @@ query conn@(MySQLConn is os _ consumed) qry = do
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
             p <- readPacket is
-            print p
             if  | isEOF p  -> writeIORef consumed True >> return Nothing
                 | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
                 | otherwise -> Just <$> getFromPacket (getTextRow fields) p
