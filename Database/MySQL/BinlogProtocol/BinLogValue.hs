@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BinaryLiterals #-}
+{-# LANGUAGE MultiWayIf #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -28,8 +30,7 @@ import qualified Data.ByteString.Char8 as BC
 import Data.Scientific (Scientific)
 import Data.ByteString.Builder.Scientific (scientificBuilder)
 import qualified Blaze.Text as Textual
-import qualified Data.Bits as Bit
-import Data.Bits ((.|.))
+import Data.Bits
 import Data.Fixed (Pico)
 import Data.Word
 import Data.Int
@@ -38,165 +39,282 @@ import Data.Time.Calendar (Day, fromGregorian, toGregorian)
 import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 import Data.Binary.Get
 import Data.Binary.Put
-import Database.MySQL.Protocol.ColumnDef
+import Database.MySQL.BinLogProtocol.BinLogMeta
 import Database.MySQL.Protocol.Packet
 import Database.MySQL.Protocol.MySQLValue
 
+-- | This data type DOES NOT try to parse binlog values into detailed haskell values.
+-- Because you may not want to waste performance in situations like database middleware.
+--
+data BinLogValue
+    = BinLogFloat      !Float
+    | BinLogDouble     !Double
+    | BinLogBit        !Word64          -- ^ a 64bit bitmap.
+    | BinLogTimeStamp  !Word32          -- ^ a utc timestamp, note 0 doesn't mean @1970-01-01 00:00:00@,
+                                        -- because mysql choose 0 to present '0000-00-00 00:00:00'
+    | BinLogTimeStamp2 !Word32 !Word32  -- ^ like 'BinLogTimeStamp' with an addtional microseconds field.
+    | BinLogDateTime   !Word16 !Word8 !Word8 !Word8 !Word8 !Word8         -- ^ YYYY MM DD hh mm ss
+    | BinLogDateTime2  !Word16 !Word8 !Word8 !Word8 !Word8 !Word8 !Word32 -- ^ YYYY MM DD hh mm ss microsecond
+    | BinLogDate       !Word16 !Word8 !Word8                              -- ^ YYYY MM DD
+    | BinLogTime       !Word8  !Word16 !Word8 !Word8                      -- ^ sign(1= non-negative, 0= negative) hh mm ss
+    | BinLogTime2      !Word8  !Word16 !Word8 !Word8 !Word32              -- ^ sign(1= non-negative, 0= negative) hh mm ss microsecond
+    | BinLogYear       !Word16                                            -- ^ year value, 0 stand for '0000'
+    | BinLogNewDecimal !Integer !Integer                                  -- ^ integeral part, fractional part
+    | BinLogEnum       !Word16                                            -- ^ enum indexing value
+    | BinLogSet        !Word64                                            -- ^ set indexing 64bit bitmap.
+    | BinLogBlob       !ByteString
+    | BinLogString     !ByteString                                        -- ^ no attempt to do charset decoding here
+    | BinLogGeometry   !ByteString
+    | BinLogNull
+
 --------------------------------------------------------------------------------
 -- | BinLog protocol decoder
-getBinLogField :: ColumnDef -> Get MySQLValue
-getBinLogField f
-    | t == MYSQL_TYPE_NULL              = pure MySQLNull
-    | t == MYSQL_TYPE_DECIMAL
-        || t == MYSQL_TYPE_NEWDECIMAL   = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == MYSQL_TYPE_TINY              = if isUnsigned then MySQLInt8U <$> getWord8
-                                                        else MySQLInt8  <$> getInt8
-    | t == MYSQL_TYPE_SHORT             = if isUnsigned then MySQLInt16U <$> getWord16le
-                                                        else MySQLInt16  <$> getInt16le
-    | t == MYSQL_TYPE_LONG
-        || t == MYSQL_TYPE_INT24        = if isUnsigned then MySQLInt32U <$> getWord32le
-                                                        else MySQLInt32  <$> getInt32le
-    | t == MYSQL_TYPE_YEAR              = MySQLYear . fromIntegral <$> getWord16le
-    | t == MYSQL_TYPE_LONGLONG          = if isUnsigned then MySQLInt64U <$> getWord64le
-                                                        else MySQLInt64  <$> getInt64le
-    | t == MYSQL_TYPE_FLOAT             = MySQLFloat  <$> getFloatle
-    | t == MYSQL_TYPE_DOUBLE            = MySQLDouble <$> getDoublele
-    | t == MYSQL_TYPE_TIMESTAMP
-        || t == MYSQL_TYPE_DATETIME     = do n <- getLenEncInt
-                                             case n of
-                                                0 -> pure $ MySQLDateTime (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
-                                                4 -> do
-                                                    d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                                                    pure $ MySQLDateTime (LocalTime d (TimeOfDay 0 0 0))
-                                                7 -> do
-                                                    d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                                                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4
-                                                    pure $ MySQLDateTime (LocalTime d td)
-                                                11 -> do
-                                                    d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                                                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
-                                                    pure $ MySQLDateTime (LocalTime d td)
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIMESTAMP/DATETIME length"
+--
+getBinLogField :: BinLogMeta -> Get BinLogValue
+getBinLogField (BINLOG_TYPE_FLOAT  size      ) = BinLogFloat <$> getFloatle
+getBinLogField (BINLOG_TYPE_DOUBLE size      ) = BinLogDouble <$> getDoublele
+getBinLogField (BINLOG_TYPE_BIT    bits bytes) = BinLogBit <$> getBits bits bytes
+getBinLogField (BINLOG_TYPE_TIMESTAMP        ) = BinLogTimeStamp <$> getWord32le
 
-    | t == MYSQL_TYPE_TIMESTAMP2        = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIMESTAMP2"
-    | t == MYSQL_TYPE_DATETIME2         = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_DATETIME2"
-    | t == MYSQL_TYPE_DATE
-        || t == MYSQL_TYPE_NEWDATE      = do n <- getLenEncInt
-                                             case n of
-                                                0 -> pure $ MySQLDate (fromGregorian 0 0 0)
-                                                4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong DATE/NEWDATE length"
+-- a integer in @YYYYMMDDhhmmss@, for example:
+-- 99991231235959 stand for @9999-12-31 23:59:59@
+getBinLogField (BINLOG_TYPE_DATETIME         ) = do i <- getWord64le
+                                                    let (yyyy, i')   = i      `quotRem` 10000000000
+                                                        (mm, i'')    = i'     `quotRem` 100000000
+                                                        (dd, i''')   = i''    `quotRem` 1000000
+                                                        (h, i'''')   = i'''   `quotRem` 10000
+                                                        (m, s)       = i''''  `quotRem` 100
+                                                    pure (BinLogDateTime (fromIntegral yyyy)
+                                                                         (fromIntegral mm)
+                                                                         (fromIntegral dd)
+                                                                         (fromIntegral h)
+                                                                         (fromIntegral m)
+                                                                         (fromIntegral s))
 
-    | t == MYSQL_TYPE_TIME              = do n <- getLenEncInt
-                                             case n of
-                                                0 -> pure $ MySQLTime (TimeOfDay 0 0 0)
-                                                8 -> do
-                                                    _ <- getWord8  -- we ignore sign here because 'TimeOfDay' doesn't support,
-                                                    _ <- getWord32le   -- we also ignore the day part
-                                                    MySQLTime <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4)
+-- ^ a integer in @YYYYMMDD@ format, for example:
+-- 99991231 stand for @9999-12-31@
+getBinLogField (BINLOG_TYPE_DATE             ) = do i <- getWord24le
+                                                    let (yyyy, i')   = i      `quotRem` 10000000000
+                                                        (mm, dd)     = i'     `quotRem` 100000000
+                                                    pure (BinLogDate (fromIntegral yyyy)
+                                                                     (fromIntegral mm)
+                                                                     (fromIntegral dd))
 
-                                                12 -> do
-                                                    _ <- getWord8  -- we ignore sign here because 'TimeOfDay' doesn't support,
-                                                    _ <- getWord32le   -- we also ignore the day part
-                                                    MySQLTime <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8)
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIME length"
+-- ^ a integer in @hhmmss@ format(can be negative), for example:
+-- 8385959 stand for @838:59:59@
+getBinLogField (BINLOG_TYPE_TIME             ) = do i <- getWord24le
+                                                    let i' =  fromIntegral i :: Int32
+                                                        sign = if i' >= 0 then 0 else 1
+                                                        ui = abs i
+                                                    let (h, ui')     = ui     `quotRem` 10000
+                                                        (m, s)       = ui'    `quotRem` 100
+                                                    pure (BinLogTime sign (fromIntegral h)
+                                                                          (fromIntegral m)
+                                                                          (fromIntegral s))
 
-    | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIME2"
-    | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
-    | t == MYSQL_TYPE_VARCHAR
-        || t == MYSQL_TYPE_BIT
-        || t == MYSQL_TYPE_ENUM
-        || t == MYSQL_TYPE_SET
-        || t == MYSQL_TYPE_TINY_BLOB
-        || t == MYSQL_TYPE_MEDIUM_BLOB
-        || t == MYSQL_TYPE_LONG_BLOB
-        || t == MYSQL_TYPE_BLOB
-        || t == MYSQL_TYPE_VAR_STRING
-        || t == MYSQL_TYPE_STRING       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
-                                                    else MySQLBytes <$> getLenEncBytes
+getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp  ) = do s <- getWord32be -- big-endian here!
+                                                    ms <- getMicroSecond fsp
+                                                    pure (BinLogTimeStamp2 s ms)
+-- BINLOG_TYPE_DATETIME2(big endian)
+--
+-- 1 bit sign (used when on disk)
+-- 17 bits year * 13 + month (year 0-9999, month 0-12)
+-- 5 bits day (0-31)
+-- 5 bits hour (0-23)
+-- 6 bits minute (0-59)
+-- 6 bits second (0-59)
+-- (5 bytes in total)
+--
+-- fractional-seconds storage (size depends on meta)
+--
+getBinLogField (BINLOG_TYPE_DATETIME2   fsp  ) = do iPart <- getWord40be
+                                                    let yyyymm = iPart `shiftR` 22 .&. 0b011111111111111111
+                                                        (yyyy, mm) = yyyymm `quotRem` 13
+                                                        yyyy' = fromIntegral yyyy
+                                                        mm' = fromIntegral mm
+                                                        dd = fromIntegral $ iPart `shiftR` 17 .&. 0b00011111
+                                                        h =  fromIntegral $ iPart `shiftR` 12 .&. 0b00011111
+                                                        m =  fromIntegral $ iPart `shiftR` 6 .&. 0b00111111
+                                                        s =  fromIntegral $ iPart .&. 0b00111111
+                                                    ms <- getMicroSecond fsp
+                                                    pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
   where
-    t = columnType f
-    isUnsigned = flagUnsigned (columnFlags f)
-    isText = columnCharSet f /= 63
-    -- please check https://github.com/jeremycole/mysql_binlog
-    fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
-    getYear :: Get Integer
-    getYear = fromIntegral <$> getWord16le
-    getInt8' :: Get Int
-    getInt8' = fromIntegral <$> getWord8
-    getSecond4 :: Get Pico
-    getSecond4 = realToFrac <$> getWord8
-    getSecond8 :: Get Pico
-    getSecond8 = realToFrac <$> do
-        s <- getInt8'
-        ms <- fromIntegral <$> getWord32le :: Get Int
-        pure $! (realToFrac s + realToFrac ms / 1000 :: Double)
+    getWord40be :: Get Word64
+    getWord40be = do
+        a <- getWord8
+        b <- getWord32be
+        pure (fromIntegral a `shiftL` 8  .|. fromIntegral b)
 
-    feedLenEncBytes typ con parser = do
-        bs <- getLenEncBytes
-        case parser bs of
-            Just v -> return (con v)
-            Nothing -> fail $ "Database.MySQL.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
+-- BINLOG_TYPE_TIME2(big endian)
+--
+-- 1 bit sign  (1= non-negative, 0= negative)
+-- 1 bit unused (Reserved for wider hour range, e.g. for intervals)
+-- 10 bit hour (0-836)
+-- 6 bit minute (0-59)
+-- 6 bit second (0-59)
+-- (3 bytes in total)
+--
+-- fractional-seconds storage (size depends on meta)
+--
+getBinLogField (BINLOG_TYPE_TIME2       fsp  ) = do iPart <- getWord24be
+                                                    let sign = fromIntegral $ iPart `shiftR` 23
+                                                        h = (fromIntegral $ iPart `shiftR` 12) .&. 0b0000001111111111
+                                                        m = (fromIntegral $ iPart `shiftR` 6) .&. 0b00111111
+                                                        s = (fromIntegral $ iPart) .&. 0b00111111
+                                                    ms <- getMicroSecond fsp
+                                                    pure (BinLogTime2 sign h m s ms)
+
+getBinLogField (BINLOG_TYPE_YEAR             ) = do y <- getWord8
+                                                    pure $! if y == 0 then BinLogYear 0 else BinLogYear (1900 + fromIntegral y)
+
+-- Decimal representation in binlog seems to be as follows:
+--
+-- 1st bit - sign such that set == +, unset == -
+-- every 4 bytes represent 9 digits in big-endian order, so that
+-- if you print the values of these quads as big-endian integers one after
+-- another, you get the whole number string representation in decimal. What
+-- remains is to put a sign and a decimal dot.
+--
+-- 80 00 00 05 1b 38 b0 60 00 means:
+--
+--   0x80 - positive
+--   0x00000005 - 5
+--   0x1b38b060 - 456700000
+--   0x00       - 0
+--
+-- 54567000000 / 10^{10} = 5.4567
+--
+-- if there're < 9 digits at first, it will be compressed into suitable length words
+-- following a simple lookup table.
+--
+getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do let i = fromIntegral (precision - scale)
+                                                                  (ucI, cI) = i `quotRem` digitsPerInteger
+                                                                  (ucF, cF) = scale `quotRem` digitsPerInteger
+                                                                  ucISize = fromIntegral (ucI `shiftL` 2)
+                                                                  ucFSize = fromIntegral (ucF `shiftL` 2)
+                                                                  cISize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cI)
+                                                                  cFSize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cF)
+                                                                  len = ucISize + cISize + ucFSize + cFSize
+
+                                                              buf <- getByteString (fromIntegral len)
+
+                                                              let fb = buf `B.unsafeIndex` 0
+                                                                  sign = if fb .&. 0x80 /= 0 then 0 else -1
+                                                                  buf' = if sign == 0 then buf
+                                                                                      else B.map (xor 0xFF) buf
+
+                                                                  iPart = fromIntegral (getCompressed cISize (B.unsafeTake cISize buf'))
+                                                                        + getUncompressed ucI (B.unsafeDrop cISize buf')
+
+                                                                  fPart = getUncompressed ucF (B.unsafeTake ucFSize buf')
+                                                                        + fromIntegral (getCompressed cFSize (B.unsafeDrop ucFSize buf'))
+
+                                                              pure (BinLogNewDecimal iPart fPart)
+  where
+    digitsPerInteger = 9
+    sizeTable = B.pack [0, 1, 1, 2, 2, 3, 3, 4, 4, 4]
+
+    getCompressed :: Int -> ByteString -> Word64
+    getCompressed 0 _  = 0
+    getCompressed x bs = let fb = bs `B.unsafeIndex` 0
+                             x' = x - 1
+                         in fromIntegral fb `shiftL` (8 * x') .|. getCompressed x' (B.unsafeDrop 1 bs)
+
+    getUncompressed :: Word8 -> ByteString -> Integer
+    getUncompressed 0 _ = 0
+    getUncompressed x bs = let v = getCompressed 4 (B.unsafeTake 4 bs)
+                               x' = x - 1
+                           in fromIntegral v * (1e9 ^ x) + getUncompressed x' (B.unsafeDrop 4 bs)
+
+
+getBinLogField (BINLOG_TYPE_ENUM     size    ) = if | size == 1 -> BinLogEnum . fromIntegral <$> getWord8
+                                                    | size == 2 -> BinLogEnum . fromIntegral <$> getWord16be
+                                                    | otherwise -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: wrong \
+                                                                          \BINLOG_TYPE_ENUM size: " ++ show size
+
+
+getBinLogField (BINLOG_TYPE_SET    bits bytes) = BinLogSet <$> getBits bits bytes
+getBinLogField (BINLOG_TYPE_BLOB   lensize   ) = do len <- if | lensize == 1 -> fromIntegral <$> getWord8
+                                                              | lensize == 2 -> fromIntegral <$> getWord16le
+                                                              | lensize == 3 -> fromIntegral <$> getWord24le
+                                                              | lensize == 4 -> fromIntegral <$> getWord32le
+                                                              | otherwise    -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                                                                        \wrong BINLOG_TYPE_BLOB length size: "
+                                                                                        ++ show lensize
+                                                    BinLogBlob <$> getByteString len
+
+getBinLogField (BINLOG_TYPE_STRING   size    ) = do len <- if | size < 256 -> fromIntegral <$> getWord8
+                                                              | otherwise  -> fromIntegral <$> getWord16le
+                                                    BinLogString <$> getByteString len
+
+getBinLogField (BINLOG_TYPE_GEOMETRY lensize ) = do len <- if | lensize == 1 -> fromIntegral <$> getWord8
+                                                              | lensize == 2 -> fromIntegral <$> getWord16le
+                                                              | lensize == 3 -> fromIntegral <$> getWord24le
+                                                              | lensize == 4 -> fromIntegral <$> getWord32le
+                                                              | otherwise    -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                                                                        \wrong BINLOG_TYPE_GEOMETRY length size: "
+                                                                                        ++ show lensize
+                                                    BinLogGeometry <$> getByteString len
+
+getMicroSecond :: Word8 -> Get Word32
+getMicroSecond 0 = pure 0
+getMicroSecond 1 = (* 100000) . fromIntegral <$> getWord8
+getMicroSecond 2 = (* 10000) . fromIntegral <$> getWord8
+getMicroSecond 3 = (* 1000) . fromIntegral <$> getWord16be
+getMicroSecond 4 = (* 100) . fromIntegral <$> getWord16be
+getMicroSecond 5 = (* 10) . fromIntegral <$> getWord24be
+getMicroSecond 6 = fromIntegral <$> getWord24be
+getMicroSecond _ = pure 0
+
+getBits :: Word16 -> Word8 -> Get Word64
+getBits bits bytes = do
+    if bits == 0
+    then fromIntegral <$> getWord8
+    else if | bytes == 1 -> fromIntegral <$> getWord8
+            | bytes == 2 -> fromIntegral <$> getWord16le
+            | bytes == 3 -> fromIntegral <$> getWord24le
+            | bytes == 4 -> fromIntegral <$> getWord32le
+            | bytes == 5 -> fromIntegral <$> getWord40le
+            | bytes == 6 -> fromIntegral <$> getWord48le
+            | bytes == 7 -> fromIntegral <$> getWord56le
+            | bytes == 7 -> fromIntegral <$> getWord64le
+            | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: wrong bit length size: " ++ show bytes
+
+  where
+    getWord40le, getWord48le, getWord56le :: Get Word64
+    getWord40le = do
+        a <- fromIntegral <$> getWord32le
+        b <- fromIntegral <$> getWord8
+        return $! a .|. (b `shiftL` 32)
+    getWord48le = do
+        a <- fromIntegral <$> getWord32le
+        b <- fromIntegral <$> getWord16le
+        return $! a .|. (b `shiftL` 32)
+    getWord56le = do
+        a <- fromIntegral <$> getWord32le
+        b <- fromIntegral <$> getWord24le
+        return $! a .|. (b `shiftL` 32)
 
 --------------------------------------------------------------------------------
 -- | BinLog row decoder
 --
-getBinLogRow :: [ColumnDef] -> Int -> Get [MySQLValue]
-getBinLogRow fields flen = do
+getBinLogRow :: [BinLogMeta] -> Int -> Get [BinLogValue]
+getBinLogRow metas flen = do
     _ <- getWord8           -- 0x00
-    let maplen = (flen + 7 + 2) `Bit.shiftR` 3
+    let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
-    go fields nullmap (0 :: Int)
+    go metas nullmap (0 :: Int)
   where
     go [] _       _        = pure []
     go (f:fs) nullmap pos = do
         r <- if isNull nullmap pos
-                then return MySQLNull
+                then return BinLogNull
                 else getBinLogField f
         let pos' = pos + 1
         rest <- pos' `seq` go fs nullmap pos'
         return (r `seq` rest `seq` (r : rest))
 
     isNull nullmap pos =
-        let (i, j) = (pos + 2) `divMod` 8
-        in (nullmap `B.unsafeIndex` i) `Bit.testBit` j
-
---------------------------------------------------------------------------------
--- | BinLog protocol encoder
---
-putBinLogField :: MySQLValue -> Put
-putBinLogField (MySQLDecimal    n) = putBuilder (scientificBuilder n)
-putBinLogField (MySQLInt8U      n) = putWord8 n
-putBinLogField (MySQLInt8       n) = putWord8 (fromIntegral n)
-putBinLogField (MySQLInt16U     n) = putWord16le n
-putBinLogField (MySQLInt16      n) = putInt16le n
-putBinLogField (MySQLInt32U     n) = putWord32le n
-putBinLogField (MySQLInt32      n) = putInt32le n
-putBinLogField (MySQLInt64U     n) = putWord64le n
-putBinLogField (MySQLInt64      n) = putInt64le n
-putBinLogField (MySQLFloat      x) = putFloatle x
-putBinLogField (MySQLDouble     x) = putDoublele x
-putBinLogField (MySQLYear       n) = putWord16le n
-putBinLogField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
-                                                           putBinLogDay date
-                                                           putBinLogTime time
-putBinLogField (MySQLDate   d)    = putBinLogDay d
-putBinLogField (MySQLTime   t)    = putBinLogTime t
-putBinLogField (MySQLBytes    bs) = putLenEncBytes bs
-putBinLogField (MySQLText      t) = putLenEncBytes (T.encodeUtf8 t)
-putBinLogField MySQLNull          = return ()
-
-putBinLogDay :: Day -> Put
-putBinLogDay d = do let (yyyy, mm, dd) = toGregorian d
-                    putWord16le (fromIntegral yyyy)
-                    putWord8 (fromIntegral mm)
-                    putWord8 (fromIntegral dd)
-
-putBinLogTime :: TimeOfDay -> Put
-putBinLogTime (TimeOfDay hh mm ss) = do let sInt = floor ss
-                                            sFrac = floor $ (ss - realToFrac sInt) * 1000000
-                                        putWord8 (fromIntegral hh)
-                                        putWord8 (fromIntegral mm)
-                                        putWord8 sInt
-                                        putWord64le sFrac
+        let (i, j) = (pos + 2) `quotRem` 8
+        in (nullmap `B.unsafeIndex` i) `testBit` j
 

@@ -24,6 +24,7 @@ library
                     ,   Database.MySQL.BinLog
                     ,   Database.MySQL.BinLogProtocol.BinLogEvent
                     ,   Database.MySQL.BinLogProtocol.BinLogValue
+                    ,   Database.MySQL.BinLogProtocol.BinLogMeta
 
   -- other-modules:       
   -- other-extensions:    

@@ -27,13 +27,13 @@ data Packet = Packet
 
 putPacket :: Packet -> Put
 putPacket (Packet len seqN body)  = do
-    putWord24le len
+    putWord24le (fromIntegral len)
     putWord8 seqN
     putLazyByteString body
 
 getPacket :: Get Packet
 getPacket = do
-    len <- getWord24le
+    len <- fromIntegral <$> getWord24le
     seqN <- getWord8
     body <- getLazyByteString (fromIntegral len)
     return (Packet len seqN body)
@@ -197,33 +197,33 @@ putLenEncInt x
          | x < 16777216  = putWord24le (fromIntegral x)
          | otherwise     = putWord64le (fromIntegral x)
 
-putWord24le :: Int -> Put
+putWord24le :: Word32 -> Put
 putWord24le v = do
     putWord16le $ fromIntegral v
     putWord8 $ fromIntegral (v `shiftR` 16)
 
-getWord24le :: Get Int
+getWord24le :: Get Word32
 getWord24le = do
     a <- fromIntegral <$> getWord16le
     b <- fromIntegral <$> getWord8
     return $! a .|. (b `shiftL` 16)
-
-putWord48le :: Word64 -> Put
-putWord48le v = do
-    putWord32le $ fromIntegral v
-    putWord16le $ fromIntegral (v `shiftR` 32)
-
-getWord48le :: Get Word64
-getWord48le = do
-    a <- fromIntegral <$> getWord32le
-    b <- fromIntegral <$> getWord16le
-    return $! a .|. (b `shiftL` 32)
 
 getByteStringNul :: Get ByteString
 getByteStringNul = L.toStrict <$> getLazyByteStringNul
 
 getRemainingByteString :: Get ByteString
 getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
+
+getWord24be :: Get Word32
+getWord24be = do
+    a <- fromIntegral <$> getWord16be
+    b <- fromIntegral <$> getWord8
+    return $! b .|. (a `shiftL` 8)
+
+putWord24be :: Word32 -> Put
+putWord24be v = do
+    putWord16be $ fromIntegral (v `shiftR` 8)
+    putWord8 $ fromIntegral v
 
 --------------------------------------------------------------------------------
 -- |the root exception type for all the mysql exceptions

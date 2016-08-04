@@ -10,9 +10,8 @@ Roadmap:
 - [x] binary protocol decoding
 - [x] binlog listening
 - [x] basic binlog parsing
-- [ ] support some new binary types: `TIMESTAMP2/DATETIME2...`
-- [ ] full binlog parsing 
 - [ ] comprehensive testsuit and benchmark
+- [x] full binlog parsing 
 - [ ] polish and stablize API
 - [ ] tls support
 
@@ -40,23 +39,25 @@ cd mysql-haskell
 cabal new-build
 ```
 
-or use whatever tools you like, currently i didn't add `stack.yml` though. 
+You can use `stack` or `cabal.project` file to add extra dependency.
 
 Guide
 -----
 
-Currently document is extremely lacking, you may find something you need in `Database.MySQL.Protocol.Base` module.
+Currently document is extremely lacking, you may find something you need in `Database.MySQL.Base` module.
 
 Reference
 ---------
 
-[Mysql official site](https://dev.mysql.com/doc/internals/en/) provided intensive document, but without following project, `mysql-haskell` may not be written at all:
+[MySQL official site](https://dev.mysql.com/doc/internals/en/) provided intensive document, but without following project, `mysql-haskell` may not be written at all:
+
++ [mysql-binlog-connector-java](https://github.com/shyiko/mysql-binlog-connector-java)
+
++ [canal](https://github.com/alibaba/canal)
 
 + [go mysql toolkit](https://github.com/siddontang/go-mysql)
 
 + [python binlog parser](https://github.com/noplay/python-mysql-replication)
-
-+ [ruby binlog parser](https://github.com/jeremycole/mysql_binlog)
 
 License
 -------

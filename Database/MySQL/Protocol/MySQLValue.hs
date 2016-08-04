@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -147,7 +148,7 @@ getTextField f
             then return MySQLNull
             else case parser bs of
                 Just v -> return (con v)
-                Nothing -> fail $ "Database.MySQL.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
+                Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
 
 --------------------------------------------------------------------------------
 -- | Text protocol encoder
@@ -214,16 +215,16 @@ getBinaryField f
                                                     d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
                                                     td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
                                                     pure $ MySQLDateTime (LocalTime d td)
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIMESTAMP/DATETIME length"
+                                                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP/DATETIME length"
 
-    | t == MYSQL_TYPE_TIMESTAMP2        = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIMESTAMP2"
-    | t == MYSQL_TYPE_DATETIME2         = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_DATETIME2"
+    | t == MYSQL_TYPE_TIMESTAMP2        = fail "Database.MySQL.Protocol.MySQLValue: unexpected type MYSQL_TYPE_TIMESTAMP2"
+    | t == MYSQL_TYPE_DATETIME2         = fail "Database.MySQL.Protocol.MySQLValue: unexpected type MYSQL_TYPE_DATETIME2"
     | t == MYSQL_TYPE_DATE
         || t == MYSQL_TYPE_NEWDATE      = do n <- getLenEncInt
                                              case n of
                                                 0 -> pure $ MySQLDate (fromGregorian 0 0 0)
                                                 4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong DATE/NEWDATE length"
+                                                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATE/NEWDATE length"
 
     | t == MYSQL_TYPE_TIME              = do n <- getLenEncInt
                                              case n of
@@ -237,9 +238,9 @@ getBinaryField f
                                                     _ <- getWord8  -- we ignore sign here because 'TimeOfDay' doesn't support,
                                                     _ <- getWord32le   -- we also ignore the day part
                                                     MySQLTime <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8)
-                                                _ -> fail "Database.MySQL.MySQLValue: wrong TIME length"
+                                                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
-    | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.MySQLValue: unexpected type MYSQL_TYPE_TIME2"
+    | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.Protocol.MySQLValue: unexpected type MYSQL_TYPE_TIME2"
     | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
         || t == MYSQL_TYPE_BIT
@@ -256,7 +257,6 @@ getBinaryField f
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
     isText = columnCharSet f /= 63
-    -- please check https://github.com/jeremycole/mysql_binlog
     fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
     getYear :: Get Integer
     getYear = fromIntegral <$> getWord16le
@@ -274,7 +274,7 @@ getBinaryField f
         bs <- getLenEncBytes
         case parser bs of
             Just v -> return (con v)
-            Nothing -> fail $ "Database.MySQL.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
+            Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
 
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
@@ -335,7 +335,7 @@ getBinaryRow fields flen = do
         return (r `seq` rest `seq` (r : rest))
 
     isNull nullmap pos =
-        let (i, j) = (pos + 2) `divMod` 8
+        let (i, j) = (pos + 2) `quotRem` 8
         in (nullmap `B.unsafeIndex` i) `Bit.testBit` j
 
 type BitMap = ByteString
