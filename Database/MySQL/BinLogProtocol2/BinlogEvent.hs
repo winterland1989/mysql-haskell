@@ -15,17 +15,13 @@ import           Data.Bits
 import           Data.ByteString         (ByteString)
 import qualified Data.ByteString         as B
 import qualified Data.ByteString.Unsafe  as B
-import qualified Data.ByteString.Char8   as BC
 import qualified Data.ByteString.Lazy    as L
 import           Database.MySQL.Protocol
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
-import           Data.Vector.Unboxed (Vector)
-
 
 import Control.Exception (throwIO, Exception(..))
 import Data.Typeable (Typeable)
-import Debug.Trace
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -69,25 +65,25 @@ data BinLogEventType
     | PREVIOUS_GTIDS_EVENT
   deriving (Show, Eq, Enum)
 
-data BinLogEvent = BinLogEvent
-    { bleTimestamp :: !Word32
-    , bleEventType :: !BinLogEventType
-    , bleServerId  :: !Word32
-    , bleEventSize :: !Word32
-    , bleLogPos    :: !Word32
-    , bleFlags     :: !Word16
-    , bleBody      :: !L.ByteString
-    , bleSemiAck   :: !Bool
+data BinLogPacket = BinLogPacket
+    { blTimestamp :: !Word32
+    , blEventType :: !BinLogEventType
+    , blServerId  :: !Word32
+    , blEventSize :: !Word32
+    , blLogPos    :: !Word32
+    , blFlags     :: !Word16
+    , blBody      :: !L.ByteString
+    , blSemiAck   :: !Bool
     } deriving (Show, Eq)
 
 putSemiAckResp :: Word32 -> ByteString -> Put
 putSemiAckResp pos fn = put pos >> put fn
 
-isFakeBinLogEvent :: BinLogEvent -> Bool
-isFakeBinLogEvent (BinLogEvent ts _ _ _ _ _ _ _) = ts == 0
+isFakeBinLogEvent :: BinLogPacket -> Bool
+isFakeBinLogEvent (BinLogPacket ts _ _ _ _ _ _ _) = ts == 0
 
-getBinLogEvent :: Bool -> Bool -> Get BinLogEvent
-getBinLogEvent checksum semi = do
+getBinLogPacket :: Bool -> Bool -> Get BinLogPacket
+getBinLogPacket checksum semi = do
     _  <- getWord8     -- OK byte
     ack <- if semi
         then getWord8 >> (== 0x01) <$> getWord8
@@ -99,22 +95,22 @@ getBinLogEvent checksum semi = do
     pos <- getWord32le
     flgs <- getWord16le
     body <- getLazyByteString (fromIntegral size - if checksum then 23 else 19)
-    return (BinLogEvent ts typ sid size pos flgs body ack)
+    return (BinLogPacket ts typ sid size pos flgs body ack)
 
-getFromBinLogEvent :: Get a -> BinLogEvent -> IO a
-getFromBinLogEvent g (BinLogEvent _ typ _ _ _ _ body _ ) =
+getFromBinLogPacket :: Get a -> BinLogPacket -> IO a
+getFromBinLogPacket g (BinLogPacket _ typ _ _ _ _ body _ ) =
     case runGetOrFail g body of
         Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
         Right (_, _, r)            -> return r
 
-getFromBinLogEvent' :: (BinLogEventType -> Get a) -> BinLogEvent -> IO a
-getFromBinLogEvent' g (BinLogEvent _ typ _ _ _ _ body _ ) =
+getFromBinLogPacket' :: (BinLogEventType -> Get a) -> BinLogPacket -> IO a
+getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
     case runGetOrFail (g typ) body of
         Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
         Right (_, _, r)            -> return r
 
 --------------------------------------------------------------------------------
--- | BinLogEvent item type
+-- | BinLogPacket item type
 
 data FormatDescription = FormatDescription
     { fdVersion      :: !Word16
@@ -192,8 +188,8 @@ getTableMapEvent fd = do
     colMetaBS <- getLenEncBytes
 
     metas <- case runGetOrFail (forM typs getBinLogMeta) (L.fromStrict colMetaBS) of
-        Left (buf, offset, errmsg) -> fail errmsg
-        Right (_, _, r)            -> return r
+        Left (_, _, errmsg) -> fail errmsg
+        Right (_, _, r)     -> return r
 
     nullmap <- getByteString ((cc + 7) `div` 8)
     return (TableMapEvent tid flgs schema table cc typs metas nullmap)
@@ -217,19 +213,16 @@ getDeleteRowEvent fd tme typ = do
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
-    pmap <- getByteString plen
-    let pmap' = if B.null pmap
-                then B.empty
-                else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
-    DeleteRowsEvent tid flgs colCnt pmap' <$> getBinLogRow (tmColumnMeta tme) pmap'
+    pmap <- getPresentMap plen poffset
+    DeleteRowsEvent tid flgs colCnt pmap <$> getBinLogRow (tmColumnMeta tme) pmap
 
 data WriteRowsEvent = WriteRowsEvent
-    { insertTableId     :: !Word64
-    , insertFlags       :: !Word16
-    -- , insertExtraData   :: !RowsEventExtraData
-    , insertColumnCnt   :: !Int
-    , insertPresentMap  :: !ByteString
-    , insertRowData     :: ![BinLogValue]
+    { writeTableId     :: !Word64
+    , writeFlags       :: !Word16
+    -- , writeExtraData   :: !RowsEventExtraData
+    , writeColumnCnt   :: !Int
+    , writePresentMap  :: !ByteString
+    , writeRowData     :: ![BinLogValue]
     } deriving (Show, Eq)
 
 getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
@@ -242,16 +235,47 @@ getWriteRowEvent fd tme typ = do
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    pmap <- getPresentMap plen poffset
+    WriteRowsEvent tid flgs colCnt pmap <$> getBinLogRow (tmColumnMeta tme) pmap
+
+data UpdateRowsEvent = UpdateRowsEvent
+    { updateTableId     :: !Word64
+    , updateFlags       :: !Word16
+    -- , updateExtraData   :: !RowsEventExtraData
+    , updateColumnCnt   :: !Int
+    , updatePresentMap  :: !ByteString
+    , updatePresentMap' :: !ByteString
+    , updateRowData     :: ![BinLogValue]
+    , updateRowData'    :: ![BinLogValue]
+    } deriving (Show, Eq)
+
+getUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get UpdateRowsEvent
+getUpdateRowEvent fd tme typ = do
+    let hlen = eventHeaderLen fd typ
+    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
+    flgs <- getWord16le
+    when (typ == UPDATE_ROWS_EVENTv2) $ do
+        extraLen <- getWord16le
+        void $ getByteString (fromIntegral extraLen - 2)
+    colCnt <- getLenEncInt
+    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    pmap <- getPresentMap plen poffset
+    pmap' <- getPresentMap plen poffset
+    UpdateRowsEvent tid flgs colCnt pmap pmap' <$> getBinLogRow (tmColumnMeta tme) pmap
+                                               <*> getBinLogRow (tmColumnMeta tme) pmap'
+
+getPresentMap :: Int -> Int -> Get BitMap
+getPresentMap plen poffset = do
     pmap <- getByteString plen
     let pmap' = if B.null pmap
                 then B.empty
                 else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
-    WriteRowsEvent tid flgs colCnt pmap' <$> getBinLogRow (tmColumnMeta tme) pmap'
+    pure pmap'
 
 --------------------------------------------------------------------------------
 -- | exception tyoe
 
-data UnexpectedBinLogEvent = UnexpectedBinLogEvent BinLogEvent
+data UnexpectedBinLogEvent = UnexpectedBinLogEvent BinLogPacket
     deriving (Show, Typeable)
 instance Exception UnexpectedBinLogEvent where
     toException   = mysqlExceptionToException

@@ -61,8 +61,8 @@ connect ci@(ConnInfo host port _ _ _ tls) =
             greet <- decodeFromPacket p
             let auth = mkAuth ci greet
             Binary.putToStream (Just (encodeToPacket auth 1)) os
-            p <- readPacket is'
-            if isOK p
+            p' <- readPacket is'
+            if isOK p'
             then do
                 consumed <- newIORef True
                 return (MySQLConn is' os' (N.close sock) consumed)
