@@ -29,6 +29,8 @@ library
   -- other-modules:       
   -- other-extensions:    
   build-depends:        base >=4.8 && <5
+                    ,   transformers
+                    ,   monad-loops
                     ,   network
                     ,   io-streams
                     ,   tcp-streams   >= 0.2.3

@@ -23,8 +23,8 @@ module Database.MySQL.Base
     , close
     , ping
       -- * direct query
-    , execute
-    , query
+    , executeRaw
+    , queryRaw
       -- * prepared query statement
     , prepareStmt
     , executeStmt
@@ -48,8 +48,8 @@ import qualified System.IO.Streams        as Stream
 
 -- | Execute a MySQL query which don't return a resultSet.
 --
-execute :: MySQLConn -> ByteString -> IO OK
-execute conn qry = command conn (COM_QUERY qry)
+executeRaw :: MySQLConn -> ByteString -> IO OK
+executeRaw conn qry = command conn (COM_QUERY qry)
 
 {-
 executeBatch :: MySQL -> OutputStream ByteString -> IO (InputStream OK)
@@ -58,8 +58,8 @@ executeBatch
 
 -- | Execute a MySQL query which return a resultSet.
 --
-query :: MySQLConn -> ByteString -> IO ([ColumnDef], InputStream [MySQLValue])
-query conn@(MySQLConn is os _ consumed) qry = do
+queryRaw :: MySQLConn -> ByteString -> IO ([ColumnDef], InputStream [MySQLValue])
+queryRaw conn@(MySQLConn is os _ consumed) qry = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
     p <- readPacket is
@@ -71,10 +71,10 @@ query conn@(MySQLConn is os _ consumed) qry = do
         _ <- readPacket is -- eof packet, we don't verify this though
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
-            p <- readPacket is
-            if  | isEOF p  -> writeIORef consumed True >> return Nothing
-                | isERR p  -> decodeFromPacket p >>=throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getTextRow fields) p
+            p' <- readPacket is
+            if  | isEOF p'  -> writeIORef consumed True >> return Nothing
+                | isERR p'  -> decodeFromPacket p' >>=throwIO . ERRException
+                | otherwise -> Just <$> getFromPacket (getTextRow fields) p'
         return (fields, rows)
 
 -- | Ask MySQL to prepare a query statement.
@@ -113,7 +113,7 @@ resetStmt (MySQLConn is os _ consumed) stid = do
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
-executeStmt conn@(MySQLConn is os _ consumed) stid params = do
+executeStmt conn@(MySQLConn is os _ _) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params) os
     p <- readPacket is
@@ -142,4 +142,5 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
                 | isOK  p  -> Just <$> getFromPacket (getBinaryRow fields len) p
                 | otherwise -> throwIO (UnexpectedPacket p)
         return (fields, rows)
+
 

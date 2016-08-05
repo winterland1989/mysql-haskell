@@ -8,6 +8,7 @@
 module Database.MySQL.BinLogProtocol.BinLogEvent where
 
 import           Control.Monad
+import           Control.Monad.Loops    (untilM)
 import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
@@ -27,42 +28,42 @@ import Data.Typeable (Typeable)
 -- | binlog tyoe
 --
 data BinLogEventType
-    = UNKNOWN_EVENT
-    | START_EVENT_V3
-    | QUERY_EVENT
-    | STOP_EVENT
-    | ROTATE_EVENT
-    | INTVAR_EVENT
-    | LOAD_EVENT
-    | SLAVE_EVENT
-    | CREATE_FILE_EVENT
-    | APPEND_BLOCK_EVENT
-    | EXEC_LOAD_EVENT
-    | DELETE_FILE_EVENT
-    | NEW_LOAD_EVENT
-    | RAND_EVENT
-    | USER_VAR_EVENT
-    | FORMAT_DESCRIPTION_EVENT
-    | XID_EVENT
-    | BEGIN_LOAD_QUERY_EVENT
-    | EXECUTE_LOAD_QUERY_EVENT
-    | TABLE_MAP_EVENT
-    | WRITE_ROWS_EVENTv0
-    | UPDATE_ROWS_EVENTv0
-    | DELETE_ROWS_EVENTv0
-    | WRITE_ROWS_EVENTv1
-    | UPDATE_ROWS_EVENTv1
-    | DELETE_ROWS_EVENTv1
-    | INCIDENT_EVENT
-    | HEARTBEAT_EVENT
-    | IGNORABLE_EVENT
-    | ROWS_QUERY_EVENT
-    | WRITE_ROWS_EVENTv2
-    | UPDATE_ROWS_EVENTv2
-    | DELETE_ROWS_EVENTv2
-    | GTID_EVENT
-    | ANONYMOUS_GTID_EVENT
-    | PREVIOUS_GTIDS_EVENT
+    = BINLOG_UNKNOWN_EVENT
+    | BINLOG_START_EVENT_V3
+    | BINLOG_QUERY_EVENT
+    | BINLOG_STOP_EVENT
+    | BINLOG_ROTATE_EVENT
+    | BINLOG_INTVAR_EVENT
+    | BINLOG_LOAD_EVENT
+    | BINLOG_SLAVE_EVENT
+    | BINLOG_CREATE_FILE_EVENT
+    | BINLOG_APPEND_BLOCK_EVENT
+    | BINLOG_EXEC_LOAD_EVENT
+    | BINLOG_DELETE_FILE_EVENT
+    | BINLOG_NEW_LOAD_EVENT
+    | BINLOG_RAND_EVENT
+    | BINLOG_USER_VAR_EVENT
+    | BINLOG_FORMAT_DESCRIPTION_EVENT
+    | BINLOG_XID_EVENT
+    | BINLOG_BEGIN_LOAD_QUERY_EVENT
+    | BINLOG_EXECUTE_LOAD_QUERY_EVENT
+    | BINLOG_TABLE_MAP_EVENT
+    | BINLOG_WRITE_ROWS_EVENTv0
+    | BINLOG_UPDATE_ROWS_EVENTv0
+    | BINLOG_DELETE_ROWS_EVENTv0
+    | BINLOG_WRITE_ROWS_EVENTv1
+    | BINLOG_UPDATE_ROWS_EVENTv1
+    | BINLOG_DELETE_ROWS_EVENTv1
+    | BINLOG_INCIDENT_EVENT
+    | BINLOG_HEARTBEAT_EVENT
+    | BINLOG_IGNORABLE_EVENT
+    | BINLOG_ROWS_QUERY_EVENT
+    | BINLOG_WRITE_ROWS_EVENTv2
+    | BINLOG_UPDATE_ROWS_EVENTv2
+    | BINLOG_DELETE_ROWS_EVENTv2
+    | BINLOG_GTID_EVENT
+    | BINLOG_ANONYMOUS_GTID_EVENT
+    | BINLOG_PREVIOUS_GTIDS_EVENT
   deriving (Show, Eq, Enum)
 
 data BinLogPacket = BinLogPacket
@@ -70,7 +71,7 @@ data BinLogPacket = BinLogPacket
     , blEventType :: !BinLogEventType
     , blServerId  :: !Word32
     , blEventSize :: !Word32
-    , blLogPos    :: !Word32
+    , blLogPos    :: !Word64   -- ^ for future GTID compatibility
     , blFlags     :: !Word16
     , blBody      :: !L.ByteString
     , blSemiAck   :: !Bool
@@ -95,10 +96,10 @@ getBinLogPacket checksum semi = do
     pos <- getWord32le
     flgs <- getWord16le
     body <- getLazyByteString (fromIntegral size - if checksum then 23 else 19)
-    return (BinLogPacket ts typ sid size pos flgs body ack)
+    return (BinLogPacket ts typ sid size (fromIntegral pos) flgs body ack)
 
 getFromBinLogPacket :: Get a -> BinLogPacket -> IO a
-getFromBinLogPacket g (BinLogPacket _ typ _ _ _ _ body _ ) =
+getFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) =
     case runGetOrFail g body of
         Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
         Right (_, _, r)            -> return r
@@ -110,7 +111,6 @@ getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
         Right (_, _, r)            -> return r
 
 --------------------------------------------------------------------------------
--- | BinLogPacket item type
 
 data FormatDescription = FormatDescription
     { fdVersion      :: !Word16
@@ -132,11 +132,10 @@ eventHeaderLen :: FormatDescription -> BinLogEventType -> Word8
 eventHeaderLen fd typ = B.unsafeIndex (fdEventHeaderLenVector fd) (fromEnum typ - 1)
 
 data RotateEvent = RotateEvent
-    { rePos :: !Word64, reFileName :: !ByteString } deriving (Show, Eq)
+    { rPos :: !Word64, rFileName :: !ByteString } deriving (Show, Eq)
 
 getRotateEvent :: Get RotateEvent
 getRotateEvent = RotateEvent <$> getWord64le <*> getRemainingByteString
-
 
 data QueryEvent = QueryEvent
     { qSlaveProxyId :: !Word32
@@ -173,7 +172,7 @@ data TableMapEvent = TableMapEvent
 
 getTableMapEvent :: FormatDescription -> Get TableMapEvent
 getTableMapEvent fd = do
-    let hlen = eventHeaderLen fd TABLE_MAP_EVENT
+    let hlen = eventHeaderLen fd BINLOG_TABLE_MAP_EVENT
     tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
     flgs <- getWord16le
     slen <- getWord8
@@ -200,7 +199,7 @@ data DeleteRowsEvent = DeleteRowsEvent
     -- , deleteExtraData   :: !RowsEventExtraData
     , deleteColumnCnt   :: !Int
     , deletePresentMap  :: !ByteString
-    , deleteRowData     :: ![BinLogValue]
+    , deleteRowData     :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
 getDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get DeleteRowsEvent
@@ -208,13 +207,13 @@ getDeleteRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
     tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
     flgs <- getWord16le
-    when (typ == DELETE_ROWS_EVENTv2) $ do
+    when (typ == BINLOG_DELETE_ROWS_EVENTv2) $ do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
-    DeleteRowsEvent tid flgs colCnt pmap <$> getBinLogRow (tmColumnMeta tme) pmap
+    DeleteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
 data WriteRowsEvent = WriteRowsEvent
     { writeTableId     :: !Word64
@@ -222,7 +221,7 @@ data WriteRowsEvent = WriteRowsEvent
     -- , writeExtraData   :: !RowsEventExtraData
     , writeColumnCnt   :: !Int
     , writePresentMap  :: !ByteString
-    , writeRowData     :: ![BinLogValue]
+    , writeRowData     :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
 getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
@@ -230,23 +229,21 @@ getWriteRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
     tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
     flgs <- getWord16le
-    when (typ == WRITE_ROWS_EVENTv2) $ do
+    when (typ == BINLOG_WRITE_ROWS_EVENTv2) $ do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
-    WriteRowsEvent tid flgs colCnt pmap <$> getBinLogRow (tmColumnMeta tme) pmap
+    WriteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
 data UpdateRowsEvent = UpdateRowsEvent
     { updateTableId     :: !Word64
     , updateFlags       :: !Word16
     -- , updateExtraData   :: !RowsEventExtraData
     , updateColumnCnt   :: !Int
-    , updatePresentMap  :: !ByteString
-    , updatePresentMap' :: !ByteString
-    , updateRowData     :: ![BinLogValue]
-    , updateRowData'    :: ![BinLogValue]
+    , updatePresentMap  :: !(ByteString, ByteString)
+    , updateRowData     :: ![ ([BinLogValue], [BinLogValue]) ]
     } deriving (Show, Eq)
 
 getUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get UpdateRowsEvent
@@ -254,15 +251,16 @@ getUpdateRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
     tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
     flgs <- getWord16le
-    when (typ == UPDATE_ROWS_EVENTv2) $ do
+    when (typ == BINLOG_UPDATE_ROWS_EVENTv2) $ do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
     pmap' <- getPresentMap plen poffset
-    UpdateRowsEvent tid flgs colCnt pmap pmap' <$> getBinLogRow (tmColumnMeta tme) pmap
-                                               <*> getBinLogRow (tmColumnMeta tme) pmap'
+    UpdateRowsEvent tid flgs colCnt (pmap, pmap') <$>
+        untilM ((,) <$> getBinLogRow (tmColumnMeta tme) pmap <*> getBinLogRow (tmColumnMeta tme) pmap')
+               isEmpty
 
 getPresentMap :: Int -> Int -> Get BitMap
 getPresentMap plen poffset = do
@@ -277,12 +275,8 @@ getPresentMap plen poffset = do
 
 data UnexpectedBinLogEvent = UnexpectedBinLogEvent BinLogPacket
     deriving (Show, Typeable)
-instance Exception UnexpectedBinLogEvent where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
+instance Exception UnexpectedBinLogEvent
 
 data DecodeBinLogEventException = DecodeBinLogEventException ByteString ByteOffset String
     deriving (Show, Typeable)
-instance Exception DecodeBinLogEventException where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
+instance Exception DecodeBinLogEventException

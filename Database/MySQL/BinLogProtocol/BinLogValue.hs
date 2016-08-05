@@ -71,8 +71,8 @@ getBinLogField BINLOG_TYPE_SHORT               = BinLogShort    <$> getWord16le
 getBinLogField BINLOG_TYPE_INT24               = BinLogInt24    <$> getWord24le
 getBinLogField BINLOG_TYPE_LONG                = BinLogLong     <$> getWord32le
 getBinLogField BINLOG_TYPE_LONGLONG            = BinLogLongLong <$> getWord64le
-getBinLogField (BINLOG_TYPE_FLOAT  size      ) = BinLogFloat <$> getFloatle
-getBinLogField (BINLOG_TYPE_DOUBLE size      ) = BinLogDouble <$> getDoublele
+getBinLogField (BINLOG_TYPE_FLOAT  _         ) = BinLogFloat <$> getFloatle
+getBinLogField (BINLOG_TYPE_DOUBLE _         ) = BinLogDouble <$> getDoublele
 getBinLogField (BINLOG_TYPE_BIT    bits bytes) = BinLogBit <$> getBits bits bytes
 getBinLogField (BINLOG_TYPE_TIMESTAMP        ) = BinLogTimeStamp <$> getWord32le
 
@@ -94,8 +94,8 @@ getBinLogField (BINLOG_TYPE_DATETIME         ) = do i <- getWord64le
 -- ^ a integer in @YYYYMMDD@ format, for example:
 -- 99991231 stand for @9999-12-31@
 getBinLogField (BINLOG_TYPE_DATE             ) = do i <- getWord24le
-                                                    let (yyyy, i')   = i      `quotRem` 10000000000
-                                                        (mm, dd)     = i'     `quotRem` 100000000
+                                                    let (yyyy, i')   = i      `quotRem` 10000
+                                                        (mm, dd)     = i'     `quotRem` 100
                                                     pure (BinLogDate (fromIntegral yyyy)
                                                                      (fromIntegral mm)
                                                                      (fromIntegral dd))
@@ -296,7 +296,7 @@ getBits bits bytes = do
 --------------------------------------------------------------------------------
 -- | BinLog row decoder
 --
-getBinLogRow :: [BinLogMeta] -> ByteString -> Get [BinLogValue]
+getBinLogRow :: [BinLogMeta] -> BitMap -> Get [BinLogValue]
 getBinLogRow metas pmap = do
     let plen = B.foldl' (\acc word8 -> acc + popCount word8) 0 pmap
         maplen = (plen + 7) `shiftR` 3

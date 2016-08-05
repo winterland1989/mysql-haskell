@@ -123,6 +123,8 @@ getTextField f
         || t == MYSQL_TYPE_BLOB
         || t == MYSQL_TYPE_VAR_STRING
         || t == MYSQL_TYPE_STRING       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
+
+    | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
@@ -252,6 +254,7 @@ getBinaryField f
         || t == MYSQL_TYPE_VAR_STRING
         || t == MYSQL_TYPE_STRING       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
                                                     else MySQLBytes <$> getLenEncBytes
+    | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for " ++ show t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)

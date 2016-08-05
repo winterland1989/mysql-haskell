@@ -1,7 +1,7 @@
 mysql-haskell
 =============
 
-`mysql-haskell` is a mysql driver written entirely in haskell by Winterland at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based mysql middlewares.
+`mysql-haskell` is a MySQL driver written entirely in haskell by Winterland at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
 
 Roadmap:
 
@@ -9,9 +9,8 @@ Roadmap:
 - [x] text protocol decoding
 - [x] binary protocol decoding
 - [x] binlog listening
-- [x] basic binlog parsing
+- [x] row based binlog parsing
 - [ ] comprehensive testsuit and benchmark
-- [x] full binlog parsing 
 - [ ] polish and stablize API
 - [ ] tls support
 
@@ -20,7 +19,7 @@ This project is still in infancy stage and lack of produciton tests, use on your
 Motivation
 ----------
 
-While mysql may not be the most advanced sql database, it's widely used among china companies, including but not limited to Baidu, Alibaba, Tecent etc., but haskell's mysql support is not ideal, we only have a very basic mysql binding written by Bryan O'Sullivan, and some higher level wrapper built on it, which have some problems:
+While MySQL may not be the most advanced sql database, it's widely used among china companies, including but not limited to Baidu, Alibaba, Tecent etc., but haskell's MySQL support is not ideal, we only have a very basic MySQL binding written by Bryan O'Sullivan, and some higher level wrapper built on it, which have some problems:
 
 + lack of prepared statment and binary protocol support.
 
@@ -28,7 +27,7 @@ While mysql may not be the most advanced sql database, it's widely used among ch
 
 + no replication protocol support.
 
-mysql-haskell is intended to solve these problems, and providing foundation for higher level libraries such as groundhog and persistent, so that accessing mysql is both fast and easy in haskell.
+`mysql-haskell` is intended to solve these problems, and providing foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
 
 Building
 --------

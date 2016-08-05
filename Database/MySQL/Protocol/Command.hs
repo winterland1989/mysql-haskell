@@ -90,7 +90,7 @@ putCommand (COM_STMT_EXECUTE stid params) = do
 
 putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid
 putCommand (COM_STMT_RESET stid) = putWord8 0x1A >> putWord32le stid
-putCommand COM_UNSUPPORTED       = fail "unsupported command"
+putCommand _                     = fail "unsupported command"
 
 instance Binary Command where
     get = getCommand

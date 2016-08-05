@@ -104,6 +104,8 @@ getBinLogMeta MYSQL_TYPE_STRING     = do low <- getWord8
                                                                        in pure (BINLOG_TYPE_SET nbits nbytes)
                                                  MYSQL_TYPE_ENUM    -> pure (BINLOG_TYPE_ENUM low)
                                                  MYSQL_TYPE_STRING  -> pure (BINLOG_TYPE_STRING (fromIntegral low))
+                                                 t                  -> fail $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
+                                                                              \ impossible type inside binlog string: " ++ show t
                                          else pure (BINLOG_TYPE_STRING (fromIntegral low))
 
 getBinLogMeta MYSQL_TYPE_BLOB       = BINLOG_TYPE_BLOB <$> getWord8

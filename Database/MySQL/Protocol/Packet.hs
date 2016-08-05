@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 module Database.MySQL.Protocol.Packet where
@@ -65,14 +64,17 @@ getFromPacket g (Packet _ _ body) = case runGetOrFail g body of
     Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
     Right (_, _, r)            -> return r
 
-encodeToPacket :: Binary a => a -> Word8 -> Packet
-encodeToPacket payload seqN =
+data DecodePacketException = DecodePacketException ByteString ByteOffset String deriving (Typeable, Show)
+instance Exception DecodePacketException
+
+encodeToPacket :: Binary a => Word8 -> a -> Packet
+encodeToPacket seqN payload =
     let s = encode payload
         l = L.length s
     in Packet (fromIntegral l) seqN s
 
-putToPacket :: Put -> Word8 -> Packet
-putToPacket payload seqN =
+putToPacket :: Word8 -> Put -> Packet
+putToPacket seqN payload =
     let s = runPut payload
         l = L.length s
     in Packet (fromIntegral l) seqN s
@@ -235,48 +237,4 @@ putWord24be :: Word32 -> Put
 putWord24be v = do
     putWord16be $ fromIntegral (v `shiftR` 8)
     putWord8 $ fromIntegral v
-
---------------------------------------------------------------------------------
--- |the root exception type for all the mysql exceptions
-data MySQLException = forall e . Exception e => MySQLException e deriving Typeable
-instance Show MySQLException where show (MySQLException e) = show e
-instance Exception MySQLException
-
-mysqlExceptionToException :: Exception e => e -> SomeException
-mysqlExceptionToException = toException . MySQLException
-
-mysqlExceptionFromException :: Exception e => SomeException -> Maybe e
-mysqlExceptionFromException x = do
-    MySQLException a <- fromException x
-    cast a
-
-data NetworkException = NetworkException deriving (Typeable, Show)
-instance Exception NetworkException where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
-
-data DecodePacketException = DecodePacketException ByteString ByteOffset String deriving (Typeable, Show)
-instance Exception DecodePacketException where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
-
-data ERRException = ERRException ERR deriving (Typeable, Show)
-instance Exception ERRException where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
-
-data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
-instance Exception UnconsumedResultSet where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
-
-data AuthException = AuthException ERR deriving (Typeable, Show)
-instance Exception AuthException where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
-
-data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
-instance Exception UnexpectedPacket where
-    toException   = mysqlExceptionToException
-    fromException = mysqlExceptionFromException
 

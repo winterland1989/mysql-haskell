@@ -1,11 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Database.MySQL.Connection where
 
 import           Control.Monad            (unless)
-import           Control.Exception        (bracketOnError, throwIO)
+import           Control.Exception        (Exception, bracketOnError, throwIO)
+import           Data.Typeable
 import           System.IO.Streams        (InputStream, OutputStream)
-import           Data.IORef               (IORef, readIORef, newIORef)
+import           Data.IORef               (IORef, readIORef, newIORef, writeIORef)
 import           Database.MySQL.Protocol
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
@@ -60,7 +62,7 @@ connect ci@(ConnInfo host port _ _ _ tls) =
             p <- readPacket is'
             greet <- decodeFromPacket p
             let auth = mkAuth ci greet
-            Binary.putToStream (Just (encodeToPacket auth 1)) os
+            Binary.putToStream (Just (encodeToPacket 1 auth)) os
             p' <- readPacket is'
             if isOK p'
             then do
@@ -136,3 +138,22 @@ guardUnconsumed :: MySQLConn -> IO ()
 guardUnconsumed (MySQLConn _ _ _ consumed) = do
     c <- readIORef consumed
     unless c (throwIO UnconsumedResultSet)
+
+writeIORef' :: IORef a -> a -> IO ()
+writeIORef' ref x = x `seq` writeIORef ref x
+
+
+data NetworkException = NetworkException deriving (Typeable, Show)
+instance Exception NetworkException
+
+data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
+instance Exception UnconsumedResultSet
+
+data ERRException = ERRException ERR deriving (Typeable, Show)
+instance Exception ERRException
+
+data AuthException = AuthException ERR deriving (Typeable, Show)
+instance Exception AuthException
+
+data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
+instance Exception UnexpectedPacket
