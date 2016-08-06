@@ -3,6 +3,18 @@
 {-# LANGUAGE MultiWayIf         #-}
 {-# LANGUAGE OverloadedStrings  #-}
 
+{-|
+Module      : Database.MySQL.BinLog
+Description : Text and binary protocol
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+This module provide tools for binlog listening and row based binlog decoding.
+-}
+
 module Database.MySQL.BinLog where
 
 import           Control.Exception                         (Exception, throwIO)
@@ -23,18 +35,6 @@ import qualified System.IO.Streams                         as Stream
 
 type SlaveID = Word32
 
--- | This is a mutable object tracking current consuming binlog's filename and position.
--- It aslo provide an IO action to automatically reply semi-ack packet to master,
--- If 'dumpBinLog' doesn't sucessfully enable semi-ack, this will be a no-op, otherwise
--- you must call it when you decide you have done with current binlog item
--- and ready for next one.
---
-data BinLogTracker = BinLogTracker
-    { btCurrentFile :: {-# UNPACK #-} !(IORef ByteString)
-    , btCurrentPos  :: {-# UNPACK #-} !(IORef Word64)
-    , btReplyAck    :: IO ()
-    }
-
 -- | Register a pesudo slave to master, although MySQL document suggests you should call this
 -- before calling 'dumpBinLog', but it seems it's not really necessary.
 --
@@ -49,7 +49,7 @@ dumpBinLog :: MySQLConn               -- ^ connection to be listened
            -> (ByteString, Word32)    -- ^ binlog position
            -> Bool                    -- ^ if master support semi-ack, do we want to enable it?
                                       -- if master doesn't support, this parameter will be ignored.
-           -> IO (FormatDescription, BinLogTracker, InputStream BinLogPacket)
+           -> IO (FormatDescription, IORef ByteString, InputStream BinLogPacket)
 dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
     guardUnconsumed conn
     checksum <- isCheckSumEnabled conn
@@ -59,42 +59,37 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
     when needAck . void $ executeRaw conn "SET @rpl_semi_sync_slave = 1"
     writeCommand (COM_BINLOG_DUMP initpos 0x00 sid initfn) os
     writeIORef consumed False
-    p <- readBinLogPacket checksum needAck is
-    case p of
-        Just p' -> do
-            fileRef <- newIORef initfn
-            logPosRef <- newIORef (blLogPos p')
-            semiAckRef <- newIORef (blSemiAck p')
 
-            let replyAck = if needAck then do ack <- readIORef semiAckRef
-                                              when ack $ do
-                                                fn <- readIORef fileRef
-                                                pos <- readIORef logPosRef
-                                                Stream.write (Just (makeSemiAckPacket pos fn)) os
-                                      else return ()
-                tracker = BinLogTracker fileRef logPosRef replyAck
+    rp <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_ROTATE_EVENT
+    re <- getFromBinLogPacket getRotateEvent rp
+    fref <- newIORef (rFileName re)
 
-            if blEventType p' == BINLOG_FORMAT_DESCRIPTION_EVENT
-            then do
-                fmt <- getFromBinLogPacket getFormatDescription p'
-                es <- Stream.makeInputStream $ do
-                    p'' <- readBinLogPacket checksum needAck is
-                    case p'' of
-                        Nothing   -> writeIORef consumed True >> return p''
-                        Just p''' -> do if blEventType p''' == BINLOG_ROTATE_EVENT
-                                        then do
-                                            rotateE <- getFromBinLogPacket getRotateEvent p'''
-                                            writeIORef' logPosRef (rPos rotateE)
-                                            writeIORef' semiAckRef (blSemiAck p''')
-                                            writeIORef' fileRef (rFileName rotateE)
-                                        else do
-                                            writeIORef' logPosRef (blLogPos p''')
-                                            writeIORef' semiAckRef (blSemiAck p''')
-                                        return p''
-                return (fmt, tracker, es)
-            else throwIO (UnexpectedBinLogEvent p')
-        Nothing -> throwIO NetworkException
+    p <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_FORMAT_DESCRIPTION_EVENT
+    replyAck needAck p fref os
+    fmt <- getFromBinLogPacket getFormatDescription p
+
+    es <- Stream.makeInputStream $ do
+        q <- readBinLogPacket checksum needAck is
+        case q of
+            Nothing   -> writeIORef consumed True >> return Nothing
+            Just q' -> do when (blEventType q' == BINLOG_ROTATE_EVENT) $ do
+                                e <- getFromBinLogPacket getRotateEvent q'
+                                writeIORef' fref (rFileName e)
+                          replyAck needAck q' fref os
+                          return q
+    return (fmt, fref, es)
   where
+    skipToPacketT iop typ = do
+        p <- iop
+        case p of
+            Just p' -> do
+                if blEventType p' == typ then return p' else throwIO (UnexpectedBinLogEvent p')
+            Nothing -> throwIO NetworkException
+
+    replyAck needAck p fref os' = when (needAck && blSemiAck p) $ do
+        fn <- readIORef fref
+        Stream.write (Just (makeSemiAckPacket (blLogPos p) fn)) os'
+
     makeSemiAckPacket pos fn = putToPacket 0 $ do
         putWord8 0xEF      -- semi-ack
         putWord64le pos
@@ -102,35 +97,47 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
 
     readBinLogPacket checksum needAck is' = do
         p <- readPacket is'
-        if  | isOK p -> do
-                p' <- getFromPacket (getBinLogPacket checksum needAck) p
-                if  | isFakeBinLogEvent p'            -> readBinLogPacket checksum needAck is'
-                    | otherwise                       -> return (Just p')
+        if  | isOK p -> Just <$> getFromPacket (getBinLogPacket checksum needAck) p
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
 
+-- | Current binlog filename and next position if you resume listening.
+--
+data BinLogTracker = BinLogTracker
+    { btFileName :: {-# UNPACK #-} !ByteString
+    , btNextPos  :: {-# UNPACK #-} !Word64
+    } deriving (Show, Eq)
+
 -- | Row based biblog event type.
+--
 -- It's recommended to call 'enableRowQueryEvent' before 'dumpBinLog', so that you can get
 -- query event in row based binlog(for exampleit's important for detect a table change).
 --
+-- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
+-- for example, writing 'BinLogPacket' to a zookeeper when you done with an event.
+--
 data RowBinLogEvent
-    = RowQueryEvent    {-# UNPACK #-} !QueryEvent
-    | RowDeleteEvent   {-# UNPACK #-} !TableMapEvent !DeleteRowsEvent
-    | RowWriteEvent    {-# UNPACK #-} !TableMapEvent !WriteRowsEvent
-    | RowUpdateEvent   {-# UNPACK #-} !TableMapEvent !UpdateRowsEvent
+    = RowQueryEvent   !BinLogTracker !QueryEvent
+    | RowDeleteEvent  !BinLogTracker !TableMapEvent !DeleteRowsEvent
+    | RowWriteEvent   !BinLogTracker !TableMapEvent !WriteRowsEvent
+    | RowUpdateEvent  !BinLogTracker !TableMapEvent !UpdateRowsEvent
   deriving (Show, Eq)
 
 -- | decode row based event from 'BinLogPacket' stream.
-decodeRowBinLogEvent :: FormatDescription -> InputStream BinLogPacket -> IO (InputStream RowBinLogEvent)
-decodeRowBinLogEvent fd' is' = Stream.makeInputStream (loop fd' is')
+decodeRowBinLogEvent :: (FormatDescription, IORef ByteString, InputStream BinLogPacket)
+                     -> IO (InputStream RowBinLogEvent)
+decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' is')
   where
-    loop fd is = do
+    loop fd fref is = do
         p <- Stream.read is
         case p of
             Nothing -> return Nothing
             Just p' -> do
                 let t = blEventType p'
-                if  | t == BINLOG_QUERY_EVENT -> Just . RowQueryEvent <$> getFromBinLogPacket getQueryEvent p'
+                if  | t == BINLOG_QUERY_EVENT -> do
+                        tr <- track p' fref
+                        e <- getFromBinLogPacket getQueryEvent p'
+                        pure (Just (RowQueryEvent tr e))
                     | t == BINLOG_TABLE_MAP_EVENT -> do
                         tme <- getFromBinLogPacket (getTableMapEvent fd) p'
                         q <- Stream.read is
@@ -138,17 +145,23 @@ decodeRowBinLogEvent fd' is' = Stream.makeInputStream (loop fd' is')
                             Nothing -> return Nothing
                             Just q' -> do
                                 let u = blEventType q'
-                                if  | u == BINLOG_WRITE_ROWS_EVENTv1 || u == BINLOG_WRITE_ROWS_EVENTv2 ->
-                                         Just . RowWriteEvent tme <$>
-                                            getFromBinLogPacket' (getWriteRowEvent fd tme) q'
-                                    | u == BINLOG_DELETE_ROWS_EVENTv1 || u == BINLOG_DELETE_ROWS_EVENTv2 ->
-                                         Just . RowDeleteEvent tme <$>
-                                            getFromBinLogPacket' (getDeleteRowEvent fd tme) q'
-                                    | u == BINLOG_UPDATE_ROWS_EVENTv1 || u == BINLOG_UPDATE_ROWS_EVENTv2 ->
-                                         Just . RowUpdateEvent tme <$>
-                                            getFromBinLogPacket' (getUpdateRowEvent fd tme) q'
-                                    | otherwise -> loop fd is
-                    | otherwise -> loop fd is
+                                if  | u == BINLOG_WRITE_ROWS_EVENTv1 || u == BINLOG_WRITE_ROWS_EVENTv2 -> do
+                                        tr <- track q' fref
+                                        e <- getFromBinLogPacket' (getWriteRowEvent fd tme) q'
+                                        pure (Just (RowWriteEvent tr tme e))
+                                    | u == BINLOG_DELETE_ROWS_EVENTv1 || u == BINLOG_DELETE_ROWS_EVENTv2 -> do
+                                        tr <- track q' fref
+                                        e <- getFromBinLogPacket' (getDeleteRowEvent fd tme) q'
+                                        pure (Just (RowDeleteEvent tr tme e))
+                                    | u == BINLOG_UPDATE_ROWS_EVENTv1 || u == BINLOG_UPDATE_ROWS_EVENTv2 -> do
+                                        tr <- track q' fref
+                                        e <- getFromBinLogPacket' (getUpdateRowEvent fd tme) q'
+                                        pure (Just (RowUpdateEvent tr tme e))
+                                    | otherwise -> loop fd fref is
+                    | otherwise -> loop fd fref is
+
+    track p fref = BinLogTracker <$> readIORef fref <*> pure (blLogPos p)
+
 
 -- | Get latest master's binlog filename and position.
 --

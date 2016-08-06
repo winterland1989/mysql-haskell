@@ -21,14 +21,16 @@ library
                     ,   Database.MySQL.Protocol.ColumnDef
                     ,   Database.MySQL.Protocol.Packet
                     ,   Database.MySQL.Protocol.MySQLValue
+                    ,   Database.MySQL.Protocol.Escape
                     ,   Database.MySQL.BinLog
                     ,   Database.MySQL.BinLogProtocol.BinLogEvent
                     ,   Database.MySQL.BinLogProtocol.BinLogValue
                     ,   Database.MySQL.BinLogProtocol.BinLogMeta
 
-  -- other-modules:       
+
+  other-modules:        Database.MySQL.Connection
   -- other-extensions:    
-  build-depends:        base >=4.8 && <5
+  build-depends:        base >=4.7 && <5
                     ,   transformers
                     ,   monad-loops
                     ,   network

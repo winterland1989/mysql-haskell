@@ -40,6 +40,7 @@ import Data.Binary.Get
 import Data.Binary.Put
 import Database.MySQL.Protocol.ColumnDef
 import Database.MySQL.Protocol.Packet
+import Database.MySQL.Protocol.Escape
 
 --------------------------------------------------------------------------------
 -- | data type mapping between MySQL values and haskell values.
@@ -169,8 +170,8 @@ putTextField (MySQLYear       n) = putBuilder (Textual.integral n)
 putTextField (MySQLDateTime  dt) = putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
 putTextField (MySQLDate       d) = putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
 putTextField (MySQLTime       t) = putByteString (BC.pack (formatTime defaultTimeLocale "%T%Q" t))
-putTextField (MySQLBytes     bs) = putByteString bs
-putTextField (MySQLText       t) = putByteString (T.encodeUtf8 t)
+putTextField (MySQLBytes     bs) = putByteString . escapeBytes $ bs
+putTextField (MySQLText       t) = putByteString . T.encodeUtf8 . escapeText $ t
 putTextField MySQLNull           = putWord8 0x79
 
 --------------------------------------------------------------------------------

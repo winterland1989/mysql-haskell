@@ -80,9 +80,6 @@ data BinLogPacket = BinLogPacket
 putSemiAckResp :: Word32 -> ByteString -> Put
 putSemiAckResp pos fn = put pos >> put fn
 
-isFakeBinLogEvent :: BinLogPacket -> Bool
-isFakeBinLogEvent (BinLogPacket ts _ _ _ _ _ _ _) = ts == 0
-
 getBinLogPacket :: Bool -> Bool -> Get BinLogPacket
 getBinLogPacket checksum semi = do
     _  <- getWord8     -- OK byte

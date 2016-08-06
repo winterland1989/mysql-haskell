@@ -51,6 +51,7 @@ import qualified System.IO.Streams        as Stream
 executeRaw :: MySQLConn -> ByteString -> IO OK
 executeRaw conn qry = command conn (COM_QUERY qry)
 
+
 {-
 executeBatch :: MySQL -> OutputStream ByteString -> IO (InputStream OK)
 executeBatch
