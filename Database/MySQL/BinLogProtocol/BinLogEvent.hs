@@ -195,7 +195,7 @@ data DeleteRowsEvent = DeleteRowsEvent
     , deleteFlags       :: !Word16
     -- , deleteExtraData   :: !RowsEventExtraData
     , deleteColumnCnt   :: !Int
-    , deletePresentMap  :: !ByteString
+    , deletePresentMap  :: !BitMap
     , deleteRowData     :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
@@ -217,7 +217,7 @@ data WriteRowsEvent = WriteRowsEvent
     , writeFlags       :: !Word16
     -- , writeExtraData   :: !RowsEventExtraData
     , writeColumnCnt   :: !Int
-    , writePresentMap  :: !ByteString
+    , writePresentMap  :: !BitMap
     , writeRowData     :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
@@ -239,7 +239,7 @@ data UpdateRowsEvent = UpdateRowsEvent
     , updateFlags       :: !Word16
     -- , updateExtraData   :: !RowsEventExtraData
     , updateColumnCnt   :: !Int
-    , updatePresentMap  :: !(ByteString, ByteString)
+    , updatePresentMap  :: !(BitMap, BitMap)
     , updateRowData     :: ![ ([BinLogValue], [BinLogValue]) ]
     } deriving (Show, Eq)
 
@@ -265,7 +265,7 @@ getPresentMap plen poffset = do
     let pmap' = if B.null pmap
                 then B.empty
                 else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
-    pure pmap'
+    pure (BitMap pmap')
 
 --------------------------------------------------------------------------------
 -- | exception tyoe

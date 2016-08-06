@@ -13,8 +13,8 @@ import           Data.Bits
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
-import Control.Exception (throwIO, SomeException, Exception(..))
-import Data.Typeable (Typeable, cast)
+import Control.Exception (throwIO, Exception(..))
+import Data.Typeable
 
 --------------------------------------------------------------------------------
 -- | packet tyoe

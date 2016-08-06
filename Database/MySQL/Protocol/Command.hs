@@ -82,7 +82,7 @@ putCommand (COM_STMT_EXECUTE stid params) = do
     putWord8 0x00 -- we only use @CURSOR_TYPE_NO_CURSOR@ here
     putWord32le 1 -- const 1
     unless (null params) $ do
-        putByteString (makeNullMap params)
+        putByteString . fromBitMap $ makeNullMap params
         putWord8 0x01    -- always use new-params-bound-flag
         let fts = map getMySQLValueType params
         forM_ fts $ \ (t, s) -> putFieldType t >> putWord8 s

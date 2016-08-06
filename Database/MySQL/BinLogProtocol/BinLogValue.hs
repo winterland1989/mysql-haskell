@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE BangPatterns #-}
 
@@ -29,7 +28,7 @@ import Data.Binary.Get
 import Data.Binary.Put
 import Database.MySQL.BinLogProtocol.BinLogMeta
 import Database.MySQL.Protocol.Packet
-import Database.MySQL.Protocol.MySQLValue (isBitSet, BitMap)
+import Database.MySQL.Protocol.MySQLValue (isColumnSet, BitMap(..))
 import Debug.Trace
 
 -- | This data type DOES NOT try to parse binlog values into detailed haskell values.
@@ -128,14 +127,14 @@ getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp  ) = do s <- getWord32be -- big-endi
 -- fractional-seconds storage (size depends on meta)
 --
 getBinLogField (BINLOG_TYPE_DATETIME2   fsp  ) = do iPart <- getWord40be
-                                                    let yyyymm = iPart `shiftR` 22 .&. 0b011111111111111111
+                                                    let yyyymm = iPart `shiftR` 22 .&. 0x01FFFF -- 0b011111111111111111
                                                         (yyyy, mm) = yyyymm `quotRem` 13
                                                         yyyy' = fromIntegral yyyy
                                                         mm' = fromIntegral mm
-                                                        dd = fromIntegral $ iPart `shiftR` 17 .&. 0b00011111
-                                                        h =  fromIntegral $ iPart `shiftR` 12 .&. 0b00011111
-                                                        m =  fromIntegral $ iPart `shiftR` 6 .&. 0b00111111
-                                                        s =  fromIntegral $ iPart .&. 0b00111111
+                                                        dd = fromIntegral $ iPart `shiftR` 17 .&. 0x1F -- 0b00011111
+                                                        h =  fromIntegral $ iPart `shiftR` 12 .&. 0x1F -- 0b00011111
+                                                        m =  fromIntegral $ iPart `shiftR` 6 .&. 0x3F  -- 0b00111111
+                                                        s =  fromIntegral $ iPart .&. 0x3F             -- 0b00111111
                                                     ms <- getMicroSecond fsp
                                                     pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
   where
@@ -158,9 +157,9 @@ getBinLogField (BINLOG_TYPE_DATETIME2   fsp  ) = do iPart <- getWord40be
 --
 getBinLogField (BINLOG_TYPE_TIME2       fsp  ) = do iPart <- getWord24be
                                                     let sign = fromIntegral $ iPart `shiftR` 23
-                                                        h = (fromIntegral $ iPart `shiftR` 12) .&. 0b0000001111111111
-                                                        m = (fromIntegral $ iPart `shiftR` 6) .&. 0b00111111
-                                                        s = (fromIntegral $ iPart) .&. 0b00111111
+                                                        h = (fromIntegral $ iPart `shiftR` 12) .&. 0x03FF -- 0b0000001111111111
+                                                        m = (fromIntegral $ iPart `shiftR` 6) .&. 0x3F    -- 0b00111111
+                                                        s = (fromIntegral $ iPart) .&. 0x3F               -- 0b00111111
                                                     ms <- getMicroSecond fsp
                                                     pure (BinLogTime2 sign h m s ms)
 
@@ -298,21 +297,21 @@ getBits bits bytes = do
 --
 getBinLogRow :: [BinLogMeta] -> BitMap -> Get [BinLogValue]
 getBinLogRow metas pmap = do
-    let plen = B.foldl' (\acc word8 -> acc + popCount word8) 0 pmap
+    let plen = B.foldl' (\acc word8 -> acc + popCount word8) 0 (fromBitMap pmap)
         maplen = (plen + 7) `shiftR` 3
     nullmap <- getByteString maplen
-    go metas nullmap 0 pmap 0
+    go metas (BitMap nullmap) 0 pmap 0
   where
     go :: [BinLogMeta] -> BitMap -> Int -> BitMap -> Int -> Get [BinLogValue]
     go [] _       _   _          _       = pure []
-    go (f:fs) nullmap !nullpos pmap !ppos  =
-        if isBitSet pmap ppos
+    go (f:fs) nullmap !nullpos pmap' !ppos  =
+        if isColumnSet pmap' ppos
         then do
-            r <- if isBitSet nullmap nullpos
+            r <- if isColumnSet nullmap nullpos
                     then return BinLogNull
                     else getBinLogField f
             let nullpos' = nullpos + 1
                 ppos' = ppos + 1
-            rest <- go fs nullmap nullpos' pmap ppos'
+            rest <- go fs nullmap nullpos' pmap' ppos'
             return (rest `seq` (r : rest))
-        else go fs nullmap nullpos pmap (ppos + 1)
+        else go fs nullmap nullpos pmap' (ppos + 1)

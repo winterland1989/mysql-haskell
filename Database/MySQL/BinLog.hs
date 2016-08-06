@@ -53,10 +53,10 @@ dumpBinLog :: MySQLConn               -- ^ connection to be listened
 dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
     guardUnconsumed conn
     checksum <- isCheckSumEnabled conn
-    when checksum $ void $ executeRaw conn "SET @master_binlog_checksum = @@global.binlog_checksum"
+    when checksum $ void $ execute_ conn "SET @master_binlog_checksum = @@global.binlog_checksum"
     semiAck  <- isSemiSyncEnabled conn
     let needAck = semiAck && wantAck
-    when needAck . void $ executeRaw conn "SET @rpl_semi_sync_slave = 1"
+    when needAck . void $ execute_ conn "SET @rpl_semi_sync_slave = 1"
     writeCommand (COM_BINLOG_DUMP initpos 0x00 sid initfn) os
     writeIORef consumed False
 
@@ -167,7 +167,7 @@ decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' 
 --
 getLastBinLogInfo :: MySQLConn -> IO (ByteString, Word64)
 getLastBinLogInfo conn = do
-    (_, is) <- queryRaw conn "SHOW MASTER STATUS;"
+    (_, is) <- query_ conn "SHOW MASTER STATUS;"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
@@ -181,7 +181,7 @@ instance Exception GetLastBinLogInfoFail
 --
 isCheckSumEnabled :: MySQLConn -> IO Bool
 isCheckSumEnabled conn = do
-    (_, is) <- queryRaw conn "SHOW GLOBAL VARIABLES LIKE 'binlog_checksum';"
+    (_, is) <- query_ conn "SHOW GLOBAL VARIABLES LIKE 'binlog_checksum';"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
@@ -192,7 +192,7 @@ isCheckSumEnabled conn = do
 --
 isSemiSyncEnabled :: MySQLConn -> IO Bool
 isSemiSyncEnabled conn = do
-    (_, is) <- queryRaw conn "SHOW VARIABLES LIKE 'rpl_semi_sync_master_enabled';"
+    (_, is) <- query_ conn "SHOW VARIABLES LIKE 'rpl_semi_sync_master_enabled';"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
@@ -203,5 +203,5 @@ isSemiSyncEnabled conn = do
 -- we can get query event in row based binlog.
 --
 enableRowQueryEvent :: MySQLConn -> IO ()
-enableRowQueryEvent conn = void $ executeRaw conn "SET @binlog_rows_query_log_events = ON;"
+enableRowQueryEvent conn = void $ execute_ conn "SET @binlog_rows_query_log_events = ON;"
 

@@ -25,6 +25,7 @@ import qualified Data.Text.Encoding as T
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as B
+import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Char8 as BC
 import Data.Scientific (Scientific)
 import Data.ByteString.Builder.Scientific (scientificBuilder)
@@ -41,7 +42,7 @@ import Data.Binary.Put
 import Database.MySQL.Protocol.ColumnDef
 import Database.MySQL.Protocol.Packet
 import Database.MySQL.Protocol.Escape
-
+import Data.Typeable
 --------------------------------------------------------------------------------
 -- | data type mapping between MySQL values and haskell values.
 data MySQLValue
@@ -61,6 +62,7 @@ data MySQLValue
     | MySQLDate          !Day
     | MySQLTime          !TimeOfDay
     | MySQLBytes         !ByteString
+    | MySQLBit           !BitMap
     | MySQLText          !Text
     | MySQLNull
   deriving (Show, Eq)
@@ -82,6 +84,7 @@ getMySQLValueType (MySQLDateTime     _)  = (MYSQL_TYPE_DATETIME , 0x00)
 getMySQLValueType (MySQLDate         _)  = (MYSQL_TYPE_DATE     , 0x00)
 getMySQLValueType (MySQLTime         _)  = (MYSQL_TYPE_TIME     , 0x00)
 getMySQLValueType (MySQLBytes        _)  = (MYSQL_TYPE_BLOB     , 0x00)
+getMySQLValueType (MySQLBit          _)  = (MYSQL_TYPE_BIT      , 0x00)
 getMySQLValueType (MySQLText         _)  = (MYSQL_TYPE_STRING   , 0x00)
 getMySQLValueType MySQLNull              = (MYSQL_TYPE_NULL     , 0x00)
 
@@ -115,7 +118,6 @@ getTextField f
         || t == MYSQL_TYPE_TIME2        = feedLenEncBytes t MySQLTime timeParser
     | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
-        || t == MYSQL_TYPE_BIT
         || t == MYSQL_TYPE_ENUM
         || t == MYSQL_TYPE_SET
         || t == MYSQL_TYPE_TINY_BLOB
@@ -125,6 +127,7 @@ getTextField f
         || t == MYSQL_TYPE_VAR_STRING
         || t == MYSQL_TYPE_STRING       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
 
+    | t == MYSQL_TYPE_BIT               = feedLenEncBytes t MySQLBit (Just . BitMap)
     | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
   where
     t = columnType f
@@ -170,9 +173,17 @@ putTextField (MySQLYear       n) = putBuilder (Textual.integral n)
 putTextField (MySQLDateTime  dt) = putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
 putTextField (MySQLDate       d) = putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
 putTextField (MySQLTime       t) = putByteString (BC.pack (formatTime defaultTimeLocale "%T%Q" t))
-putTextField (MySQLBytes     bs) = putByteString . escapeBytes $ bs
-putTextField (MySQLText       t) = putByteString . T.encodeUtf8 . escapeText $ t
-putTextField MySQLNull           = putWord8 0x79
+putTextField (MySQLBytes     bs) = do putCharUtf8 '\''
+                                      putByteString . escapeBytes $ bs
+                                      putCharUtf8 '\''
+putTextField (MySQLText       t) = do putCharUtf8 '\''
+                                      putByteString . T.encodeUtf8 . escapeText $ t
+                                      putCharUtf8 '\''
+putTextField (MySQLBit        b) = do
+                                      putBuilder "0b\'"
+                                      putBuilder . execPut $ putTextBitMap b
+                                      putCharUtf8 '\''
+putTextField MySQLNull           = putBuilder "NULL"
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
@@ -245,7 +256,6 @@ getBinaryField f
     | t == MYSQL_TYPE_TIME2             = fail "Database.MySQL.Protocol.MySQLValue: unexpected type MYSQL_TYPE_TIME2"
     | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
-        || t == MYSQL_TYPE_BIT
         || t == MYSQL_TYPE_ENUM
         || t == MYSQL_TYPE_SET
         || t == MYSQL_TYPE_TINY_BLOB
@@ -255,6 +265,7 @@ getBinaryField f
         || t == MYSQL_TYPE_VAR_STRING
         || t == MYSQL_TYPE_STRING       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
                                                     else MySQLBytes <$> getLenEncBytes
+    | t == MYSQL_TYPE_BIT               = MySQLBit . BitMap <$> getLenEncBytes
     | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for " ++ show t
   where
     t = columnType f
@@ -297,11 +308,12 @@ putBinaryField (MySQLYear       n) = putWord16le n
 putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
                                                            putBinaryTime time
-putBinaryField (MySQLDate   d)    = putBinaryDay d
-putBinaryField (MySQLTime   t)    = putBinaryTime t
-putBinaryField (MySQLBytes    bs) = putLenEncBytes bs
-putBinaryField (MySQLText      t) = putLenEncBytes (T.encodeUtf8 t)
-putBinaryField MySQLNull          = return ()
+putBinaryField (MySQLDate    d)    = putBinaryDay d
+putBinaryField (MySQLTime    t)    = putBinaryTime t
+putBinaryField (MySQLBytes  bs)    = putLenEncBytes bs
+putBinaryField (MySQLBit    bs)    = putLenEncBytes (fromBitMap bs)
+putBinaryField (MySQLText    t)    = putLenEncBytes (T.encodeUtf8 t)
+putBinaryField MySQLNull           = return ()
 
 putBinaryDay :: Day -> Put
 putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
@@ -341,23 +353,53 @@ getBinaryRow fields flen = do
         let (i, j) = (pos + 2) `quotRem` 8
         in (nullmap `B.unsafeIndex` i) `testBit` j
 
--- | We use a 'ByteString' to present a bitmap here, every bit inside a byte is mapped to
--- a column, the mapping order is following:
--- byteString: head -> tail
--- column:     left -> right
+-- | We use a 'ByteString' to present a bitmap here,
 --
-type BitMap = ByteString
+-- When used as 'MySQLBit' values, the underlining 'ByteString' follows:
+--
+--  * byteString: head       -> tail
+--  * bit:        big endian -> little endian
+--
+-- If 'BitMap' is used as a null-map/present-map, every bit inside a byte
+-- is mapped to a column, the mapping order is following:
+--
+--  * byteString: head -> tail
+--  * column:     left -> right
+--
+newtype BitMap = BitMap { fromBitMap :: ByteString } deriving (Eq, Ord, Typeable)
 
--- | test if a position is set
-isBitSet :: BitMap -> Int -> Bool
-isBitSet bitmap pos =
+-- | test if a column is set
+--
+-- The number counts from left to right.
+--
+isColumnSet :: BitMap -> Int -> Bool
+isColumnSet (BitMap bitmap) pos =
     let (i, j) = pos `quotRem` 8
     in (bitmap `B.unsafeIndex` i) `testBit` j
+
+-- | test if a bit is set
+--
+-- The bit counts from little-endian to big-endian.
+--
+isBitSet :: BitMap -> Int -> Bool
+isBitSet (BitMap bitmap) pos =
+    let bits = B.length bitmap * 8
+        (i, j) = (bits - pos - 1) `quotRem` 8
+    in (bitmap `B.unsafeIndex` i) `testBit` (7 - j)
+
+putTextBitMap :: BitMap -> Put
+putTextBitMap (BitMap bs) = mapM_ putBit8 (B.unpack bs)
+  where
+    putBit8 word = forM_ [7,6..0] $ \ pos ->
+        if word `testBit` pos then putCharUtf8 '1' else putCharUtf8 '0'
+
+instance Show BitMap where
+    show =  BC.unpack . L.toStrict . runPut . putTextBitMap
 
 -- | make a nullmap for params without offset.
 --
 makeNullMap :: [MySQLValue] -> BitMap
-makeNullMap values = B.pack (go values 0x00 0)
+makeNullMap values = BitMap . B.pack $ go values 0x00 0
   where
     go :: [MySQLValue] -> Word8 -> Int -> [Word8]
     go []             byte   8  = [byte]
