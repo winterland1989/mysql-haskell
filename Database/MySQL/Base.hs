@@ -1,5 +1,4 @@
-{-# LANGUAGE MultiWayIf        #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings  #-}
 
 {-|
 Module      : Database.MySQL.Base

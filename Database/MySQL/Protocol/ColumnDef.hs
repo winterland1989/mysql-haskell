@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE CPP               #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|

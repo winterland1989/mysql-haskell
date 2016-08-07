@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MultiWayIf   #-}
 
 {-|
 Module      : Database.MySQL.Protocol.Escape

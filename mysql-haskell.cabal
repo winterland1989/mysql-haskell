@@ -28,7 +28,6 @@ library
 
 
     other-modules:      Database.MySQL.Connection
-    other-extensions:   DeriveDataTypeable
     build-depends:      base >=4.7 && <5
                     ,   transformers
                     ,   monad-loops
@@ -47,7 +46,7 @@ library
                     ,   blaze-textual
 
     default-language:    Haskell2010
-
+    default-extensions:   DeriveDataTypeable MultiWayIf
     ghc-options:       -Wall
 
 test-suite test

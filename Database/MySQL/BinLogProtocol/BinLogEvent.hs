@@ -1,6 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable        #-}
 {-# LANGUAGE OverloadedStrings         #-}
-
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|

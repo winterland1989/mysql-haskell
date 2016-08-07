@@ -21,6 +21,9 @@ before_install:
 
  - travis_retry sudo apt-get install -q -y mysql-server-${MYSQLVER} mysql-client-core-${MYSQLVER} mysql-client-${MYSQLVER}
  - mysql -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;" -uroot
+ - mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
+ - mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
+ - mysql -u root -e "FLUSH PRIVILEGES"
 
 install:
  - cabal --version
