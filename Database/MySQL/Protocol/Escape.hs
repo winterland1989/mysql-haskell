@@ -1,8 +1,9 @@
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE MultiWayIf   #-}
+
 {-|
 Module      : Database.MySQL.Protocol.Escape
-Description : Text and binary protocol
+Description : Pure haskell mysql escape
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com
@@ -32,16 +33,16 @@ The @\%@ and @\_@ sequences are used to search for literal instances of @%@ and 
 
 module Database.MySQL.Protocol.Escape where
 
-import Data.Text (Text)
-import Data.ByteString (ByteString)
-import qualified Data.Text.Array as TA
-import qualified Data.Text.Internal as T
+import           Data.ByteString          (ByteString)
 import qualified Data.ByteString.Internal as B
-import Foreign.ForeignPtr       (withForeignPtr)
-import Foreign.Ptr              (Ptr, plusPtr, minusPtr)
-import GHC.IO                   (unsafeDupablePerformIO)
-import Foreign.Storable         (peek, poke, pokeByteOff)
-import Data.Word
+import           Data.Text                (Text)
+import qualified Data.Text.Array          as TA
+import qualified Data.Text.Internal       as T
+import           Data.Word
+import           Foreign.ForeignPtr       (withForeignPtr)
+import           Foreign.Ptr              (Ptr, minusPtr, plusPtr)
+import           Foreign.Storable         (peek, poke, pokeByteOff)
+import           GHC.IO                   (unsafeDupablePerformIO)
 
 escapeText :: Text -> Text
 escapeText (T.Text arr off len)

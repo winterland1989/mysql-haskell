@@ -1,7 +1,17 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# LANGUAGE CPP                       #-}
+
+{-|
+Module      : Database.MySQL.Protocol
+Description : All protocol related.
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+This module re-exports all text protocol and binary protocol related stuff.
+
+-}
 
 module Database.MySQL.Protocol
     ( module  Database.MySQL.Protocol.Auth
@@ -17,10 +27,10 @@ module Database.MySQL.Protocol
 import           Data.Binary
 import           Data.Bits
 import           Database.MySQL.Protocol.Auth
-import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.ColumnDef
-import           Database.MySQL.Protocol.Packet
+import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.MySQLValue
+import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
 -- default Capability Flags

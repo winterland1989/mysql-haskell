@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -41,22 +40,22 @@ module Database.MySQL.Base
     , command
     ) where
 
-import           Control.Exception        (Exception, throwIO, throw)
+import           Control.Arrow             (first)
+import           Control.Exception         (Exception, throw, throwIO)
 import           Control.Monad
-import           Data.ByteString          (ByteString)
-import  qualified    Data.ByteString.Builder as BB
-import  qualified    Data.ByteString  as B
-import  qualified    Data.ByteString.Char8 as BC
-import  qualified    Data.ByteString.Lazy  as L
-import Data.Binary.Put
-import           Data.IORef               (writeIORef)
-import           Database.MySQL.Protocol
+import           Data.Binary.Put
+import           Data.ByteString           (ByteString)
+import qualified Data.ByteString           as B
+import qualified Data.ByteString.Builder   as BB
+import qualified Data.ByteString.Char8     as BC
+import qualified Data.ByteString.Lazy      as L
+import           Data.IORef                (writeIORef)
+import           Data.String               (IsString (..))
+import           Data.Typeable
 import           Database.MySQL.Connection
-import           System.IO.Streams        (InputStream, OutputStream)
-import qualified System.IO.Streams        as Stream
-import Data.String (IsString(..))
-import Data.Typeable
-import Control.Arrow (first)
+import           Database.MySQL.Protocol
+import           System.IO.Streams         (InputStream, OutputStream)
+import qualified System.IO.Streams         as Stream
 
 --------------------------------------------------------------------------------
 
@@ -172,7 +171,9 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
         return (fields, rows)
 
 
--- | A query string. This type is intended to make it difficult to
+-- | Query string type borrowed from @mysql-simple@.
+--
+-- This type is intended to make it difficult to
 -- construct a SQL query by concatenating string fragments, as that is
 -- an extremely common way to accidentally introduce SQL injection
 -- vulnerabilities into an application.
@@ -181,16 +182,10 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
 -- construct a query is to enable the @OverloadedStrings@ language
 -- extension and then simply write the query in double quotes.
 --
--- > {-# LANGUAGE OverloadedStrings #-}
--- >
--- > import Database.MySQL.Simple
--- >
--- > q :: Query
--- > q = "select ?"
---
 -- The underlying type is a 'ByteString', and literal Haskell strings
 -- that contain Unicode characters will be correctly transformed to
 -- UTF-8.
+--
 newtype Query = Query { fromQuery :: ByteString } deriving (Eq, Ord, Typeable)
 
 instance Show Query where

@@ -1,11 +1,22 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
+
+{-|
+Module      : Database.MySQL.Protocol.Packet
+Description : MySQL packet type
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+MySQL packet decoder&encoder, and varities utility.
+
+-}
 
 module Database.MySQL.Protocol.Packet where
 
 import           Control.Applicative
+import           Control.Exception     (Exception (..), throwIO)
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
@@ -13,8 +24,7 @@ import           Data.Bits
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
-import Control.Exception (throwIO, Exception(..))
-import Data.Typeable
+import           Data.Typeable
 
 --------------------------------------------------------------------------------
 -- | packet tyoe
@@ -111,9 +121,9 @@ instance Binary OK where
     put = putOK
 
 data ERR = ERR
-    { errCode     :: !Word16
-    , errState    :: !ByteString
-    , errMsg      :: !ByteString
+    { errCode  :: !Word16
+    , errState :: !ByteString
+    , errMsg   :: !ByteString
     } deriving (Show, Eq)
 
 getERR :: Get ERR
@@ -175,10 +185,7 @@ getLenEncBytes = do
     b <- lookAhead getWord8
     if b == 0xfb
     then getWord8 >> return B.empty
-    else do
-        len <- getLenEncInt
-        str <- getByteString len
-        return str
+    else getLenEncInt >>= getByteString
 
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger

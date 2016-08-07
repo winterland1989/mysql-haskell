@@ -1,35 +1,36 @@
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE BangPatterns #-}
 
 {-|
-Module      : Database.MySQL.Protocol.MySQLValue
-Description : Text and binary protocol
+Module      : Database.MySQL.BinLogProtocol.BinLogValue
+Description : binlog protocol
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : PORTABLE
 
-This module provide both text and binary row decoder/encoder machinery.
+Binlog protocol
 
 -}
 
 
 module Database.MySQL.BinLogProtocol.BinLogValue where
 
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Unsafe as B
-import Data.Bits
-import Data.Word
-import Data.Int
-import Data.Binary.Get
-import Data.Binary.Put
-import Database.MySQL.BinLogProtocol.BinLogMeta
-import Database.MySQL.Protocol.Packet
-import Database.MySQL.Protocol.MySQLValue (isColumnSet, BitMap(..))
-import Debug.Trace
+import           Data.Binary.Get
+import           Data.Binary.Put
+import           Data.Bits
+import           Data.ByteString                          (ByteString)
+import qualified Data.ByteString                          as B
+import qualified Data.ByteString.Unsafe                   as B
+import           Data.Int
+import           Data.Word
+import           Database.MySQL.BinLogProtocol.BinLogMeta
+import           Database.MySQL.Protocol.MySQLValue       (BitMap (..),
+                                                           isColumnSet)
+import           Database.MySQL.Protocol.Packet
+import           Debug.Trace
 
 -- | This data type DOES NOT try to parse binlog values into detailed haskell values.
 -- Because you may not want to waste performance in situations like database middleware.
@@ -73,47 +74,52 @@ getBinLogField BINLOG_TYPE_LONGLONG            = BinLogLongLong <$> getWord64le
 getBinLogField (BINLOG_TYPE_FLOAT  _         ) = BinLogFloat <$> getFloatle
 getBinLogField (BINLOG_TYPE_DOUBLE _         ) = BinLogDouble <$> getDoublele
 getBinLogField (BINLOG_TYPE_BIT    bits bytes) = BinLogBit <$> getBits bits bytes
-getBinLogField (BINLOG_TYPE_TIMESTAMP        ) = BinLogTimeStamp <$> getWord32le
+getBinLogField BINLOG_TYPE_TIMESTAMP           = BinLogTimeStamp <$> getWord32le
 
 -- a integer in @YYYYMMDDhhmmss@, for example:
 -- 99991231235959 stand for @9999-12-31 23:59:59@
-getBinLogField (BINLOG_TYPE_DATETIME         ) = do i <- getWord64le
-                                                    let (yyyy, i')   = i      `quotRem` 10000000000
-                                                        (mm, i'')    = i'     `quotRem` 100000000
-                                                        (dd, i''')   = i''    `quotRem` 1000000
-                                                        (h, i'''')   = i'''   `quotRem` 10000
-                                                        (m, s)       = i''''  `quotRem` 100
-                                                    pure (BinLogDateTime (fromIntegral yyyy)
-                                                                         (fromIntegral mm)
-                                                                         (fromIntegral dd)
-                                                                         (fromIntegral h)
-                                                                         (fromIntegral m)
-                                                                         (fromIntegral s))
+getBinLogField BINLOG_TYPE_DATETIME = do
+    i <- getWord64le
+    let (yyyy, i')   = i      `quotRem` 10000000000
+        (mm, i'')    = i'     `quotRem` 100000000
+        (dd, i''')   = i''    `quotRem` 1000000
+        (h, i'''')   = i'''   `quotRem` 10000
+        (m, s)       = i''''  `quotRem` 100
+    pure (BinLogDateTime (fromIntegral yyyy)
+                         (fromIntegral mm)
+                         (fromIntegral dd)
+                         (fromIntegral h)
+                         (fromIntegral m)
+                         (fromIntegral s))
 
 -- ^ a integer in @YYYYMMDD@ format, for example:
 -- 99991231 stand for @9999-12-31@
-getBinLogField (BINLOG_TYPE_DATE             ) = do i <- getWord24le
-                                                    let (yyyy, i')   = i      `quotRem` 10000
-                                                        (mm, dd)     = i'     `quotRem` 100
-                                                    pure (BinLogDate (fromIntegral yyyy)
-                                                                     (fromIntegral mm)
-                                                                     (fromIntegral dd))
+getBinLogField BINLOG_TYPE_DATE = do
+    i <- getWord24le
+    let (yyyy, i')   = i      `quotRem` 10000
+        (mm, dd)     = i'     `quotRem` 100
+    pure (BinLogDate (fromIntegral yyyy)
+                     (fromIntegral mm)
+                     (fromIntegral dd))
 
 -- ^ a integer in @hhmmss@ format(can be negative), for example:
 -- 8385959 stand for @838:59:59@
-getBinLogField (BINLOG_TYPE_TIME             ) = do i <- getWord24le
-                                                    let i' =  fromIntegral i :: Int32
-                                                        sign = if i' >= 0 then 1 else 0
-                                                        ui = abs i
-                                                    let (h, ui')     = ui     `quotRem` 10000
-                                                        (m, s)       = ui'    `quotRem` 100
-                                                    pure (BinLogTime sign (fromIntegral h)
-                                                                          (fromIntegral m)
-                                                                          (fromIntegral s))
+getBinLogField BINLOG_TYPE_TIME = do
+    i <- getWord24le
+    let i' =  fromIntegral i :: Int32
+        sign = if i' >= 0 then 1 else 0
+        ui = abs i
+    let (h, ui')     = ui     `quotRem` 10000
+        (m, s)       = ui'    `quotRem` 100
+    pure (BinLogTime sign (fromIntegral h)
+                          (fromIntegral m)
+                          (fromIntegral s))
 
-getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp  ) = do s <- getWord32be -- big-endian here!
-                                                    ms <- getMicroSecond fsp
-                                                    pure (BinLogTimeStamp2 s ms)
+getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp) = do
+    s <- getWord32be -- big-endian here!
+    ms <- getMicroSecond fsp
+    pure (BinLogTimeStamp2 s ms)
+
 -- BINLOG_TYPE_DATETIME2(big endian)
 --
 -- 1 bit sign (used when on disk)
@@ -126,17 +132,18 @@ getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp  ) = do s <- getWord32be -- big-endi
 --
 -- fractional-seconds storage (size depends on meta)
 --
-getBinLogField (BINLOG_TYPE_DATETIME2   fsp  ) = do iPart <- getWord40be
-                                                    let yyyymm = iPart `shiftR` 22 .&. 0x01FFFF -- 0b011111111111111111
-                                                        (yyyy, mm) = yyyymm `quotRem` 13
-                                                        yyyy' = fromIntegral yyyy
-                                                        mm' = fromIntegral mm
-                                                        dd = fromIntegral $ iPart `shiftR` 17 .&. 0x1F -- 0b00011111
-                                                        h =  fromIntegral $ iPart `shiftR` 12 .&. 0x1F -- 0b00011111
-                                                        m =  fromIntegral $ iPart `shiftR` 6 .&. 0x3F  -- 0b00111111
-                                                        s =  fromIntegral $ iPart .&. 0x3F             -- 0b00111111
-                                                    ms <- getMicroSecond fsp
-                                                    pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
+getBinLogField (BINLOG_TYPE_DATETIME2 fsp) = do
+    iPart <- getWord40be
+    let yyyymm = iPart `shiftR` 22 .&. 0x01FFFF -- 0b011111111111111111
+        (yyyy, mm) = yyyymm `quotRem` 13
+        yyyy' = fromIntegral yyyy
+        mm' = fromIntegral mm
+        dd = fromIntegral $ iPart `shiftR` 17 .&. 0x1F -- 0b00011111
+        h =  fromIntegral $ iPart `shiftR` 12 .&. 0x1F -- 0b00011111
+        m =  fromIntegral $ iPart `shiftR` 6 .&. 0x3F  -- 0b00111111
+        s =  fromIntegral $ iPart .&. 0x3F             -- 0b00111111
+    ms <- getMicroSecond fsp
+    pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
   where
     getWord40be :: Get Word64
     getWord40be = do
@@ -155,16 +162,18 @@ getBinLogField (BINLOG_TYPE_DATETIME2   fsp  ) = do iPart <- getWord40be
 --
 -- fractional-seconds storage (size depends on meta)
 --
-getBinLogField (BINLOG_TYPE_TIME2       fsp  ) = do iPart <- getWord24be
-                                                    let sign = fromIntegral $ iPart `shiftR` 23
-                                                        h = (fromIntegral $ iPart `shiftR` 12) .&. 0x03FF -- 0b0000001111111111
-                                                        m = (fromIntegral $ iPart `shiftR` 6) .&. 0x3F    -- 0b00111111
-                                                        s = (fromIntegral $ iPart) .&. 0x3F               -- 0b00111111
-                                                    ms <- getMicroSecond fsp
-                                                    pure (BinLogTime2 sign h m s ms)
+getBinLogField (BINLOG_TYPE_TIME2 fsp) = do
+    iPart <- getWord24be
+    let sign = fromIntegral $ iPart `shiftR` 23
+        h = fromIntegral (iPart `shiftR` 12) .&. 0x03FF -- 0b0000001111111111
+        m = fromIntegral (iPart `shiftR` 6) .&. 0x3F    -- 0b00111111
+        s = fromIntegral iPart .&. 0x3F               -- 0b00111111
+    ms <- getMicroSecond fsp
+    pure (BinLogTime2 sign h m s ms)
 
-getBinLogField (BINLOG_TYPE_YEAR             ) = do y <- getWord8
-                                                    pure $! if y == 0 then BinLogYear 0 else BinLogYear (1900 + fromIntegral y)
+getBinLogField BINLOG_TYPE_YEAR                = do
+    y <- getWord8
+    pure $! if y == 0 then BinLogYear 0 else BinLogYear (1900 + fromIntegral y)
 
 -- Decimal representation in binlog seems to be as follows:
 --
@@ -183,7 +192,7 @@ getBinLogField (BINLOG_TYPE_YEAR             ) = do y <- getWord8
 -- if there're < 9 digits at first, it will be compressed into suitable length words
 -- following a simple lookup table.
 --
-getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do
+getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
     let i = fromIntegral (precision - scale)
         (ucI, cI) = i `quotRem` digitsPerInteger
         (ucF, cF) = scale `quotRem` digitsPerInteger
@@ -195,7 +204,7 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do
 
     buf <- getByteString (fromIntegral len)
 
-    let fb = (trace (show buf) buf) `B.unsafeIndex` 0
+    let fb = buf `B.unsafeIndex` 0
         sign = if fb .&. 0x80 == 0x80 then 1 else 0
         buf' = (fb `xor` 0x80) `B.cons` B.tail buf
         buf'' = if sign == 1 then buf'
@@ -228,34 +237,36 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale ) = do
                            in fromIntegral v * (blockSize ^ x') + getUncompressed x' (B.unsafeDrop 4 bs)
 
 
-getBinLogField (BINLOG_TYPE_ENUM     size    ) = if | size == 1 -> BinLogEnum . fromIntegral <$> getWord8
-                                                    | size == 2 -> BinLogEnum . fromIntegral <$> getWord16be
-                                                    | otherwise -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: wrong \
-                                                                          \BINLOG_TYPE_ENUM size: " ++ show size
+getBinLogField (BINLOG_TYPE_ENUM size) =
+    if  | size == 1 -> BinLogEnum . fromIntegral <$> getWord8
+        | size == 2 -> BinLogEnum . fromIntegral <$> getWord16be
+        | otherwise -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: wrong \
+                              \BINLOG_TYPE_ENUM size: " ++ show size
 
 
-getBinLogField (BINLOG_TYPE_SET    bits bytes) = BinLogSet <$> getBits bits bytes
-getBinLogField (BINLOG_TYPE_BLOB   lensize   ) = do len <- if | lensize == 1 -> fromIntegral <$> getWord8
-                                                              | lensize == 2 -> fromIntegral <$> getWord16le
-                                                              | lensize == 3 -> fromIntegral <$> getWord24le
-                                                              | lensize == 4 -> fromIntegral <$> getWord32le
-                                                              | otherwise    -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
-                                                                                        \wrong BINLOG_TYPE_BLOB length size: "
-                                                                                        ++ show lensize
-                                                    BinLogBlob <$> getByteString len
+getBinLogField (BINLOG_TYPE_SET bits bytes) = BinLogSet <$> getBits bits bytes
+getBinLogField (BINLOG_TYPE_BLOB lensize) = do
+    len <- if  | lensize == 1 -> fromIntegral <$> getWord8
+               | lensize == 2 -> fromIntegral <$> getWord16le
+               | lensize == 3 -> fromIntegral <$> getWord24le
+               | lensize == 4 -> fromIntegral <$> getWord32le
+               | otherwise    -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                        \wrong BINLOG_TYPE_BLOB length size: " ++ show lensize
+    BinLogBlob <$> getByteString len
 
-getBinLogField (BINLOG_TYPE_STRING   size    ) = do len <- if | size < 256 -> fromIntegral <$> getWord8
-                                                              | otherwise  -> fromIntegral <$> getWord16le
-                                                    BinLogString <$> getByteString len
+getBinLogField (BINLOG_TYPE_STRING size) = do
+    len <- if | size < 256 -> fromIntegral <$> getWord8
+              | otherwise  -> fromIntegral <$> getWord16le
+    BinLogString <$> getByteString len
 
-getBinLogField (BINLOG_TYPE_GEOMETRY lensize ) = do len <- if | lensize == 1 -> fromIntegral <$> getWord8
-                                                              | lensize == 2 -> fromIntegral <$> getWord16le
-                                                              | lensize == 3 -> fromIntegral <$> getWord24le
-                                                              | lensize == 4 -> fromIntegral <$> getWord32le
-                                                              | otherwise    -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
-                                                                                        \wrong BINLOG_TYPE_GEOMETRY length size: "
-                                                                                        ++ show lensize
-                                                    BinLogGeometry <$> getByteString len
+getBinLogField (BINLOG_TYPE_GEOMETRY lensize) = do
+    len <- if | lensize == 1 -> fromIntegral <$> getWord8
+              | lensize == 2 -> fromIntegral <$> getWord16le
+              | lensize == 3 -> fromIntegral <$> getWord24le
+              | lensize == 4 -> fromIntegral <$> getWord32le
+              | otherwise    -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                        \wrong BINLOG_TYPE_GEOMETRY length size: " ++ show lensize
+    BinLogGeometry <$> getByteString len
 
 getMicroSecond :: Word8 -> Get Word32
 getMicroSecond 0 = pure 0
@@ -268,7 +279,7 @@ getMicroSecond 6 = fromIntegral <$> getWord24be
 getMicroSecond _ = pure 0
 
 getBits :: Word16 -> Word8 -> Get Word64
-getBits bits bytes = do
+getBits bits bytes =
     if bits == 0
     then fromIntegral <$> getWord8
     else if | bytes == 1 -> fromIntegral <$> getWord8
@@ -279,7 +290,8 @@ getBits bits bytes = do
             | bytes == 6 -> fromIntegral <$> getWord48le
             | bytes == 7 -> fromIntegral <$> getWord56le
             | bytes == 7 -> fromIntegral <$> getWord64le
-            | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: wrong bit length size: " ++ show bytes
+            | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                    \wrong bit length size: " ++ show bytes
 
   where
     getWord40le, getWord56le :: Get Word64

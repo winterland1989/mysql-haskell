@@ -1,11 +1,10 @@
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE MultiWayIf         #-}
 {-# LANGUAGE OverloadedStrings  #-}
 
 {-|
 Module      : Database.MySQL.BinLog
-Description : Text and binary protocol
+Description : Binary protocol toolkit
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com
@@ -21,15 +20,18 @@ import           Control.Exception                         (Exception, throwIO)
 import           Control.Monad
 import           Data.Binary.Put
 import           Data.ByteString                           (ByteString)
-import           Data.IORef                                (IORef, newIORef, readIORef, writeIORef)
+import           Data.IORef                                (IORef, newIORef,
+                                                            readIORef,
+                                                            writeIORef)
+import           Data.Text.Encoding                        (encodeUtf8)
 import           Data.Typeable
 import           Data.Word
-import           Data.Text.Encoding                        (encodeUtf8)
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol
-import           System.IO.Streams                         (InputStream, OutputStream)
+import           System.IO.Streams                         (InputStream,
+                                                            OutputStream)
 import qualified System.IO.Streams                         as Stream
 
 

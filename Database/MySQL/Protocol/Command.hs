@@ -1,20 +1,30 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings         #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
+
+{-|
+Module      : Database.MySQL.Protocol.Command
+Description : MySQL commands
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+Common MySQL commands supports.
+
+-}
 
 module Database.MySQL.Protocol.Command where
 
-import           Control.Monad
 import           Control.Applicative
+import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
-import   Data.ByteString       (ByteString)
-import           Database.MySQL.Protocol.Packet
+import           Data.ByteString                    (ByteString)
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue
+import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
 --  Commands
@@ -102,7 +112,7 @@ instance Binary Command where
 
 -- | call 'isOK' with this packet return true
 data StmtPrepareOK = StmtPrepareOK
-    { stmtId :: !Word32
+    { stmtId        :: !Word32
     , stmtColumnCnt :: !Int
     , stmtParamCnt  :: !Int
     , stmtWarnCnt   :: !Int

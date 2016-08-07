@@ -1,9 +1,18 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings         #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
+
+{-|
+Module      : Database.MySQL.Protocol.ColumnDef
+Description : MySQL field type
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+Column definition(aka. field type).
+
+-}
 
 module Database.MySQL.Protocol.ColumnDef where
 
@@ -11,8 +20,8 @@ import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
-import           Data.ByteString.Char8 as BC
-import           Data.Bits ((.&.))
+import           Data.Bits                      ((.&.))
+import           Data.ByteString.Char8          as BC
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -21,17 +30,17 @@ import           Database.MySQL.Protocol.Packet
 -- | A description of a field (column) of a table.
 data ColumnDef = ColumnDef
     { -- fieldCatalog :: !ByteString            -- ^ const 'def'
-      columnDB ::         !ByteString            -- ^ Database for table.
-    , columnTable ::      !ByteString            -- ^ Table of column, if column was a field.
+      columnDB        ::         !ByteString            -- ^ Database for table.
+    , columnTable     ::      !ByteString            -- ^ Table of column, if column was a field.
     , columnOrigTable ::  !ByteString            -- ^ Original table name, if table was an alias.
-    , columnName ::       !ByteString            -- ^ Name of column.
-    , columnOrigName ::   !ByteString            -- ^ Original column name, if an alias.
+    , columnName      ::       !ByteString            -- ^ Name of column.
+    , columnOrigName  ::   !ByteString            -- ^ Original column name, if an alias.
     -- columnFixedLen ::  !LenEncInt              -- ^ const '0x0C'
-    , columnCharSet ::    !Word16                 -- ^ Character set number.
-    , columnLength ::     !Word32                 -- ^ Width of column (create length).
-    , columnType ::       !FieldType
-    , columnFlags ::      !Word16                 -- ^ Div flags.
-    , columnDecimals ::   !Word8                  -- ^ Number of decimals in field.
+    , columnCharSet   ::    !Word16                 -- ^ Character set number.
+    , columnLength    ::     !Word32                 -- ^ Width of column (create length).
+    , columnType      ::       !FieldType
+    , columnFlags     ::      !Word16                 -- ^ Div flags.
+    , columnDecimals  ::   !Word8                  -- ^ Number of decimals in field.
     -- columnfiller :: Word16                     -- const 0x00 0x00
     } deriving (Show, Eq)
 

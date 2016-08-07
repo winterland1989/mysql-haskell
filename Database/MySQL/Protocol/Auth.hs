@@ -1,18 +1,27 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
+
+{-|
+Module      : Database.MySQL.Protocol.Auth
+Description : MySQL field type
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+Auth related packet.
+
+-}
 
 module Database.MySQL.Protocol.Auth where
 
-import           Control.Monad
 import           Control.Applicative
+import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
-import qualified Data.ByteString       as B
-import           Data.ByteString.Char8 as BC
+import qualified Data.ByteString                as B
+import           Data.ByteString.Char8          as BC
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------

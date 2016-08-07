@@ -1,7 +1,7 @@
 mysql-haskell
 =============
 
-`mysql-haskell` is a MySQL driver written entirely in haskell by Winterland at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
+`mysql-haskell` is a MySQL driver written entirely in haskell by @winterland1989 at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
 
 Roadmap:
 

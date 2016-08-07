@@ -1,26 +1,40 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{-|
+Module      : Database.MySQL.Connection
+Description : Connection managment
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+This is an internal module, the 'MySQLConn' type should not directly acessed to user.
+
+-}
+
 module Database.MySQL.Connection where
 
-import           Control.Monad            (unless)
 import           Control.Exception        (Exception, bracketOnError, throwIO)
-import           Data.Typeable
-import           System.IO.Streams        (InputStream, OutputStream)
-import           Data.IORef               (IORef, readIORef, newIORef, writeIORef)
-import           Database.MySQL.Protocol
+import           Control.Monad            (unless)
+import qualified Crypto.Hash              as Crypto
+import qualified Data.Binary              as Binary
+import qualified Data.Binary.Put          as Binary
+import qualified Data.Bits                as Bit
+import qualified Data.ByteArray           as BA
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as L
-import qualified Data.ByteArray           as BA
-import qualified Data.Bits                as Bit
-import qualified Crypto.Hash              as Crypto
+import           Data.IORef               (IORef, newIORef, readIORef,
+                                           writeIORef)
+import           Data.Typeable
+import           Database.MySQL.Protocol
 import           Network.Socket           (HostName, PortNumber)
+import qualified Network.Socket           as N
+import           System.IO.Streams        (InputStream, OutputStream)
 import qualified System.IO.Streams        as Stream
 import qualified System.IO.Streams.Binary as Binary
-import qualified Data.Binary.Put          as Binary
-import qualified Data.Binary              as Binary
 import qualified System.IO.Streams.TCP    as TCP
-import qualified Network.Socket           as N
 
 --------------------------------------------------------------------------------
 

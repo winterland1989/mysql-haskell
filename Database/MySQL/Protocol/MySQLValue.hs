@@ -10,39 +10,43 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : PORTABLE
 
-This module provide both text and binary row decoder/encoder machinery.
+Core text and binary row decoder/encoder machinery.
 
 -}
 
-
 module Database.MySQL.Protocol.MySQLValue where
 
-import Control.Monad
-import qualified Data.ByteString.Lex.Integral   as LexInt
-import qualified Data.ByteString.Lex.Fractional as LexFrac
-import Data.Text (Text)
-import qualified Data.Text.Encoding as T
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Unsafe as B
-import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Char8 as BC
-import Data.Scientific (Scientific)
-import Data.ByteString.Builder.Scientific (scientificBuilder)
-import qualified Blaze.Text as Textual
-import Data.Bits
-import Data.Fixed (Pico)
-import Data.Word
-import Data.Int
-import Data.Time.Format (defaultTimeLocale, formatTime)
-import Data.Time.Calendar (Day, fromGregorian, toGregorian)
-import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
-import Data.Binary.Get
-import Data.Binary.Put
-import Database.MySQL.Protocol.ColumnDef
-import Database.MySQL.Protocol.Packet
-import Database.MySQL.Protocol.Escape
-import Data.Typeable
+import qualified Blaze.Text                         as Textual
+import           Control.Applicative
+import           Control.Monad
+import           Data.Binary.Get
+import           Data.Binary.Put
+import           Data.Bits
+import           Data.ByteString                    (ByteString)
+import qualified Data.ByteString                    as B
+import           Data.ByteString.Builder.Scientific (scientificBuilder)
+import qualified Data.ByteString.Char8              as BC
+import qualified Data.ByteString.Lazy               as L
+import qualified Data.ByteString.Lex.Fractional     as LexFrac
+import qualified Data.ByteString.Lex.Integral       as LexInt
+import qualified Data.ByteString.Unsafe             as B
+import           Data.Fixed                         (Pico)
+import           Data.Int
+import           Data.Scientific                    (Scientific)
+import           Data.Text                          (Text)
+import qualified Data.Text.Encoding                 as T
+import           Data.Time.Calendar                 (Day, fromGregorian,
+                                                     toGregorian)
+import           Data.Time.Format                   (defaultTimeLocale,
+                                                     formatTime)
+import           Data.Time.LocalTime                (LocalTime (..),
+                                                     TimeOfDay (..))
+import           Data.Typeable
+import           Data.Word
+import           Database.MySQL.Protocol.ColumnDef
+import           Database.MySQL.Protocol.Escape
+import           Database.MySQL.Protocol.Packet
+
 --------------------------------------------------------------------------------
 -- | data type mapping between MySQL values and haskell values.
 data MySQLValue

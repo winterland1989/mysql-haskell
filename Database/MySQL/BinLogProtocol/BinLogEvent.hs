@@ -1,28 +1,39 @@
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE DeriveDataTypeable        #-}
+{-# LANGUAGE OverloadedStrings         #-}
 
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
+{-|
+Module      : Database.MySQL.BinLogProtocol.BinLogEvent
+Description : Binlog event
+Copyright   : (c) Winterland, 2016
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : PORTABLE
+
+Binlog event type
+-}
+
 module Database.MySQL.BinLogProtocol.BinLogEvent where
 
-import           Control.Monad
-import           Control.Monad.Loops    (untilM)
 import           Control.Applicative
+import           Control.Monad
+import           Control.Monad.Loops                       (untilM)
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Bits
-import           Data.ByteString         (ByteString)
-import qualified Data.ByteString         as B
-import qualified Data.ByteString.Unsafe  as B
-import qualified Data.ByteString.Lazy    as L
-import           Database.MySQL.Protocol
+import           Data.ByteString                           (ByteString)
+import qualified Data.ByteString                           as B
+import qualified Data.ByteString.Lazy                      as L
+import qualified Data.ByteString.Unsafe                    as B
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
+import           Database.MySQL.Protocol
 
-import Control.Exception (throwIO, Exception(..))
-import Data.Typeable (Typeable)
+import           Control.Exception                         (Exception (..),
+                                                            throwIO)
+import           Data.Typeable                             (Typeable)
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -110,9 +121,9 @@ getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
 --------------------------------------------------------------------------------
 
 data FormatDescription = FormatDescription
-    { fdVersion      :: !Word16
-    , fdMySQLVersion :: !ByteString
-    , fdCreateTime   :: !Word32
+    { fdVersion              :: !Word16
+    , fdMySQLVersion         :: !ByteString
+    , fdCreateTime           :: !Word32
     -- , eventHeaderLen :: !Word8  -- const 19
     , fdEventHeaderLenVector :: !ByteString  -- ^ a array indexed by Binlog Event Type - 1
                                              -- to extract the length of the event specific header.
@@ -191,12 +202,12 @@ getTableMapEvent fd = do
     return (TableMapEvent tid flgs schema table cc typs metas nullmap)
 
 data DeleteRowsEvent = DeleteRowsEvent
-    { deleteTableId     :: !Word64
-    , deleteFlags       :: !Word16
+    { deleteTableId    :: !Word64
+    , deleteFlags      :: !Word16
     -- , deleteExtraData   :: !RowsEventExtraData
-    , deleteColumnCnt   :: !Int
-    , deletePresentMap  :: !BitMap
-    , deleteRowData     :: ![[BinLogValue]]
+    , deleteColumnCnt  :: !Int
+    , deletePresentMap :: !BitMap
+    , deleteRowData    :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
 getDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get DeleteRowsEvent
@@ -213,12 +224,12 @@ getDeleteRowEvent fd tme typ = do
     DeleteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
 data WriteRowsEvent = WriteRowsEvent
-    { writeTableId     :: !Word64
-    , writeFlags       :: !Word16
+    { writeTableId    :: !Word64
+    , writeFlags      :: !Word16
     -- , writeExtraData   :: !RowsEventExtraData
-    , writeColumnCnt   :: !Int
-    , writePresentMap  :: !BitMap
-    , writeRowData     :: ![[BinLogValue]]
+    , writeColumnCnt  :: !Int
+    , writePresentMap :: !BitMap
+    , writeRowData    :: ![[BinLogValue]]
     } deriving (Show, Eq)
 
 getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
@@ -235,12 +246,12 @@ getWriteRowEvent fd tme typ = do
     WriteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
 data UpdateRowsEvent = UpdateRowsEvent
-    { updateTableId     :: !Word64
-    , updateFlags       :: !Word16
+    { updateTableId    :: !Word64
+    , updateFlags      :: !Word16
     -- , updateExtraData   :: !RowsEventExtraData
-    , updateColumnCnt   :: !Int
-    , updatePresentMap  :: !(BitMap, BitMap)
-    , updateRowData     :: ![ ([BinLogValue], [BinLogValue]) ]
+    , updateColumnCnt  :: !Int
+    , updatePresentMap :: !(BitMap, BitMap)
+    , updateRowData    :: ![ ([BinLogValue], [BinLogValue]) ]
     } deriving (Show, Eq)
 
 getUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get UpdateRowsEvent
