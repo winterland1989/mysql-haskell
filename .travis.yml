@@ -2,22 +2,24 @@ sudo: required
 dist: trusty
 
 env:
- - CABALVER=1.18 GHCVER=7.8.4  MYSQL=5.5
- - CABALVER=1.18 GHCVER=7.8.4  MYSQL=5.6
- - CABALVER=1.22 GHCVER=7.10.2 MYSQL=5.5
- - CABALVER=1.22 GHCVER=7.10.2 MYSQL=5.6
- - CABALVER=1.24 GHCVER=8.0.1  MYSQL=5.5
- - CABALVER=1.24 GHCVER=8.0.1  MYSQL=5.6
+ - CABALVER=1.18 GHCVER=7.8.4  MYSQLVER=5.5
+ - CABALVER=1.18 GHCVER=7.8.4  MYSQLVER=5.6
+ - CABALVER=1.22 GHCVER=7.10.2 MYSQLVER=5.5
+ - CABALVER=1.22 GHCVER=7.10.2 MYSQLVER=5.6
+ - CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.5
+ - CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.6
 
 # Note: the distinction between `before_install` and `install` is not important.
 before_install:
+ - export DEBIAN_FRONTEND=noninteractive
  - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
  - travis_retry sudo apt-get update
  - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER # see note about happy/alex
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
  - travis_retry sudo apt-get install happy-1.19.4 alex-3.1.3
  - export PATH=/opt/alex/3.1.3/bin:/opt/happy/1.19.4/bin:$PATH
- - travis_retry sudo apt-get install mysql-server-${MYSQL}
+
+ - travis_retry sudo apt-get install -q -y mysql-server-${MYSQLVER} mysql-client-core-${MYSQLVER} mysql-client-${MYSQLVER}
  - mysql -e "CREATE DATABASE IF NOT EXISTS test-mysql-haskell;" -uroot
 
 install:
