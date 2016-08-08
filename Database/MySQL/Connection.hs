@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings  #-}
-
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment

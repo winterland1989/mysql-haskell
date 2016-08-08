@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings  #-}
-
 {-|
 Module      : Database.MySQL.Base
 Description : Prelude of mysql-haskell
@@ -50,6 +48,7 @@ import qualified Data.ByteString.Char8     as BC
 import qualified Data.ByteString.Lazy      as L
 import           Data.IORef                (writeIORef)
 import           Data.String               (IsString (..))
+import           Data.Monoid
 import           Data.Typeable
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol

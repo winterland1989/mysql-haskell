@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings  #-}
-
 {-|
 Module      : Database.MySQL.BinLog
 Description : Binary protocol toolkit

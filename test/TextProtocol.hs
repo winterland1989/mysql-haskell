@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BinaryLiterals #-}
-
 module TextProtocol where
 
 import Database.MySQL.Base

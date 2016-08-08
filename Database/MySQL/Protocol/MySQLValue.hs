@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings  #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|
@@ -26,7 +25,6 @@ import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
 import           Data.ByteString.Builder.Scientific (scientificBuilder)
 import qualified Data.ByteString.Char8              as BC
-import qualified Data.ByteString.Lazy               as L
 import qualified Data.ByteString.Lex.Fractional     as LexFrac
 import qualified Data.ByteString.Lex.Integral       as LexInt
 import qualified Data.ByteString.Unsafe             as B
@@ -400,6 +398,9 @@ putBinaryField (MySQLInt64      n) = putInt64le n
 putBinaryField (MySQLFloat      x) = putFloatle x
 putBinaryField (MySQLDouble     x) = putDoublele x
 putBinaryField (MySQLYear       n) = putWord16le n
+putBinaryField (MySQLTimeStamp (LocalTime date time)) = do putWord8 11    -- always put full
+                                                           putBinaryDay date
+                                                           putBinaryTime time
 putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
                                                            putBinaryTime time

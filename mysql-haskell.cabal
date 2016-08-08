@@ -55,6 +55,8 @@ library
     default-extensions:     DeriveDataTypeable
                         ,   DeriveGeneric
                         ,   MultiWayIf
+                        ,   OverloadedStrings
+                        ,   BinaryLiterals
     ghc-options:       -Wall
 
 test-suite test
@@ -66,4 +68,7 @@ test-suite test
       , base
       , HUnit
       , io-streams
+    default-extensions:     MultiWayIf
+                        ,   OverloadedStrings
+                        ,   BinaryLiterals
     default-language:    Haskell2010
