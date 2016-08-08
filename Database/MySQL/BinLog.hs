@@ -14,6 +14,7 @@ module Database.MySQL.BinLog where
 
 import           Control.Exception                         (Exception, throwIO)
 import           Control.Monad
+import           Control.Applicative
 import           Data.Binary.Put
 import           Data.ByteString                           (ByteString)
 import           Data.IORef                                (IORef, newIORef,

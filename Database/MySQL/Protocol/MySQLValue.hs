@@ -23,7 +23,7 @@ import           Data.Binary.Put
 import           Data.Bits
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
-import           Data.ByteString.Builder.Scientific (scientificBuilder)
+import           Data.ByteString.Builder.Scientific (formatScientificBuilder, FPFormat(..))
 import qualified Data.ByteString.Char8              as BC
 import qualified Data.ByteString.Lex.Fractional     as LexFrac
 import qualified Data.ByteString.Lex.Integral       as LexInt
@@ -49,7 +49,7 @@ import           GHC.Generics (Generic)
 --------------------------------------------------------------------------------
 -- | Data type mapping between MySQL values and haskell values.
 --
--- There're some subtle differences between MySQL values and haskell values to be understand:
+-- There're some subtle differences between MySQL values and haskell values:
 --
 -- MySQL's @DATETIME@ and @TIMESTAMP@ are different on timezone handling:
 --
@@ -68,6 +68,8 @@ import           GHC.Generics (Generic)
 -- TIME values may range from '-838:59:59' to '838:59:59', so 'MySQLTime' values consist of a sign and a
 -- 'TimeOfDay' whose hour part may exceeded 24. you can use @timeOfDayToTime@ to get the absolute time interval.
 --
+-- Under MySQL >= 5.7, @DATETIME@, @TIMESTAMP@ and @TIME@ may contain fractional part, which matches haskell's
+-- precision.
 --
 data MySQLValue
     = MySQLDecimal       !Scientific   -- ^ DECIMAL, NEWDECIMAL
@@ -87,6 +89,7 @@ data MySQLValue
     | MySQLDate          !Day
     | MySQLTime          !Word8 !TimeOfDay -- ^ sign(0 = non-negative, 1 = negative) hh mm ss microsecond
                                            -- The sign is OPPOSITE to binlog one !!!
+    | MySQLGeometry      !ByteString       -- ^ todo: parsing to something meanful
     | MySQLBytes         !ByteString
     | MySQLBit           !Word64
     | MySQLText          !Text
@@ -111,6 +114,7 @@ mySQLValueType (MySQLTimeStamp    _)  = (MYSQL_TYPE_TIMESTAMP, 0x00)
 mySQLValueType (MySQLDate         _)  = (MYSQL_TYPE_DATE     , 0x00)
 mySQLValueType (MySQLTime       _ _)  = (MYSQL_TYPE_TIME     , 0x00)
 mySQLValueType (MySQLBytes        _)  = (MYSQL_TYPE_BLOB     , 0x00)
+mySQLValueType (MySQLGeometry     _)  = (MYSQL_TYPE_GEOMETRY , 0x00)
 mySQLValueType (MySQLBit          _)  = (MYSQL_TYPE_BIT      , 0x00)
 mySQLValueType (MySQLText         _)  = (MYSQL_TYPE_STRING   , 0x00)
 mySQLValueType MySQLNull              = (MYSQL_TYPE_NULL     , 0x00)
@@ -144,11 +148,13 @@ getTextField f
         || t == MYSQL_TYPE_NEWDATE      = feedLenEncBytes t MySQLDate dateParser
     | t == MYSQL_TYPE_TIME
         || t == MYSQL_TYPE_TIME2        = feedLenEncBytes t id $ \ bs ->
-                                            if bs `BC.index` 0 == '-'
-                                                then MySQLTime 1 <$> timeParser (BC.drop 1 bs)
-                                                else MySQLTime 0 <$> timeParser bs
+                                            if B.null bs
+                                            then pure MySQLNull
+                                            else if bs `BC.index` 0 == '-'
+                                                 then MySQLTime 1 <$> timeParser (BC.drop 1 bs)
+                                                 else MySQLTime 0 <$> timeParser bs
 
-    | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
+    | t == MYSQL_TYPE_GEOMETRY          = MySQLGeometry <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
         || t == MYSQL_TYPE_ENUM
         || t == MYSQL_TYPE_SET
@@ -193,7 +199,7 @@ getTextField f
 --------------------------------------------------------------------------------
 -- | Text protocol encoder
 putTextField :: MySQLValue -> Put
-putTextField (MySQLDecimal    n) = putBuilder (scientificBuilder n)
+putTextField (MySQLDecimal    n) = putBuilder (formatScientificBuilder Fixed Nothing n)
 putTextField (MySQLInt8U      n) = putBuilder (Textual.integral n)
 putTextField (MySQLInt8       n) = putBuilder (Textual.integral n)
 putTextField (MySQLInt16U     n) = putBuilder (Textual.integral n)
@@ -205,29 +211,34 @@ putTextField (MySQLInt64      n) = putBuilder (Textual.integral n)
 putTextField (MySQLFloat      x) = putBuilder (Textual.float x)
 putTextField (MySQLDouble     x) = putBuilder (Textual.double x)
 putTextField (MySQLYear       n) = putBuilder (Textual.integral n)
-putTextField (MySQLDateTime  dt) = putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
-putTextField (MySQLTimeStamp dt) = putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
-putTextField (MySQLDate       d) = putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
-putTextField (MySQLTime  sign t) = do when (sign == 1) (putCharUtf8 '-')
+putTextField (MySQLDateTime  dt) = putInQuotes $
+                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
+putTextField (MySQLTimeStamp dt) = putInQuotes $
+                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
+putTextField (MySQLDate       d) = putInQuotes $
+                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
+putTextField (MySQLTime  sign t) = putInQuotes $ do
+                                      when (sign == 1) (putCharUtf8 '-')
                                       putByteString (BC.pack (formatTime defaultTimeLocale "%T%Q" t))
                                       -- this works even for hour > 24
-putTextField (MySQLBytes     bs) = do putCharUtf8 '\''
-                                      putByteString . escapeBytes $ bs
-                                      putCharUtf8 '\''
-putTextField (MySQLText       t) = do putCharUtf8 '\''
+putTextField (MySQLGeometry  bs) = putInQuotes $ putByteString . escapeBytes $ bs
+putTextField (MySQLBytes     bs) = putInQuotes $ putByteString . escapeBytes $ bs
+putTextField (MySQLText       t) = putInQuotes $
                                       putByteString . T.encodeUtf8 . escapeText $ t
-                                      putCharUtf8 '\''
-putTextField (MySQLBit        b) = do putBuilder "0b\'"
+putTextField (MySQLBit        b) = do putBuilder "b\'"
                                       putBuilder . execPut $ putTextBits b
                                       putCharUtf8 '\''
 putTextField MySQLNull           = putBuilder "NULL"
+
+putInQuotes :: Put -> Put
+putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
 getTextRow :: [ColumnDef] -> Get [MySQLValue]
 getTextRow fs = forM fs $ \ f -> do
     p <- lookAhead getWord8
-    if p == 0x79
+    if p == 0xFB
     then getWord8 >> return MySQLNull
     else getTextField f
 
@@ -309,7 +320,7 @@ getBinaryField f
                    MySQLTime sign <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8)
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
-    | t == MYSQL_TYPE_GEOMETRY          = MySQLBytes <$> getLenEncBytes
+    | t == MYSQL_TYPE_GEOMETRY          = MySQLGeometry <$> getLenEncBytes
     | t == MYSQL_TYPE_VARCHAR
         || t == MYSQL_TYPE_ENUM
         || t == MYSQL_TYPE_SET
@@ -386,7 +397,7 @@ putTextBits word = forM_ [63,62..0] $ \ pos ->
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
 putBinaryField :: MySQLValue -> Put
-putBinaryField (MySQLDecimal    n) = putBuilder (scientificBuilder n)
+putBinaryField (MySQLDecimal    n) = putBuilder (formatScientificBuilder Fixed Nothing n)
 putBinaryField (MySQLInt8U      n) = putWord8 n
 putBinaryField (MySQLInt8       n) = putWord8 (fromIntegral n)
 putBinaryField (MySQLInt16U     n) = putWord16le n
@@ -408,6 +419,7 @@ putBinaryField (MySQLDate    d)    = putBinaryDay d
 putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
                                         putWord8 sign
                                         putBinaryTime t
+putBinaryField (MySQLGeometry bs)  = putLenEncBytes bs
 putBinaryField (MySQLBytes  bs)    = putLenEncBytes bs
 putBinaryField (MySQLBit    word)  = do putWord8 8     -- always put full
                                         putWord64be word

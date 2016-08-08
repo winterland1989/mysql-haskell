@@ -1,51 +1,96 @@
 module Main where
 
 import Database.MySQL.Base
-import Test.HUnit
+import Control.Monad
+import Test.Tasty
+import Test.Tasty.HUnit
 import qualified TextProtocol
+import System.Environment
 
 main :: IO ()
+
 main = do
-    c <- connect defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
-    execute_ c  "CREATE TEMPORARY TABLE test(\
-                \_id INT,\
-                \_bit BIT(16),\
-                \_tinyInt TINYINT,\
-                \_tinyIntU TINYINT UNSIGNED,\
-                \_smallInt SMALLINT,\
-                \_smallIntU SMALLINT UNSIGNED,\
-                \_mediumInt MEDIUMINT,\
-                \_mediumIntU MEDIUMINT UNSIGNED,\
-                \_int INT,\
-                \_intU INT UNSIGNED,\
-                \_bigInt BIGINT,\
-                \_bigIntU BIGINT UNSIGNED,\
-                \_decimal DECIMAL(20,10),\
-                \_float FLOAT,\
-                \_dobule DOUBLE\
-                \);"
+    mySQLVer <- lookupEnv "MYSQLVER"
 
-    execute_ c  "INSERT INTO test VALUES(\
-                \0,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL,\
-                \NULL\
-                \);"
-    runTestTT $ TestList
-        [   TestLabel "text protocol"   $ TextProtocol.tests c
-        ]
+    defaultMain $ testCaseSteps "Multi-step test" $ \step -> do
+        step "Preparing..."
+        c <- connect defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
+        execute_ c  "CREATE TEMPORARY TABLE test(\
+                    \__id           INT,\
+                    \__bit          BIT(16),\
+                    \__tinyInt      TINYINT,\
+                    \__tinyIntU     TINYINT UNSIGNED,\
+                    \__smallInt     SMALLINT,\
+                    \__smallIntU    SMALLINT UNSIGNED,\
+                    \__mediumInt    MEDIUMINT,\
+                    \__mediumIntU   MEDIUMINT UNSIGNED,\
+                    \__int          INT,\
+                    \__intU         INT UNSIGNED,\
+                    \__bigInt       BIGINT,\
+                    \__bigIntU      BIGINT UNSIGNED,\
+                    \__decimal      DECIMAL(20,10),\
+                    \__float        FLOAT,\
+                    \__dobule       DOUBLE,\
+                    \__date         DATE,\
+                    \__datetime     DATETIME,\
+                    \__timestamp    TIMESTAMP NULL,\
+                    \__time         TIME,\
+                    \__year         YEAR,\
+                    \__char         CHAR(8),\
+                    \__varchar      VARCHAR(1024),\
+                    \__binary       BINARY(8),\
+                    \__varbinary    VARBINARY(1024),\
+                    \__tinyblob     TINYBLOB,\
+                    \__tinytext     TINYTEXT,\
+                    \__blob         BLOB,\
+                    \__text         TEXT,\
+                    \__enum         ENUM('foo', 'bar', 'qux'),\
+                    \__set          SET('foo', 'bar', 'qux')\
+                    \) CHARACTER SET utf8;"
 
-    close c
+        when (mySQLVer == Just "5.7") $ do execute_ c "CREATE TEMPORARY TABLE test57(\
+                                                 \__datetime     DATETIME(2),\
+                                                 \__timestamp    TIMESTAMP(4) NULL,\
+                                                 \__time         TIME(6)\
+                                                 \) CHARACTER SET utf8;"
+                                           return ()
+
+        execute_ c  "INSERT INTO test VALUES(\
+                    \0,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL,\
+                    \NULL\
+                    \);"
+
+        step "Testing text protocol"
+        TextProtocol.tests c
+
+        close c
 
 

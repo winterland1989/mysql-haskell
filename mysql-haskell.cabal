@@ -56,7 +56,6 @@ library
                         ,   DeriveGeneric
                         ,   MultiWayIf
                         ,   OverloadedStrings
-                        ,   BinaryLiterals
     ghc-options:       -Wall
 
 test-suite test
@@ -66,9 +65,10 @@ test-suite test
     build-depends:
         mysql-haskell
       , base
-      , HUnit
+      , tasty
+      , tasty-hunit
       , io-streams
+      , time
     default-extensions:     MultiWayIf
                         ,   OverloadedStrings
-                        ,   BinaryLiterals
     default-language:    Haskell2010

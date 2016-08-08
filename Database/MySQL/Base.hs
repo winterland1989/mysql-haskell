@@ -38,6 +38,7 @@ module Database.MySQL.Base
     ) where
 
 import           Control.Arrow             (first)
+import           Control.Applicative
 import           Control.Exception         (Exception, throw, throwIO)
 import           Control.Monad
 import           Data.Binary.Put
