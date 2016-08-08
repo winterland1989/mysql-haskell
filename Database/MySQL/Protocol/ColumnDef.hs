@@ -30,19 +30,19 @@ import           Database.MySQL.Protocol.Packet
 
 -- | A description of a field (column) of a table.
 data ColumnDef = ColumnDef
-    { -- fieldCatalog :: !ByteString            -- ^ const 'def'
-      columnDB        ::         !ByteString            -- ^ Database for table.
-    , columnTable     ::      !ByteString            -- ^ Table of column, if column was a field.
-    , columnOrigTable ::  !ByteString            -- ^ Original table name, if table was an alias.
-    , columnName      ::       !ByteString            -- ^ Name of column.
-    , columnOrigName  ::   !ByteString            -- ^ Original column name, if an alias.
-    -- columnFixedLen ::  !LenEncInt              -- ^ const '0x0C'
-    , columnCharSet   ::    !Word16                 -- ^ Character set number.
-    , columnLength    ::     !Word32                 -- ^ Width of column (create length).
-    , columnType      ::       !FieldType
-    , columnFlags     ::      !Word16                 -- ^ Div flags.
-    , columnDecimals  ::   !Word8                  -- ^ Number of decimals in field.
-    -- columnfiller :: Word16                     -- const 0x00 0x00
+    { -- fieldCatalog :: !ByteString              -- ^ const 'def'
+      columnDB        ::  !ByteString             -- ^ Database for table.
+    , columnTable     ::  !ByteString             -- ^ Table of column, if column was a field.
+    , columnOrigTable ::  !ByteString             -- ^ Original table name, if table was an alias.
+    , columnName      ::  !ByteString             -- ^ Name of column.
+    , columnOrigName  ::  !ByteString             -- ^ Original column name, if an alias.
+    -- columnFixedLen ::    !LenEncInt              -- ^ const '0x0C'
+    , columnCharSet   ::  !Word16                 -- ^ Character set number.
+    , columnLength    ::  !Word32                 -- ^ Width of column (create length).
+    , columnType      ::  !FieldType
+    , columnFlags     ::  !Word16                 -- ^ Div flags.
+    , columnDecimals  ::  !Word8                  -- ^ Number of decimals in field.
+    -- columnFiller :: Word16                     -- const 0x00 0x00
     } deriving (Show, Eq)
 
 

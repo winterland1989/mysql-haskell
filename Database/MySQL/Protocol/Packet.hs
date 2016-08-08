@@ -99,14 +99,10 @@ data OK = OK
     } deriving (Show, Eq)
 
 getOK :: Get OK
-getOK = do
-    w <- lookAhead getWord8
-    if w == 0x00
-    then OK <$> getLenEncInt
-            <*> getLenEncInt
-            <*> getWord16le
-            <*> getWord16le
-    else fail "wrong OK packet"
+getOK = OK <$> getLenEncInt
+           <*> getLenEncInt
+           <*> getWord16le
+           <*> getWord16le
 
 putOK :: OK -> Put
 putOK (OK row lid stat wcnt) = do
@@ -127,14 +123,10 @@ data ERR = ERR
     } deriving (Show, Eq)
 
 getERR :: Get ERR
-getERR = do
-    w <- lookAhead getWord8
-    if w == 0xFF
-    then ERR <$> getWord16le
+getERR = ERR <$> getWord16le
              <*  skip 1
              <*> getByteString 5
              <*> getRemainingByteString
-    else fail "wrong ERR packet"
 
 putERR :: ERR -> Put
 putERR (ERR code stat msg) = do
@@ -154,12 +146,8 @@ data EOF = EOF
     } deriving (Show, Eq)
 
 getEOF :: Get EOF
-getEOF = do
-    w <- lookAhead getWord8
-    if w == 0xFE
-    then EOF <$> getWord16le
+getEOF = EOF <$> getWord16le
              <*> getWord16le
-    else fail "wrong EOF packet"
 
 putEOF :: EOF -> Put
 putEOF (EOF wcnt stat) = do

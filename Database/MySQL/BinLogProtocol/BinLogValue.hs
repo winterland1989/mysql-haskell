@@ -17,6 +17,7 @@ Binlog protocol
 
 module Database.MySQL.BinLogProtocol.BinLogValue where
 
+import           Control.Applicative
 import           Data.Binary.Get
 import           Data.Binary.Put
 import           Data.Bits
@@ -29,10 +30,13 @@ import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.Protocol.MySQLValue       (BitMap (..),
                                                            isColumnSet)
 import           Database.MySQL.Protocol.Packet
-import           Debug.Trace
+import           Data.Scientific
+import           GHC.Generics (Generic)
 
--- | This data type DOES NOT try to parse binlog values into detailed haskell values.
--- Because you may not want to waste performance in situations like database middleware.
+-- | Data type for representing binlog values.
+--
+-- This data type DOES NOT try to parse binlog values into detailed haskell values,
+-- because you may not want to waste performance in situations like database middleware.
 --
 data BinLogValue
     = BinLogTiny       !Word8
@@ -52,14 +56,14 @@ data BinLogValue
     | BinLogTime       !Word8  !Word16 !Word8 !Word8           -- ^ sign(1= non-negative, 0= negative) hh mm ss
     | BinLogTime2      !Word8  !Word16 !Word8 !Word8 !Word32   -- ^ sign(1= non-negative, 0= negative) hh mm ss microsecond
     | BinLogYear       !Word16                                 -- ^ year value, 0 stand for '0000'
-    | BinLogNewDecimal !Word8  !Integer !Integer               -- ^ sign(1= non-negative, 0= negative) integeral part, fractional part
+    | BinLogNewDecimal !Scientific                             -- ^ sign(1= non-negative, 0= negative) integeral part, fractional part
     | BinLogEnum       !Word16                                 -- ^ enum indexing value
     | BinLogSet        !Word64                                 -- ^ set indexing 64bit bitmap.
     | BinLogBlob       !ByteString
     | BinLogString     !ByteString                             -- ^ no attempt to do charset decoding here
     | BinLogGeometry   !ByteString
     | BinLogNull
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 --------------------------------------------------------------------------------
 -- | BinLog protocol decoder
@@ -204,7 +208,7 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
     buf <- getByteString (fromIntegral len)
 
     let fb = buf `B.unsafeIndex` 0
-        sign = if fb .&. 0x80 == 0x80 then 1 else 0
+        sign = if fb .&. 0x80 == 0x80 then 1 else 0 :: Word8
         buf' = (fb `xor` 0x80) `B.cons` B.tail buf
         buf'' = if sign == 1 then buf'
                             else B.map (xor 0xFF) buf'
@@ -217,7 +221,9 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
         fPart = getUncompressed ucF (B.unsafeTake ucFSize buf''') * (10 ^ cF)
               + fromIntegral (getCompressed cFSize (B.unsafeDrop ucFSize buf'''))
 
-    pure (BinLogNewDecimal sign iPart fPart)
+    let sci = scientific (iPart * 10 ^ scale + fPart) (negate $ fromIntegral scale)
+        sci' = if sign == 0 then negate sci else sci
+    pure (BinLogNewDecimal sci')
   where
     digitsPerInteger = 9
     blockSize = fromIntegral $ (10 :: Int32) ^ (9 :: Int)
@@ -288,7 +294,7 @@ getBits bits bytes =
             | bytes == 5 -> fromIntegral <$> getWord40le
             | bytes == 6 -> fromIntegral <$> getWord48le
             | bytes == 7 -> fromIntegral <$> getWord56le
-            | bytes == 7 -> fromIntegral <$> getWord64le
+            | bytes == 8 -> fromIntegral <$> getWord64le
             | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
                                     \wrong bit length size: " ++ show bytes
 
