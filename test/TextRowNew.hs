@@ -24,7 +24,8 @@ tests c = do
 
     Just v <- Stream.read is
     assertEqual "decode NULL values" v
-        [ MySQLNull
+        [ MySQLInt32 0
+        , MySQLNull
         , MySQLNull
         , MySQLNull
         ]
