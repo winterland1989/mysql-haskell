@@ -182,23 +182,24 @@ getTextField f
     fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
     dateParser bs = do
         (yyyy, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.tail rest)
-        (dd, _) <- LexInt.readDecimal (B.tail rest')
+        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
+        (dd, _) <- LexInt.readDecimal (B.unsafeTail rest')
         return (fromGregorian yyyy mm dd)
 
     timeParser bs = do
         (hh, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.tail rest)
-        (ss, _) <- LexFrac.readDecimal (B.tail rest')
+        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
+        (ss, _) <- LexFrac.readDecimal (B.unsafeTail rest')
         return (TimeOfDay hh mm ss)
 
     feedLenEncBytes typ con parser = do
         bs <- getLenEncBytes
         if B.null bs
-            then return MySQLNull
-            else case parser bs of
-                Just v -> return (con v)
-                Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
+        then return MySQLNull
+        else case parser bs of
+            Just v -> return (con v)
+            Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, \
+                              \input: " ++ BC.unpack bs
 
 --------------------------------------------------------------------------------
 -- | Text protocol encoder

@@ -48,7 +48,7 @@ data MySQLConn = MySQLConn {
 
 -- | Everything you need to establish a MySQL connection.
 --
-data ConnInfo = ConnInfo
+data ConnectInfo = ConnectInfo
     { ciHost     :: HostName
     , ciPort     :: PortNumber
     , ciDatabase :: ByteString
@@ -58,18 +58,18 @@ data ConnInfo = ConnInfo
     }
     deriving Show
 
--- | A simple 'ConnInfo' targeting localhost with @user=root@ and empty password.
+-- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
-defaultConnectInfo :: ConnInfo
-defaultConnectInfo = ConnInfo "127.0.0.1" 3306 "" "root" "" Nothing
+defaultConnectInfo :: ConnectInfo
+defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" Nothing
 
 --------------------------------------------------------------------------------
 
 -- | Establish a MySQL connection.
 --
-connect :: ConnInfo -> IO MySQLConn
-connect ci@(ConnInfo host port _ _ _ tls) =
-    bracketOnError (TCP.connect host port)
+connect :: ConnectInfo -> IO MySQLConn
+connect ci@(ConnectInfo host port _ _ _ tls) =
+    bracketOnError (TCP.connectWithBufferSize host port 65530)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- Binary.decodeInputStream is
             os' <- Binary.encodeOutputStream os
@@ -85,8 +85,8 @@ connect ci@(ConnInfo host port _ _ _ tls) =
                 return conn
             else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
   where
-    mkAuth :: ConnInfo -> Greeting -> Auth
-    mkAuth (ConnInfo _ _ db user pass _) greet =
+    mkAuth :: ConnectInfo -> Greeting -> Auth
+    mkAuth (ConnectInfo _ _ db user pass _) greet =
         let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
             scambleBuf = scramble salt pass
         in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
@@ -104,13 +104,16 @@ connect ci@(ConnInfo host port _ _ _ tls) =
 -- | Close a MySQL connection.
 --
 close :: MySQLConn -> IO ()
-close (MySQLConn _ os closeSocket _) = Stream.write Nothing os >> closeSocket
+close conn@(MySQLConn is os closeSocket _) = do
+    command conn COM_QUIT
+    Stream.write Nothing os
+    _ <- readPacket is
+    closeSocket
 
 -- | Send a 'COM_PING'.
 --
 ping :: MySQLConn -> IO OK
 ping = flip command COM_PING
-
 
 --------------------------------------------------------------------------------
 -- helpers
@@ -136,7 +139,7 @@ readPacket is = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet
                 acc' = bs:acc
             if len' < 16777215
             then return (Packet len'' seqN (L.concat . reverse $ acc'))
-            else go len'' acc'
+            else len'' `seq` go len'' acc'
         )
 
 writeCommand :: Command -> OutputStream Packet -> IO ()
@@ -148,14 +151,15 @@ writeCommand a = let bs = Binary.runPut (Binary.put a) in
         then Stream.write (Just (Packet len seqN bs))
         else go (len - 16777215) (seqN + 1) (L.drop 16777215 bs)
 
-
 guardUnconsumed :: MySQLConn -> IO ()
 guardUnconsumed (MySQLConn _ _ _ consumed) = do
     c <- readIORef consumed
     unless c (throwIO UnconsumedResultSet)
+{-# INLINE guardUnconsumed #-}
 
 writeIORef' :: IORef a -> a -> IO ()
 writeIORef' ref x = x `seq` writeIORef ref x
+{-# INLINE writeIORef' #-}
 
 --------------------------------------------------------------------------------
 -- default Capability Flags

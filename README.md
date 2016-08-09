@@ -1,6 +1,8 @@
 mysql-haskell
 =============
 
+[![Build Status](https://travis-ci.org/winterland1989/mysql-haskell.svg)](https://travis-ci.org/winterland1989/mysql-haskell)
+
 `mysql-haskell` is a MySQL driver written entirely in haskell by @winterland1989 at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
 
 Roadmap:
@@ -14,7 +16,7 @@ Roadmap:
 - [ ] comprehensive testsuit and benchmark
 - [ ] tls support
 
-This project is still in infancy stage and lack of produciton tests, use on your own risk, and any form of contributions are welcomed!
+This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
 
 Motivation
 ----------
@@ -58,6 +60,8 @@ an eye on following combinations:
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.5
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.6
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.7
+
+There's a c++ multiple threads version as a reference under `benchmark`, you may need to modify `bench.sh`(change the include path) to get it running.
 
 Guide
 -----

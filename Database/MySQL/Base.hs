@@ -13,7 +13,7 @@ This module provide common MySQL operations.
 module Database.MySQL.Base
     ( -- * Setting up and control connection
       MySQLConn
-    , ConnInfo(..)
+    , ConnectInfo(..)
     , defaultConnectInfo
     , connect
     , close
@@ -99,7 +99,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         rows <- Stream.makeInputStream $ do
             p' <- readPacket is
             if  | isEOF p'  -> writeIORef consumed True >> return Nothing
-                | isERR p'  -> decodeFromPacket p' >>=throwIO . ERRException
+                | isERR p'  -> decodeFromPacket p' >>= throwIO . ERRException
                 | otherwise -> Just <$> getFromPacket (getTextRow fields) p'
         return (fields, rows)
 

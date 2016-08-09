@@ -105,7 +105,6 @@ instance Binary Command where
     get = getCommand
     put = putCommand
 
-
 --------------------------------------------------------------------------------
 --  Prepared statment related
 

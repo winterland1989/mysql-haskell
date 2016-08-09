@@ -1,4 +1,4 @@
-// make libmysql.c LDFLAGS="-g -O2 -L/usr/lib64/mysql -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl"
+// g++ libmysql.c -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl -I/usr/local/include/mysql -o libmysql
 
 #include <stdio.h>
 #include <string.h>
@@ -9,10 +9,10 @@
 
 #define THREAD_NUM  4
 #define DBHOST      "localhost"
-#define DBUSER      "root"
-#define DBPASS      "pca"
+#define DBUSER      "testMySQLHaskell"
+#define DBPASS      ""
 #define DBPORT      3306
-#define DBNAME      "dxponline"
+#define DBNAME      "testMySQLHaskell"
 #define DBSOCK      NULL //"/var/lib/mysql/mysql.sock"
 #define DBPCNT      0
 
@@ -27,11 +27,12 @@ void *func(void *arg)
     ThreadArgs *args = (ThreadArgs *)arg;
     MYSQL_RES *result;
     MYSQL_ROW row;
+    unsigned int rowCounter = 0;
     MYSQL_FIELD *field;
     unsigned int num_fields;
     unsigned int i;
     unsigned int timeout = 3000;
-    const char *pStatement = "SHOW TABLES";
+    const char *pStatement = "SELECT * FROM employees";
     mysql_thread_init();
     MYSQL *mysql = mysql_init(NULL);
 
@@ -72,25 +73,27 @@ void *func(void *arg)
     }
 
     num_fields = mysql_num_fields(result);
-    printf("[%ld][%d]numbers of result: %d\n", *args->thread_id, args->id, num_fields);
-
+    printf("numbers of fields: %d\n", num_fields);
+    printf("field name: ");
     while (NULL != (field = mysql_fetch_field(result)))
     {
-        printf("[%ld][%d]field name: %s\n", *args->thread_id, args->id, field->name);
+        printf(" %s ", field->name);
     }
+    printf("\n");
 
     while (NULL != (row = mysql_fetch_row(result)))
     {
+        rowCounter++;
         unsigned long *lengths;
         lengths = mysql_fetch_lengths(result);
 
         for (i = 0; i < num_fields; i++)
         {
-            printf("[%ld][%d]{%.*s} ", *args->thread_id, args->id, (int) lengths[i], row[i] ? row[i] : "NULL");
+            //printf("[%ld][%d]{%.*s} ", *args->thread_id, args->id, (int) lengths[i], row[i] ? row[i] : "NULL");
         }
 
-        printf("\n");
     }
+    printf("loop through result, total %d rows\n", rowCounter);
 
     mysql_free_result(result);
     mysql_close(mysql);

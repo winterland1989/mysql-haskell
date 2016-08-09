@@ -32,7 +32,7 @@ data Packet = Packet
     { pLen  :: !Int
     , pSeqN :: !Word8
     , pBody :: !L.ByteString
-    } deriving Show
+    } deriving (Show, Eq)
 
 putPacket :: Packet -> Put
 putPacket (Packet len seqN body)  = do
@@ -49,17 +49,21 @@ getPacket = do
 
 instance Binary Packet where
     put = putPacket
+    {-# INLINE put #-}
     get = getPacket
-
+    {-# INLINE get #-}
 
 isERR :: Packet -> Bool
 isERR p = L.index (pBody p) 0 == 0xFF
+{-# INLINE isERR #-}
 
 isOK :: Packet -> Bool
 isOK p  = L.index (pBody p) 0 == 0x00
+{-# INLINE isOK #-}
 
 isEOF :: Packet -> Bool
 isEOF p = L.index (pBody p) 0 == 0xFE
+{-# INLINE isEOF #-}
 
 -- | get packet inside IO, throw 'DecodePacketException' on fail parsing.
 -- here we choose stability over correctness by omit incomplete consumed case:
@@ -68,11 +72,13 @@ decodeFromPacket :: Binary a => Packet -> IO a
 decodeFromPacket (Packet _ _ body) = case decodeOrFail body of
     Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
     Right (_, _, r)            -> return r
+{-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
 getFromPacket g (Packet _ _ body) = case runGetOrFail g body of
     Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
     Right (_, _, r)            -> return r
+{-# INLINE getFromPacket #-}
 
 data DecodePacketException = DecodePacketException ByteString ByteOffset String deriving (Typeable, Show)
 instance Exception DecodePacketException
@@ -82,20 +88,22 @@ encodeToPacket seqN payload =
     let s = encode payload
         l = L.length s
     in Packet (fromIntegral l) seqN s
+{-# INLINE encodeToPacket #-}
 
 putToPacket :: Word8 -> Put -> Packet
 putToPacket seqN payload =
     let s = runPut payload
         l = L.length s
     in Packet (fromIntegral l) seqN s
+{-# INLINE putToPacket #-}
 
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
 data OK = OK
-    { okAffectedRows :: Int
-    , okLastInsertID :: Int
-    , okStatus       :: Word16
-    , okWarningCnt   :: Word16
+    { okAffectedRows :: !Int
+    , okLastInsertID :: !Int
+    , okStatus       :: !Word16
+    , okWarningCnt   :: !Word16
     } deriving (Show, Eq)
 
 getOK :: Get OK
@@ -167,6 +175,7 @@ putLenEncBytes c = do
         let l = B.length c
         putWord8 $ fromIntegral l
         putByteString c
+{-# INLINE putLenEncBytes #-}
 
 getLenEncBytes :: Get ByteString
 getLenEncBytes = do
@@ -174,6 +183,7 @@ getLenEncBytes = do
     if b == 0xfb
     then getWord8 >> return B.empty
     else getLenEncInt >>= getByteString
+{-# INLINE getLenEncBytes #-}
 
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
@@ -186,6 +196,7 @@ getLenEncInt = getWord8 >>= word2Len
          | l == 0xfd  = fromIntegral <$> getWord24le
          | l == 0xfe  = fromIntegral <$> getWord64le
          | otherwise = fail $ "invalid length val " ++ show l
+{-# INLINE getLenEncInt #-}
 
 putLenEncInt:: Int -> Put
 putLenEncInt x
@@ -193,6 +204,7 @@ putLenEncInt x
          | x < 65536     = putWord16le (fromIntegral x)
          | x < 16777216  = putWord24le (fromIntegral x)
          | otherwise     = putWord64le (fromIntegral x)
+{-# INLINE putLenEncInt #-}
 
 putWord24le :: Word32 -> Put
 putWord24le v = do
