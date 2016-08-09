@@ -25,10 +25,12 @@ In short, it's about 2~3 times slower than pure c/c++, but 3 times faster than o
 
 <img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-10.png?raw=true">
 
+Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db), since i haven't taken much time on optimizing, hopefully the figures may improve in future, and more benchmark(insert/delete...) will be added.
+
 Motivation
 ----------
 
-While MySQL may not be the most advanced sql database, it's widely used among china companies, including but not limited to Baidu, Alibaba, Tecent etc., but haskell's MySQL support is not ideal, we only have a very basic MySQL binding written by Bryan O'Sullivan, and some higher level wrapper built on it, which have some problems:
+While MySQL may not be the most advanced sql database, it's widely used among China companies, including but not limited to Baidu, Alibaba, Tecent etc., but haskell's MySQL support is not ideal, we only have a very basic MySQL binding written by Bryan O'Sullivan, and some higher level wrapper built on it, which have some problems:
 
 + lack of prepared statment and binary protocol support.
 
@@ -36,7 +38,7 @@ While MySQL may not be the most advanced sql database, it's widely used among ch
 
 + no replication protocol support.
 
-`mysql-haskell` is intended to solve these problems, and providing foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
+`mysql-haskell` is intended to solve these problems, and provide foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
 
 Building
 --------
