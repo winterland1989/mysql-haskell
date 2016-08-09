@@ -1,9 +1,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NegativeLiterals #-}
 
-module TextProtocol where
+module BinaryRow where
 
 import Control.Applicative
+import Control.Monad
+import Control.Exception
 import Database.MySQL.Base
 import Database.MySQL.Protocol
 import qualified System.IO.Streams as Stream
@@ -13,39 +15,9 @@ import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 
 tests :: MySQLConn -> Assertion
 tests c = do
-    (f, is) <- query_ c "SELECT \
-                            \__id         ,\
-                            \__bit        ,\
-                            \__tinyInt    ,\
-                            \__tinyIntU   ,\
-                            \__smallInt   ,\
-                            \__smallIntU  ,\
-                            \__mediumInt  ,\
-                            \__mediumIntU ,\
-                            \__int        ,\
-                            \__intU       ,\
-                            \__bigInt     ,\
-                            \__bigIntU    ,\
-                            \__decimal    ,\
-                            \__float      ,\
-                            \__dobule     ,\
-                            \__date       ,\
-                            \__datetime   ,\
-                            \__timestamp  ,\
-                            \__time       ,\
-                            \__year       ,\
-                            \__char       ,\
-                            \__varchar    ,\
-                            \__binary     ,\
-                            \__varbinary  ,\
-                            \__tinyblob   ,\
-                            \__tinytext   ,\
-                            \__blob       ,\
-                            \__text       ,\
-                            \__enum       ,\
-                            \__set\
-                            \ FROM test;"
+    selStmt <- prepareStmt c "SELECT * FROM test;"
 
+    (f, is) <- queryStmt c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
         [ MYSQL_TYPE_LONG
         , MYSQL_TYPE_BIT
@@ -146,10 +118,10 @@ tests c = do
                 \__enum       = 'foo'                                  ,\
                 \__set        = 'foo,bar' WHERE __id=0;"
 
-    (_, is) <- query_ c "SELECT * FROM test;"
+    (_, is) <- queryStmt c selStmt []
     Just v <- Stream.read is
 
-    assertEqual "decode text protocol" v
+    assertEqual "decode binary protocol" v
         [ MySQLInt32 0
         , MySQLBit 224
         , MySQLInt8 (-128)
@@ -182,8 +154,8 @@ tests c = do
         , MySQLText "foo,bar"]
 
     Stream.skipToEof is
-
-    execute c "UPDATE test SET \
+    updStmt <- prepareStmt c
+            "UPDATE test SET \
             \__bit        = ?     ,\
             \__tinyInt    = ?     ,\
             \__tinyIntU   = ?     ,\
@@ -213,6 +185,8 @@ tests c = do
             \__text       = ?     ,\
             \__enum       = ?     ,\
             \__set        = ? WHERE __id=0;"
+
+    executeStmt c updStmt
                 [ MySQLBit 224
                 , MySQLInt8 (-128)
                 , MySQLInt8U 255
@@ -241,13 +215,15 @@ tests c = do
                 , MySQLBytes "12345678"
                 , MySQLText "韩冬真赞"
                 , MySQLText "foo"
-                , MySQLText "foo,bar"]
+                , MySQLText "foo,bar"
+                ]
 
 
-    (_, is) <- query_ c "SELECT * FROM test;"
+
+    (_, is) <- queryStmt c selStmt []
     Just v <- Stream.read is
 
-    assertEqual "decode text protocol" v
+    assertEqual "roundtrip binary protocol" v
         [ MySQLInt32 0
         , MySQLBit 224
         , MySQLInt8 (-128)
@@ -277,6 +253,7 @@ tests c = do
         , MySQLBytes "12345678"
         , MySQLText "韩冬真赞"
         , MySQLText "foo"
-        , MySQLText "foo,bar"]
+        , MySQLText "foo,bar"
+        ]
 
     Stream.skipToEof is

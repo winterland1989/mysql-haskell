@@ -1,19 +1,22 @@
 module Main where
 
 import Database.MySQL.Base
+import System.Environment
 import Control.Monad
 import Test.Tasty
 import Test.Tasty.HUnit
-import qualified TextProtocol
-import System.Environment
+import qualified TextRow
+import qualified TextRowNew
+import qualified BinaryRow
+import qualified BinaryRowNew
 
 main :: IO ()
 
 main = do
     mySQLVer <- lookupEnv "MYSQLVER"
 
-    defaultMain $ testCaseSteps "Multi-step test" $ \step -> do
-        step "Preparing..."
+    defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
+        step "preparing table..."
         c <- connect defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
         execute_ c  "CREATE TEMPORARY TABLE test(\
                     \__id           INT,\
@@ -35,7 +38,7 @@ main = do
                     \__datetime     DATETIME,\
                     \__timestamp    TIMESTAMP NULL,\
                     \__time         TIME,\
-                    \__year         YEAR,\
+                    \__year         YEAR(4),\
                     \__char         CHAR(8),\
                     \__varchar      VARCHAR(1024),\
                     \__binary       BINARY(8),\
@@ -48,14 +51,41 @@ main = do
                     \__set          SET('foo', 'bar', 'qux')\
                     \) CHARACTER SET utf8;"
 
-        when (mySQLVer == Just "5.7") $ do execute_ c "CREATE TEMPORARY TABLE test57(\
-                                                 \__datetime     DATETIME(2),\
-                                                 \__timestamp    TIMESTAMP(4) NULL,\
-                                                 \__time         TIME(6)\
-                                                 \) CHARACTER SET utf8;"
-                                           return ()
 
-        execute_ c  "INSERT INTO test VALUES(\
+        resetTestTable c
+
+        step "testing text protocol"
+        TextRow.tests c
+
+        resetTestTable c
+
+        step "testing binary protocol"
+        BinaryRow.tests c
+
+        when (mySQLVer == Just "5.7") $ do
+            execute_ c "CREATE TEMPORARY TABLE test57(\
+                       \__id           INT,\
+                       \__datetime     DATETIME(2),\
+                       \__timestamp    TIMESTAMP(4) NULL,\
+                       \__time         TIME(6)\
+                       \) CHARACTER SET utf8;"
+
+            resetTest57Table c
+
+            step "testing MySQL5.7 extra text protocol"
+            TextRowNew.tests c
+
+            resetTest57Table c
+
+            step "testing MySQL5.7 extra binary protocol"
+            BinaryRowNew.tests c
+
+        close c
+
+  where
+    resetTestTable c = do
+            execute_ c  "DELETE FROM test WHERE __id=0;"
+            execute_ c  "INSERT INTO test VALUES(\
                     \0,\
                     \NULL,\
                     \NULL,\
@@ -88,9 +118,11 @@ main = do
                     \NULL\
                     \);"
 
-        step "Testing text protocol"
-        TextProtocol.tests c
-
-        close c
-
-
+    resetTest57Table c = do
+            execute_ c  "DELETE FROM test57 WHERE __id=0;"
+            execute_ c  "INSERT INTO test57 VALUES(\
+                        \0,\
+                        \NULL,\
+                        \NULL,\
+                        \NULL\
+                        \);"

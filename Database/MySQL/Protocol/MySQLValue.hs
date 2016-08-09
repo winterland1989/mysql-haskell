@@ -24,10 +24,12 @@ import           Data.Bits
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
 import           Data.ByteString.Builder.Scientific (formatScientificBuilder, FPFormat(..))
+import  qualified         Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8              as BC
 import qualified Data.ByteString.Lex.Fractional     as LexFrac
 import qualified Data.ByteString.Lex.Integral       as LexInt
 import qualified Data.ByteString.Unsafe             as B
+import qualified Data.ByteString.Lazy            as L
 import           Data.Fixed                         (Pico)
 import           Data.Int
 import           Data.Scientific                    (Scientific)
@@ -96,19 +98,21 @@ data MySQLValue
     | MySQLNull
   deriving (Show, Eq, Generic)
 
+-- | Decide if usigned bit(0x80) and 'FieldType' for 'MySQLValue's.
+--
 mySQLValueType :: MySQLValue -> (FieldType, Word8)
 mySQLValueType (MySQLDecimal      _)  = (MYSQL_TYPE_DECIMAL  , 0x00)
-mySQLValueType (MySQLInt8U        _)  = (MYSQL_TYPE_TINY     , 0x01)
+mySQLValueType (MySQLInt8U        _)  = (MYSQL_TYPE_TINY     , 0x80)
 mySQLValueType (MySQLInt8         _)  = (MYSQL_TYPE_TINY     , 0x00)
-mySQLValueType (MySQLInt16U       _)  = (MYSQL_TYPE_SHORT    , 0x01)
+mySQLValueType (MySQLInt16U       _)  = (MYSQL_TYPE_SHORT    , 0x80)
 mySQLValueType (MySQLInt16        _)  = (MYSQL_TYPE_SHORT    , 0x00)
-mySQLValueType (MySQLInt32U       _)  = (MYSQL_TYPE_LONG     , 0x01)
+mySQLValueType (MySQLInt32U       _)  = (MYSQL_TYPE_LONG     , 0x80)
 mySQLValueType (MySQLInt32        _)  = (MYSQL_TYPE_LONG     , 0x00)
-mySQLValueType (MySQLInt64U       _)  = (MYSQL_TYPE_LONGLONG , 0x01)
+mySQLValueType (MySQLInt64U       _)  = (MYSQL_TYPE_LONGLONG , 0x80)
 mySQLValueType (MySQLInt64        _)  = (MYSQL_TYPE_LONGLONG , 0x00)
 mySQLValueType (MySQLFloat        _)  = (MYSQL_TYPE_FLOAT    , 0x00)
 mySQLValueType (MySQLDouble       _)  = (MYSQL_TYPE_DOUBLE   , 0x00)
-mySQLValueType (MySQLYear         _)  = (MYSQL_TYPE_YEAR     , 0x00)
+mySQLValueType (MySQLYear         _)  = (MYSQL_TYPE_YEAR     , 0x80)
 mySQLValueType (MySQLDateTime     _)  = (MYSQL_TYPE_DATETIME , 0x00)
 mySQLValueType (MySQLTimeStamp    _)  = (MYSQL_TYPE_TIMESTAMP, 0x00)
 mySQLValueType (MySQLDate         _)  = (MYSQL_TYPE_DATE     , 0x00)
@@ -308,16 +312,18 @@ getBinaryField f
         || t == MYSQL_TYPE_TIME2 = do
             n <- getLenEncInt
             case n of
-               0 -> pure $ MySQLTime 1 (TimeOfDay 0 0 0)
+               0 -> pure $ MySQLTime 0 (TimeOfDay 0 0 0)
                8 -> do
                    sign <- getWord8   -- is_negative(1 if minus, 0 for plus)
-                   _ <- getWord32le   -- we also ignore the day part
-                   MySQLTime sign <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4)
+                   d <- fromIntegral <$> getWord32le
+                   h <-  getInt8'
+                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> getInt8' <*> getSecond4)
 
                12 -> do
                    sign <- getWord8   -- is_negative(1 if minus, 0 for plus)
-                   _ <- getWord32le   -- we also ignore the day part
-                   MySQLTime sign <$> (TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8)
+                   d <- fromIntegral <$> getWord32le
+                   h <-  getInt8'
+                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> getInt8' <*> getSecond8)
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
     | t == MYSQL_TYPE_GEOMETRY          = MySQLGeometry <$> getLenEncBytes
@@ -351,7 +357,7 @@ getBinaryField f
     getSecond8 = realToFrac <$> do
         s <- getInt8'
         ms <- fromIntegral <$> getWord32le :: Get Int
-        pure $! (realToFrac s + realToFrac ms / 1000 :: Double)
+        pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
 
     feedLenEncBytes typ con parser = do
         bs <- getLenEncBytes
@@ -397,7 +403,8 @@ putTextBits word = forM_ [63,62..0] $ \ pos ->
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
 putBinaryField :: MySQLValue -> Put
-putBinaryField (MySQLDecimal    n) = putBuilder (formatScientificBuilder Fixed Nothing n)
+putBinaryField (MySQLDecimal    n) = putLenEncBytes . L.toStrict . BB.toLazyByteString $
+                                        formatScientificBuilder Fixed Nothing n
 putBinaryField (MySQLInt8U      n) = putWord8 n
 putBinaryField (MySQLInt8       n) = putWord8 (fromIntegral n)
 putBinaryField (MySQLInt16U     n) = putWord16le n
@@ -408,14 +415,17 @@ putBinaryField (MySQLInt64U     n) = putWord64le n
 putBinaryField (MySQLInt64      n) = putInt64le n
 putBinaryField (MySQLFloat      x) = putFloatle x
 putBinaryField (MySQLDouble     x) = putDoublele x
-putBinaryField (MySQLYear       n) = putWord16le n
+putBinaryField (MySQLYear       n) = putLenEncBytes . L.toStrict . BB.toLazyByteString $
+                                        Textual.integral n  -- this's really weird, it's not documented anywhere
+                                                            -- we must put encode year into string in binary mode!
 putBinaryField (MySQLTimeStamp (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
-                                                           putBinaryTime time
+                                                           putBinaryTime' time
 putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
-                                                           putBinaryTime time
-putBinaryField (MySQLDate    d)    = putBinaryDay d
+                                                           putBinaryTime' time
+putBinaryField (MySQLDate    d)    = do putWord8 4
+                                        putBinaryDay d
 putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
                                         putWord8 sign
                                         putBinaryTime t
@@ -432,13 +442,22 @@ putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
                     putWord8 (fromIntegral mm)
                     putWord8 (fromIntegral dd)
 
+putBinaryTime' :: TimeOfDay -> Put
+putBinaryTime' (TimeOfDay hh mm ss) = do let s = floor ss
+                                             ms = floor $ (ss - realToFrac s) * 1000000
+                                         putWord8 (fromIntegral hh)
+                                         putWord8 (fromIntegral mm)
+                                         putWord8 s
+                                         putWord32le ms
 putBinaryTime :: TimeOfDay -> Put
-putBinaryTime (TimeOfDay hh mm ss) = do let sInt = floor ss
-                                            sFrac = floor $ (ss - realToFrac sInt) * 1000000
-                                        putWord8 (fromIntegral hh)
+putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
+                                            ms = floor $ (ss - realToFrac s) * 1000000
+                                            (d, h) = hh `quotRem` 24  -- hour may exceed 24 here
+                                        putWord32le (fromIntegral d)
+                                        putWord8 (fromIntegral h)
                                         putWord8 (fromIntegral mm)
-                                        putWord8 sInt
-                                        putWord64le sFrac
+                                        putWord8 s
+                                        putWord32le ms
 
 --------------------------------------------------------------------------------
 -- | Binary row encoder

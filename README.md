@@ -10,8 +10,8 @@ Roadmap:
 - [x] binary protocol decoding
 - [x] binlog listening
 - [x] row based binlog parsing
+- [x] stablized API
 - [ ] comprehensive testsuit and benchmark
-- [ ] polish and stablize API
 - [ ] tls support
 
 This project is still in infancy stage and lack of produciton tests, use on your own risk, and any form of contributions are welcomed!
@@ -32,18 +32,37 @@ While MySQL may not be the most advanced sql database, it's widely used among ch
 Building
 --------
 
+Just use the old way:
+
 ```bash
 git clone https://github.com/winterland1989/mysql-haskell.git
 cd mysql-haskell
-cabal new-build
+cabal install --only-dependencies
+cabal build
 ```
 
-You can use `stack` or `cabal.project` file to add extra dependency.
+Running tests require creating a user `testMySQLHaskell` and database `testMySQLHaskell`, you can do it use following script:
+
+```bash
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
+mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
+mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
+mysql -u root -e "FLUSH PRIVILEGES"
+```
+
+New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping
+an eye on following combinations:
+
++ CABALVER=1.18 GHCVER=7.8.4  MYSQLVER=5.5
++ CABALVER=1.22 GHCVER=7.10.2 MYSQLVER=5.5
++ CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.5
++ CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.6
++ CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.7
 
 Guide
 -----
 
-Currently document is extremely lacking, you may find something you need in `Database.MySQL.Base` module.
+Run `cabal haddock` and you will get pretty decent document.
 
 Reference
 ---------
