@@ -104,10 +104,8 @@ connect ci@(ConnectInfo host port _ _ _ tls) =
 -- | Close a MySQL connection.
 --
 close :: MySQLConn -> IO ()
-close conn@(MySQLConn is os closeSocket _) = do
-    command conn COM_QUIT
+close (MySQLConn _ os closeSocket _) = do
     Stream.write Nothing os
-    _ <- readPacket is
     closeSocket
 
 -- | Send a 'COM_PING'.
@@ -128,6 +126,7 @@ command conn@(MySQLConn is os _ _) cmd = do
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
     else decodeFromPacket p
+{-# INLINE command #-}
 
 readPacket :: InputStream Packet -> IO Packet
 readPacket is = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet len _ bs) ->
@@ -141,6 +140,7 @@ readPacket is = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet
             then return (Packet len'' seqN (L.concat . reverse $ acc'))
             else len'' `seq` go len'' acc'
         )
+{-# INLINE readPacket #-}
 
 writeCommand :: Command -> OutputStream Packet -> IO ()
 writeCommand a = let bs = Binary.runPut (Binary.put a) in

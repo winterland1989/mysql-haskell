@@ -17,10 +17,10 @@ tests c = do
 
     (f, is) <- queryStmt c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
-        [ MYSQL_TYPE_LONG
-        , MYSQL_TYPE_DATETIME
-        , MYSQL_TYPE_TIMESTAMP
-        , MYSQL_TYPE_TIME
+        [ mySQLTypeLong
+        , mySQLTypeDateTime
+        , mySQLTypeTimestamp
+        , mySQLTypeTime
         ]
 
     Just v <- Stream.read is

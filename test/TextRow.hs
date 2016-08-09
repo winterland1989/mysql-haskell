@@ -1,51 +1,51 @@
+{-# LANGUAGE NegativeLiterals    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE NegativeLiterals #-}
 
 module TextRow where
 
-import Control.Applicative
-import Database.MySQL.Base
-import Database.MySQL.Protocol
-import qualified System.IO.Streams as Stream
-import Test.Tasty.HUnit
-import Data.Time.Calendar (fromGregorian)
-import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
+import           Control.Applicative
+import           Data.Time.Calendar      (fromGregorian)
+import           Data.Time.LocalTime     (LocalTime (..), TimeOfDay (..))
+import           Database.MySQL.Base
+import           Database.MySQL.Protocol
+import qualified System.IO.Streams       as Stream
+import           Test.Tasty.HUnit
 
 tests :: MySQLConn -> Assertion
 tests c = do
     (f, is) <- query_ c "SELECT * FROM test;"
 
     assertEqual "decode Field types" (columnType <$> f)
-        [ MYSQL_TYPE_LONG
-        , MYSQL_TYPE_BIT
-        , MYSQL_TYPE_TINY
-        , MYSQL_TYPE_TINY
-        , MYSQL_TYPE_SHORT
-        , MYSQL_TYPE_SHORT
-        , MYSQL_TYPE_INT24
-        , MYSQL_TYPE_INT24
-        , MYSQL_TYPE_LONG
-        , MYSQL_TYPE_LONG
-        , MYSQL_TYPE_LONGLONG
-        , MYSQL_TYPE_LONGLONG
-        , MYSQL_TYPE_NEWDECIMAL
-        , MYSQL_TYPE_FLOAT
-        , MYSQL_TYPE_DOUBLE
-        , MYSQL_TYPE_DATE
-        , MYSQL_TYPE_DATETIME
-        , MYSQL_TYPE_TIMESTAMP
-        , MYSQL_TYPE_TIME
-        , MYSQL_TYPE_YEAR
-        , MYSQL_TYPE_STRING
-        , MYSQL_TYPE_VAR_STRING
-        , MYSQL_TYPE_STRING
-        , MYSQL_TYPE_VAR_STRING
-        , MYSQL_TYPE_BLOB
-        , MYSQL_TYPE_BLOB
-        , MYSQL_TYPE_BLOB
-        , MYSQL_TYPE_BLOB
-        , MYSQL_TYPE_STRING
-        , MYSQL_TYPE_STRING
+        [ mySQLTypeLong
+        , mySQLTypeBit
+        , mySQLTypeTiny
+        , mySQLTypeTiny
+        , mySQLTypeShort
+        , mySQLTypeShort
+        , mySQLTypeInt24
+        , mySQLTypeInt24
+        , mySQLTypeLong
+        , mySQLTypeLong
+        , mySQLTypeLongLong
+        , mySQLTypeLongLong
+        , mySQLTypeNewDecimal
+        , mySQLTypeFloat
+        , mySQLTypeDouble
+        , mySQLTypeDate
+        , mySQLTypeDateTime
+        , mySQLTypeTimestamp
+        , mySQLTypeTime
+        , mySQLTypeYear
+        , mySQLTypeString
+        , mySQLTypeVarString
+        , mySQLTypeString
+        , mySQLTypeVarString
+        , mySQLTypeBlob
+        , mySQLTypeBlob
+        , mySQLTypeBlob
+        , mySQLTypeBlob
+        , mySQLTypeString
+        , mySQLTypeString
         ]
 
     Just v <- Stream.read is

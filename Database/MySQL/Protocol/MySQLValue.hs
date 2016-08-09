@@ -88,7 +88,7 @@ data MySQLValue
     | MySQLYear          !Word16       -- ^ YEAR
     | MySQLDateTime      !LocalTime    -- ^ DATETIME
     | MySQLTimeStamp     !LocalTime    -- ^ TIMESTAMP
-    | MySQLDate          !Day
+    | MySQLDate          !Day              -- ^ DATE
     | MySQLTime          !Word8 !TimeOfDay -- ^ sign(0 = non-negative, 1 = negative) hh mm ss microsecond
                                            -- The sign is OPPOSITE to binlog one !!!
     | MySQLGeometry      !ByteString       -- ^ todo: parsing to something meanful
@@ -101,77 +101,77 @@ data MySQLValue
 -- | Decide if usigned bit(0x80) and 'FieldType' for 'MySQLValue's.
 --
 mySQLValueType :: MySQLValue -> (FieldType, Word8)
-mySQLValueType (MySQLDecimal      _)  = (MYSQL_TYPE_DECIMAL  , 0x00)
-mySQLValueType (MySQLInt8U        _)  = (MYSQL_TYPE_TINY     , 0x80)
-mySQLValueType (MySQLInt8         _)  = (MYSQL_TYPE_TINY     , 0x00)
-mySQLValueType (MySQLInt16U       _)  = (MYSQL_TYPE_SHORT    , 0x80)
-mySQLValueType (MySQLInt16        _)  = (MYSQL_TYPE_SHORT    , 0x00)
-mySQLValueType (MySQLInt32U       _)  = (MYSQL_TYPE_LONG     , 0x80)
-mySQLValueType (MySQLInt32        _)  = (MYSQL_TYPE_LONG     , 0x00)
-mySQLValueType (MySQLInt64U       _)  = (MYSQL_TYPE_LONGLONG , 0x80)
-mySQLValueType (MySQLInt64        _)  = (MYSQL_TYPE_LONGLONG , 0x00)
-mySQLValueType (MySQLFloat        _)  = (MYSQL_TYPE_FLOAT    , 0x00)
-mySQLValueType (MySQLDouble       _)  = (MYSQL_TYPE_DOUBLE   , 0x00)
-mySQLValueType (MySQLYear         _)  = (MYSQL_TYPE_YEAR     , 0x80)
-mySQLValueType (MySQLDateTime     _)  = (MYSQL_TYPE_DATETIME , 0x00)
-mySQLValueType (MySQLTimeStamp    _)  = (MYSQL_TYPE_TIMESTAMP, 0x00)
-mySQLValueType (MySQLDate         _)  = (MYSQL_TYPE_DATE     , 0x00)
-mySQLValueType (MySQLTime       _ _)  = (MYSQL_TYPE_TIME     , 0x00)
-mySQLValueType (MySQLBytes        _)  = (MYSQL_TYPE_BLOB     , 0x00)
-mySQLValueType (MySQLGeometry     _)  = (MYSQL_TYPE_GEOMETRY , 0x00)
-mySQLValueType (MySQLBit          _)  = (MYSQL_TYPE_BIT      , 0x00)
-mySQLValueType (MySQLText         _)  = (MYSQL_TYPE_STRING   , 0x00)
-mySQLValueType MySQLNull              = (MYSQL_TYPE_NULL     , 0x00)
+mySQLValueType (MySQLDecimal      _)  = (mySQLTypeDecimal  , 0x00)
+mySQLValueType (MySQLInt8U        _)  = (mySQLTypeTiny     , 0x80)
+mySQLValueType (MySQLInt8         _)  = (mySQLTypeTiny     , 0x00)
+mySQLValueType (MySQLInt16U       _)  = (mySQLTypeShort    , 0x80)
+mySQLValueType (MySQLInt16        _)  = (mySQLTypeShort    , 0x00)
+mySQLValueType (MySQLInt32U       _)  = (mySQLTypeLong     , 0x80)
+mySQLValueType (MySQLInt32        _)  = (mySQLTypeLong     , 0x00)
+mySQLValueType (MySQLInt64U       _)  = (mySQLTypeLongLong , 0x80)
+mySQLValueType (MySQLInt64        _)  = (mySQLTypeLongLong , 0x00)
+mySQLValueType (MySQLFloat        _)  = (mySQLTypeFloat    , 0x00)
+mySQLValueType (MySQLDouble       _)  = (mySQLTypeDouble   , 0x00)
+mySQLValueType (MySQLYear         _)  = (mySQLTypeYear     , 0x80)
+mySQLValueType (MySQLDateTime     _)  = (mySQLTypeDateTime , 0x00)
+mySQLValueType (MySQLTimeStamp    _)  = (mySQLTypeTimestamp, 0x00)
+mySQLValueType (MySQLDate         _)  = (mySQLTypeDate     , 0x00)
+mySQLValueType (MySQLTime       _ _)  = (mySQLTypeTime     , 0x00)
+mySQLValueType (MySQLBytes        _)  = (mySQLTypeBlob     , 0x00)
+mySQLValueType (MySQLGeometry     _)  = (mySQLTypeGeometry , 0x00)
+mySQLValueType (MySQLBit          _)  = (mySQLTypeBit      , 0x00)
+mySQLValueType (MySQLText         _)  = (mySQLTypeString   , 0x00)
+mySQLValueType MySQLNull              = (mySQLTypeNull     , 0x00)
 
 --------------------------------------------------------------------------------
 -- | Text protocol decoder
 getTextField :: ColumnDef -> Get MySQLValue
 getTextField f
-    | t == MYSQL_TYPE_NULL              = pure MySQLNull
-    | t == MYSQL_TYPE_DECIMAL
-        || t == MYSQL_TYPE_NEWDECIMAL   = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == MYSQL_TYPE_TINY              = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
+    | t == mySQLTypeNull              = pure MySQLNull
+    | t == mySQLTypeDecimal
+        || t == mySQLTypeNewDecimal   = feedLenEncBytes t MySQLDecimal fracLexer
+    | t == mySQLTypeTiny              = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
                                                         else feedLenEncBytes t MySQLInt8 intLexer
-    | t == MYSQL_TYPE_SHORT             = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
+    | t == mySQLTypeShort             = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
                                                         else feedLenEncBytes t MySQLInt16 intLexer
-    | t == MYSQL_TYPE_LONG
-        || t == MYSQL_TYPE_INT24        = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
+    | t == mySQLTypeLong
+        || t == mySQLTypeInt24        = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
                                                         else feedLenEncBytes t MySQLInt32 intLexer
-    | t == MYSQL_TYPE_LONGLONG          = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
+    | t == mySQLTypeLongLong          = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
                                                         else feedLenEncBytes t MySQLInt64 intLexer
-    | t == MYSQL_TYPE_FLOAT             = feedLenEncBytes t MySQLFloat fracLexer
-    | t == MYSQL_TYPE_DOUBLE            = feedLenEncBytes t MySQLDouble fracLexer
-    | t == MYSQL_TYPE_YEAR              = feedLenEncBytes t MySQLYear intLexer
-    | t == MYSQL_TYPE_TIMESTAMP
-        || t == MYSQL_TYPE_TIMESTAMP2   = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
+    | t == mySQLTypeFloat             = feedLenEncBytes t MySQLFloat fracLexer
+    | t == mySQLTypeDouble            = feedLenEncBytes t MySQLDouble fracLexer
+    | t == mySQLTypeYear              = feedLenEncBytes t MySQLYear intLexer
+    | t == mySQLTypeTimestamp
+        || t == mySQLTypeTimestamp2   = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
                                             LocalTime <$> dateParser bs <*> timeParser (B.drop 11 bs)
-    | t == MYSQL_TYPE_DATETIME
-        || t == MYSQL_TYPE_DATETIME2    = feedLenEncBytes t MySQLDateTime $ \ bs ->
+    | t == mySQLTypeDateTime
+        || t == mySQLTypeDateTime2    = feedLenEncBytes t MySQLDateTime $ \ bs ->
                                             LocalTime <$> dateParser bs <*> timeParser (B.drop 11 bs)
-    | t == MYSQL_TYPE_DATE
-        || t == MYSQL_TYPE_NEWDATE      = feedLenEncBytes t MySQLDate dateParser
-    | t == MYSQL_TYPE_TIME
-        || t == MYSQL_TYPE_TIME2        = feedLenEncBytes t id $ \ bs ->
+    | t == mySQLTypeDate
+        || t == mySQLTypeNewDate      = feedLenEncBytes t MySQLDate dateParser
+    | t == mySQLTypeTime
+        || t == mySQLTypeTime2        = feedLenEncBytes t id $ \ bs ->
                                             if B.null bs
                                             then pure MySQLNull
                                             else if bs `BC.index` 0 == '-'
                                                  then MySQLTime 1 <$> timeParser (BC.drop 1 bs)
                                                  else MySQLTime 0 <$> timeParser bs
 
-    | t == MYSQL_TYPE_GEOMETRY          = MySQLGeometry <$> getLenEncBytes
-    | t == MYSQL_TYPE_VARCHAR
-        || t == MYSQL_TYPE_ENUM
-        || t == MYSQL_TYPE_SET
-        || t == MYSQL_TYPE_TINY_BLOB
-        || t == MYSQL_TYPE_MEDIUM_BLOB
-        || t == MYSQL_TYPE_LONG_BLOB
-        || t == MYSQL_TYPE_BLOB
-        || t == MYSQL_TYPE_VAR_STRING
-        || t == MYSQL_TYPE_STRING       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
+    | t == mySQLTypeGeometry          = MySQLGeometry <$> getLenEncBytes
+    | t == mySQLTypeVarChar
+        || t == mySQLTypeEnum
+        || t == mySQLTypeSet
+        || t == mySQLTypeTinyBlob
+        || t == mySQLTypeMediumBlob
+        || t == mySQLTypeLongBlob
+        || t == mySQLTypeBlob
+        || t == mySQLTypeVarString
+        || t == mySQLTypeString       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
 
-    | t == MYSQL_TYPE_BIT               = do len <- getLenEncInt
-                                             if len == 0 then pure MySQLNull
-                                                         else MySQLBit <$> getBits len
+    | t == mySQLTypeBit               = do len <- getLenEncInt
+                                           if len == 0 then pure MySQLNull
+                                                       else MySQLBit <$> getBits len
 
     | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
   where
@@ -251,23 +251,23 @@ getTextRow fs = forM fs $ \ f -> do
 -- | Binary protocol decoder
 getBinaryField :: ColumnDef -> Get MySQLValue
 getBinaryField f
-    | t == MYSQL_TYPE_NULL              = pure MySQLNull
-    | t == MYSQL_TYPE_DECIMAL
-        || t == MYSQL_TYPE_NEWDECIMAL   = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == MYSQL_TYPE_TINY              = if isUnsigned then MySQLInt8U <$> getWord8
+    | t == mySQLTypeNull              = pure MySQLNull
+    | t == mySQLTypeDecimal
+        || t == mySQLTypeNewDecimal   = feedLenEncBytes t MySQLDecimal fracLexer
+    | t == mySQLTypeTiny              = if isUnsigned then MySQLInt8U <$> getWord8
                                                         else MySQLInt8  <$> getInt8
-    | t == MYSQL_TYPE_SHORT             = if isUnsigned then MySQLInt16U <$> getWord16le
+    | t == mySQLTypeShort             = if isUnsigned then MySQLInt16U <$> getWord16le
                                                         else MySQLInt16  <$> getInt16le
-    | t == MYSQL_TYPE_LONG
-        || t == MYSQL_TYPE_INT24        = if isUnsigned then MySQLInt32U <$> getWord32le
+    | t == mySQLTypeLong
+        || t == mySQLTypeInt24        = if isUnsigned then MySQLInt32U <$> getWord32le
                                                         else MySQLInt32  <$> getInt32le
-    | t == MYSQL_TYPE_YEAR              = MySQLYear . fromIntegral <$> getWord16le
-    | t == MYSQL_TYPE_LONGLONG          = if isUnsigned then MySQLInt64U <$> getWord64le
+    | t == mySQLTypeYear              = MySQLYear . fromIntegral <$> getWord16le
+    | t == mySQLTypeLongLong          = if isUnsigned then MySQLInt64U <$> getWord64le
                                                         else MySQLInt64  <$> getInt64le
-    | t == MYSQL_TYPE_FLOAT             = MySQLFloat  <$> getFloatle
-    | t == MYSQL_TYPE_DOUBLE            = MySQLDouble <$> getDoublele
-    | t == MYSQL_TYPE_TIMESTAMP
-        || t == MYSQL_TYPE_TIMESTAMP2   = do
+    | t == mySQLTypeFloat             = MySQLFloat  <$> getFloatle
+    | t == mySQLTypeDouble            = MySQLDouble <$> getDoublele
+    | t == mySQLTypeTimestamp
+        || t == mySQLTypeTimestamp2   = do
             n <- getLenEncInt
             case n of
                0 -> pure $ MySQLTimeStamp (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
@@ -283,8 +283,8 @@ getBinaryField f
                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
                    pure $ MySQLTimeStamp (LocalTime d td)
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
-    | t == MYSQL_TYPE_DATETIME
-        || t == MYSQL_TYPE_DATETIME2    = do
+    | t == mySQLTypeDateTime
+        || t == mySQLTypeDateTime2    = do
             n <- getLenEncInt
             case n of
                0 -> pure $ MySQLDateTime (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
@@ -301,16 +301,16 @@ getBinaryField f
                    pure $ MySQLDateTime (LocalTime d td)
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
 
-    | t == MYSQL_TYPE_DATE
-        || t == MYSQL_TYPE_NEWDATE      = do
+    | t == mySQLTypeDate
+        || t == mySQLTypeNewDate      = do
             n <- getLenEncInt
             case n of
                0 -> pure $ MySQLDate (fromGregorian 0 0 0)
                4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
 
-    | t == MYSQL_TYPE_TIME
-        || t == MYSQL_TYPE_TIME2 = do
+    | t == mySQLTypeTime
+        || t == mySQLTypeTime2 = do
             n <- getLenEncInt
             case n of
                0 -> pure $ MySQLTime 0 (TimeOfDay 0 0 0)
@@ -327,22 +327,22 @@ getBinaryField f
                    MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> getInt8' <*> getSecond8)
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
-    | t == MYSQL_TYPE_GEOMETRY          = MySQLGeometry <$> getLenEncBytes
-    | t == MYSQL_TYPE_VARCHAR
-        || t == MYSQL_TYPE_ENUM
-        || t == MYSQL_TYPE_SET
-        || t == MYSQL_TYPE_TINY_BLOB
-        || t == MYSQL_TYPE_MEDIUM_BLOB
-        || t == MYSQL_TYPE_LONG_BLOB
-        || t == MYSQL_TYPE_BLOB
-        || t == MYSQL_TYPE_VAR_STRING
-        || t == MYSQL_TYPE_STRING       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
+    | t == mySQLTypeGeometry          = MySQLGeometry <$> getLenEncBytes
+    | t == mySQLTypeVarChar
+        || t == mySQLTypeEnum
+        || t == mySQLTypeSet
+        || t == mySQLTypeTinyBlob
+        || t == mySQLTypeMediumBlob
+        || t == mySQLTypeLongBlob
+        || t == mySQLTypeBlob
+        || t == mySQLTypeVarString
+        || t == mySQLTypeString       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
                                                     else MySQLBytes <$> getLenEncBytes
-    | t == MYSQL_TYPE_BIT               = do len <- getLenEncInt
-                                             if len == 0 then pure MySQLNull
-                                                         else MySQLBit <$> getBits len
-    | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue:\
-                                                 \ missing binary decoder for " ++ show t
+    | t == mySQLTypeBit               = do len <- getLenEncInt
+                                           if len == 0 then pure MySQLNull
+                                                       else MySQLBit <$> getBits len
+    | otherwise                       = fail $ "Database.MySQL.Protocol.MySQLValue:\
+                                               \ missing binary decoder for " ++ show t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
@@ -523,5 +523,5 @@ makeNullMap values = BitMap . B.pack $ go values 0x00 0
     go (_        :vs) byte pos = let pos' = pos + 1 in pos' `seq` go vs byte pos'
 
 --------------------------------------------------------------------------------
--- TODO: add helpers to parse MYSQL_TYPE_GEOMETRY
+-- TODO: add helpers to parse mySQLTypeGEOMETRY
 -- reference: https://github.com/felixge/node-mysql/blob/master/lib/protocol/Parser.js

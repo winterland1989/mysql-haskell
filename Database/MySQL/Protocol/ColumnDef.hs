@@ -81,111 +81,57 @@ instance Binary ColumnDef where
     put = putField
 
 
-data FieldType
-    = MYSQL_TYPE_DECIMAL     -- 0x00
-    | MYSQL_TYPE_TINY        -- 0x01
-    | MYSQL_TYPE_SHORT       -- 0x02
-    | MYSQL_TYPE_LONG        -- 0x03
-    | MYSQL_TYPE_FLOAT       -- 0x04
-    | MYSQL_TYPE_DOUBLE      -- 0x05
-    | MYSQL_TYPE_NULL        -- 0x06
-    | MYSQL_TYPE_TIMESTAMP   -- 0x07
-    | MYSQL_TYPE_LONGLONG    -- 0x08
-    | MYSQL_TYPE_INT24       -- 0x09
-    | MYSQL_TYPE_DATE        -- 0x0a
-    | MYSQL_TYPE_TIME        -- 0x0b
-    | MYSQL_TYPE_DATETIME    -- 0x0c
-    | MYSQL_TYPE_YEAR        -- 0x0d
-    | MYSQL_TYPE_NEWDATE     -- 0x0e
-    | MYSQL_TYPE_VARCHAR     -- 0x0f
-    | MYSQL_TYPE_BIT         -- 0x10
-    | MYSQL_TYPE_TIMESTAMP2  -- 0x11
-    | MYSQL_TYPE_DATETIME2   -- 0x12
-    | MYSQL_TYPE_TIME2       -- 0x13
-    | MYSQL_TYPE_NEWDECIMAL  -- 0xf6
-    | MYSQL_TYPE_ENUM        -- 0xf7
-    | MYSQL_TYPE_SET         -- 0xf8
-    | MYSQL_TYPE_TINY_BLOB   -- 0xf9
-    | MYSQL_TYPE_MEDIUM_BLOB -- 0xfa
-    | MYSQL_TYPE_LONG_BLOB   -- 0xfb
-    | MYSQL_TYPE_BLOB        -- 0xfc
-    | MYSQL_TYPE_VAR_STRING  -- 0xfd
-    | MYSQL_TYPE_STRING      -- 0xfe
-    | MYSQL_TYPE_GEOMETRY    -- 0xff
-    | MYSQL_TYPE_UNKNOWN !Word8
-  deriving (Show, Eq)
+newtype FieldType = FieldType Word8 deriving (Show, Eq)
+
+mySQLTypeDecimal, mySQLTypeTiny, mySQLTypeShort, mySQLTypeLong, mySQLTypeFloat :: FieldType
+mySQLTypeDouble, mySQLTypeNull, mySQLTypeTimestamp, mySQLTypeLongLong, mySQLTypeInt24 :: FieldType
+mySQLTypeDate, mySQLTypeTime, mySQLTypeDateTime, mySQLTypeYear, mySQLTypeNewDate, mySQLTypeVarChar :: FieldType
+mySQLTypeBit, mySQLTypeTimestamp2, mySQLTypeDateTime2, mySQLTypeTime2, mySQLTypeNewDecimal :: FieldType
+mySQLTypeEnum, mySQLTypeSet, mySQLTypeTinyBlob, mySQLTypeMediumBlob, mySQLTypeLongBlob :: FieldType
+mySQLTypeBlob, mySQLTypeVarString, mySQLTypeString, mySQLTypeGeometry :: FieldType
+
+mySQLTypeDecimal        = FieldType 0x00
+mySQLTypeTiny           = FieldType 0x01
+mySQLTypeShort          = FieldType 0x02
+mySQLTypeLong           = FieldType 0x03
+mySQLTypeFloat          = FieldType 0x04
+mySQLTypeDouble         = FieldType 0x05
+mySQLTypeNull           = FieldType 0x06
+mySQLTypeTimestamp      = FieldType 0x07
+mySQLTypeLongLong       = FieldType 0x08
+mySQLTypeInt24          = FieldType 0x09
+mySQLTypeDate           = FieldType 0x0a
+mySQLTypeTime           = FieldType 0x0b
+mySQLTypeDateTime       = FieldType 0x0c
+mySQLTypeYear           = FieldType 0x0d
+mySQLTypeNewDate        = FieldType 0x0e
+mySQLTypeVarChar        = FieldType 0x0f
+mySQLTypeBit            = FieldType 0x10
+mySQLTypeTimestamp2     = FieldType 0x11
+mySQLTypeDateTime2      = FieldType 0x12
+mySQLTypeTime2          = FieldType 0x13
+mySQLTypeNewDecimal     = FieldType 0xf6
+mySQLTypeEnum           = FieldType 0xf7
+mySQLTypeSet            = FieldType 0xf8
+mySQLTypeTinyBlob       = FieldType 0xf9
+mySQLTypeMediumBlob     = FieldType 0xfa
+mySQLTypeLongBlob       = FieldType 0xfb
+mySQLTypeBlob           = FieldType 0xfc
+mySQLTypeVarString      = FieldType 0xfd
+mySQLTypeString         = FieldType 0xfe
+mySQLTypeGeometry       = FieldType 0xff
 
 getFieldType :: Get FieldType
 getFieldType = word8ToFieldType <$> getWord8
 
 word8ToFieldType :: Word8 -> FieldType
-word8ToFieldType 0x00 = MYSQL_TYPE_DECIMAL
-word8ToFieldType 0x01 = MYSQL_TYPE_TINY
-word8ToFieldType 0x02 = MYSQL_TYPE_SHORT
-word8ToFieldType 0x03 = MYSQL_TYPE_LONG
-word8ToFieldType 0x04 = MYSQL_TYPE_FLOAT
-word8ToFieldType 0x05 = MYSQL_TYPE_DOUBLE
-word8ToFieldType 0x06 = MYSQL_TYPE_NULL
-word8ToFieldType 0x07 = MYSQL_TYPE_TIMESTAMP
-word8ToFieldType 0x08 = MYSQL_TYPE_LONGLONG
-word8ToFieldType 0x09 = MYSQL_TYPE_INT24
-word8ToFieldType 0x0a = MYSQL_TYPE_DATE
-word8ToFieldType 0x0b = MYSQL_TYPE_TIME
-word8ToFieldType 0x0c = MYSQL_TYPE_DATETIME
-word8ToFieldType 0x0d = MYSQL_TYPE_YEAR
-word8ToFieldType 0x0e = MYSQL_TYPE_NEWDATE
-word8ToFieldType 0x0f = MYSQL_TYPE_VARCHAR
-word8ToFieldType 0x10 = MYSQL_TYPE_BIT
-word8ToFieldType 0x11 = MYSQL_TYPE_TIMESTAMP2
-word8ToFieldType 0x12 = MYSQL_TYPE_DATETIME2
-word8ToFieldType 0x13 = MYSQL_TYPE_TIME2
-word8ToFieldType 0xf6 = MYSQL_TYPE_NEWDECIMAL
-word8ToFieldType 0xf7 = MYSQL_TYPE_ENUM
-word8ToFieldType 0xf8 = MYSQL_TYPE_SET
-word8ToFieldType 0xf9 = MYSQL_TYPE_TINY_BLOB
-word8ToFieldType 0xfa = MYSQL_TYPE_MEDIUM_BLOB
-word8ToFieldType 0xfb = MYSQL_TYPE_LONG_BLOB
-word8ToFieldType 0xfc = MYSQL_TYPE_BLOB
-word8ToFieldType 0xfd = MYSQL_TYPE_VAR_STRING
-word8ToFieldType 0xfe = MYSQL_TYPE_STRING
-word8ToFieldType 0xff = MYSQL_TYPE_GEOMETRY
-word8ToFieldType x    = MYSQL_TYPE_UNKNOWN x
+word8ToFieldType = FieldType
 
 putFieldType :: FieldType -> Put
 putFieldType = putWord8 . fieldTypeToWord8
 
 fieldTypeToWord8 :: FieldType -> Word8
-fieldTypeToWord8 MYSQL_TYPE_DECIMAL     = 0x00
-fieldTypeToWord8 MYSQL_TYPE_TINY        = 0x01
-fieldTypeToWord8 MYSQL_TYPE_SHORT       = 0x02
-fieldTypeToWord8 MYSQL_TYPE_LONG        = 0x03
-fieldTypeToWord8 MYSQL_TYPE_FLOAT       = 0x04
-fieldTypeToWord8 MYSQL_TYPE_DOUBLE      = 0x05
-fieldTypeToWord8 MYSQL_TYPE_NULL        = 0x06
-fieldTypeToWord8 MYSQL_TYPE_TIMESTAMP   = 0x07
-fieldTypeToWord8 MYSQL_TYPE_LONGLONG    = 0x08
-fieldTypeToWord8 MYSQL_TYPE_INT24       = 0x09
-fieldTypeToWord8 MYSQL_TYPE_DATE        = 0x0a
-fieldTypeToWord8 MYSQL_TYPE_TIME        = 0x0b
-fieldTypeToWord8 MYSQL_TYPE_DATETIME    = 0x0c
-fieldTypeToWord8 MYSQL_TYPE_YEAR        = 0x0d
-fieldTypeToWord8 MYSQL_TYPE_NEWDATE     = 0x0e
-fieldTypeToWord8 MYSQL_TYPE_VARCHAR     = 0x0f
-fieldTypeToWord8 MYSQL_TYPE_BIT         = 0x10
-fieldTypeToWord8 MYSQL_TYPE_TIMESTAMP2  = 0x11
-fieldTypeToWord8 MYSQL_TYPE_DATETIME2   = 0x12
-fieldTypeToWord8 MYSQL_TYPE_TIME2       = 0x13
-fieldTypeToWord8 MYSQL_TYPE_NEWDECIMAL  = 0xf6
-fieldTypeToWord8 MYSQL_TYPE_ENUM        = 0xf7
-fieldTypeToWord8 MYSQL_TYPE_SET         = 0xf8
-fieldTypeToWord8 MYSQL_TYPE_TINY_BLOB   = 0xf9
-fieldTypeToWord8 MYSQL_TYPE_MEDIUM_BLOB = 0xfa
-fieldTypeToWord8 MYSQL_TYPE_LONG_BLOB   = 0xfb
-fieldTypeToWord8 MYSQL_TYPE_BLOB        = 0xfc
-fieldTypeToWord8 MYSQL_TYPE_VAR_STRING  = 0xfd
-fieldTypeToWord8 MYSQL_TYPE_STRING      = 0xfe
-fieldTypeToWord8 MYSQL_TYPE_GEOMETRY    = 0xff
-fieldTypeToWord8 (MYSQL_TYPE_UNKNOWN x) = x
+fieldTypeToWord8 (FieldType x) = x
 
 instance Binary FieldType where
     get = getFieldType

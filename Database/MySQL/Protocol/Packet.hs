@@ -69,18 +69,23 @@ isEOF p = L.index (pBody p) 0 == 0xFE
 -- here we choose stability over correctness by omit incomplete consumed case:
 -- if we successful parse a packet, then we don't care if there're bytes left.
 decodeFromPacket :: Binary a => Packet -> IO a
-decodeFromPacket (Packet _ _ body) = case decodeOrFail body of
-    Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
-    Right (_, _, r)            -> return r
+decodeFromPacket (Packet _ _ body) = case pushChunks (runGetIncremental get) body of
+    Done _  _ r             -> return r
+    Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+    Partial _               -> throwIO DecodePcketPartial
 {-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
-getFromPacket g (Packet _ _ body) = case runGetOrFail g body of
-    Left (buf, offset, errmsg) -> throwIO (DecodePacketException (L.toStrict buf) offset errmsg)
-    Right (_, _, r)            -> return r
+getFromPacket g (Packet _ _ body) = case pushChunks (runGetIncremental g) body of
+    Done _  _ r             -> return r
+    Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+    Partial _               -> throwIO DecodePcketPartial
 {-# INLINE getFromPacket #-}
 
-data DecodePacketException = DecodePacketException ByteString ByteOffset String deriving (Typeable, Show)
+data DecodePacketException
+    = DecodePacketFailed ByteString ByteOffset String
+    | DecodePcketPartial
+  deriving (Typeable, Show)
 instance Exception DecodePacketException
 
 encodeToPacket :: Binary a => Word8 -> a -> Packet
@@ -210,12 +215,14 @@ putWord24le :: Word32 -> Put
 putWord24le v = do
     putWord16le $ fromIntegral v
     putWord8 $ fromIntegral (v `shiftR` 16)
+{-# INLINE putWord24le #-}
 
 getWord24le :: Get Word32
 getWord24le = do
     a <- fromIntegral <$> getWord16le
     b <- fromIntegral <$> getWord8
     return $! a .|. (b `shiftL` 16)
+{-# INLINE getWord24le #-}
 
 putWord48le :: Word64 -> Put
 putWord48le v = do
@@ -244,4 +251,3 @@ putWord24be :: Word32 -> Put
 putWord24be v = do
     putWord16be $ fromIntegral (v `shiftR` 8)
     putWord8 $ fromIntegral v
-

@@ -51,7 +51,6 @@ main = do
                     \__set          SET('foo', 'bar', 'qux')\
                     \) CHARACTER SET utf8;"
 
-
         resetTestTable c
 
         step "testing text protocol"

@@ -24,10 +24,11 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
                                     }
 
 
-    (fs, is) <- query_ c "SELECT * FROM employees"
+    stmt <- prepareStmt c "SELECT * FROM employees"
+    (fs, is) <- queryStmt c stmt []
     (rowCount :: Int) <- fold (\s _ -> s+1) 0 is
     putStr "field name: "
-    mapM_ (B.putStr . columnName) fs >> B.putStr ", "
+    forM_ fs $ \ f -> B.putStr (columnName f) >> B.putStr ", "
     putStr "\n"
     putStr "numbers of rows: "
     print rowCount

@@ -18,6 +18,13 @@ Roadmap:
 
 This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
 
+Is it fast?
+----------
+
+In short, it's about 2~3 times slower than pure c/c++, but 3 times faster than old FFI bindings(mysql by Bryan O'Sullivan).
+
+<img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-10.png?raw=true">
+
 Motivation
 ----------
 

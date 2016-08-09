@@ -1,5 +1,3 @@
-// g++ libmysql.c -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl -I/usr/local/include/mysql -o libmysql
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,7 +27,6 @@ void *func(void *arg)
     MYSQL_ROW row;
     unsigned int rowCounter = 0;
     MYSQL_FIELD *field;
-    unsigned int num_fields;
     unsigned int i;
     unsigned int timeout = 3000;
     const char *pStatement = "SELECT * FROM employees";
@@ -52,8 +49,6 @@ void *func(void *arg)
         return (void *)0;
     }
 
-    printf("[%ld][%d]connect succssfully\n", *args->thread_id, args->id);
-
     if (0 != mysql_real_query(mysql, pStatement, strlen(pStatement)))
     {
         printf("[%ld][%d]query failed: %s\n", *args->thread_id, args->id, mysql_error(mysql));
@@ -72,25 +67,17 @@ void *func(void *arg)
         return (void *)0;
     }
 
-    num_fields = mysql_num_fields(result);
-    printf("numbers of fields: %d\n", num_fields);
     printf("field name: ");
     while (NULL != (field = mysql_fetch_field(result)))
     {
-        printf(" %s ", field->name);
+        printf(" %s, ", field->name);
     }
-    printf("\n");
 
     while (NULL != (row = mysql_fetch_row(result)))
     {
         rowCounter++;
         unsigned long *lengths;
         lengths = mysql_fetch_lengths(result);
-
-        for (i = 0; i < num_fields; i++)
-        {
-            //printf("[%ld][%d]{%.*s} ", *args->thread_id, args->id, (int) lengths[i], row[i] ? row[i] : "NULL");
-        }
 
     }
     printf("loop through result, total %d rows\n", rowCounter);

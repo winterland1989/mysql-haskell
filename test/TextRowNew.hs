@@ -13,16 +13,13 @@ import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 
 tests :: MySQLConn -> Assertion
 tests c = do
-    (f, is) <- query_ c "SELECT \
-                            \__datetime   ,\
-                            \__timestamp  ,\
-                            \__time        \
-                            \ FROM test57;"
+    (f, is) <- query_ c "SELECT * FROM test57;"
 
     assertEqual "decode Field types" (columnType <$> f)
-        [ MYSQL_TYPE_DATETIME
-        , MYSQL_TYPE_TIMESTAMP
-        , MYSQL_TYPE_TIME
+        [ mySQLTypeLong
+        , mySQLTypeDateTime
+        , mySQLTypeTimestamp
+        , mySQLTypeTime
         ]
 
     Just v <- Stream.read is
