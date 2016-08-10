@@ -97,10 +97,10 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         _ <- readPacket is -- eof packet, we don't verify this though
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
-            p' <- readPacket is
-            if  | isEOF p'  -> writeIORef consumed True >> return Nothing
-                | isERR p'  -> decodeFromPacket p' >>= throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getTextRow fields) p'
+            q <- readPacket is
+            if  | isEOF q  -> writeIORef consumed True >> return Nothing
+                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
+                | otherwise -> Just <$> getFromPacket (getTextRow fields) q
         return (fields, rows)
 
 -- | Ask MySQL to prepare a query statement.
@@ -130,7 +130,7 @@ closeStmt (MySQLConn _ os _ _) stid = do
 --
 resetStmt :: MySQLConn -> StmtID -> IO ()
 resetStmt (MySQLConn is os _ consumed) stid = do
-    writeCommand (COM_STMT_RESET stid) os
+    writeCommand (COM_STMT_RESET stid) os  -- previous result-set may still be unconsumed
     p <- readPacket is
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
@@ -139,13 +139,7 @@ resetStmt (MySQLConn is os _ consumed) stid = do
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
-executeStmt conn@(MySQLConn is os _ _) stid params = do
-    guardUnconsumed conn
-    writeCommand (COM_STMT_EXECUTE stid params) os
-    p <- readPacket is
-    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
-        | isOK  p ->  decodeFromPacket p
-        | otherwise -> throwIO (UnexpectedPacket p)
+executeStmt conn stid params = command conn (COM_STMT_EXECUTE stid params)
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --
@@ -165,10 +159,8 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
             q <- readPacket is
             if  | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>=throwIO . ERRException
-                | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q
-                | otherwise -> throwIO (UnexpectedPacket q)
+                | otherwise -> Just <$> getFromPacket (getBinaryRow fields len) q
         return (fields, rows)
-
 
 -- | Query string type borrowed from @mysql-simple@.
 --

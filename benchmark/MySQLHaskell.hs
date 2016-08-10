@@ -23,11 +23,10 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
                                     , ciDatabase = "testMySQLHaskell"
                                     }
 
-
     (fs, is) <- query_ c "SELECT * FROM employees"
     (rowCount :: Int) <- fold (\s _ -> s+1) 0 is
     putStr "field name: "
-    mapM_ (B.putStr . columnName) fs >> B.putStr ", "
+    forM_ fs $ \ f -> B.putStr (columnName f) >> B.putStr ", "
     putStr "\n"
     putStr "numbers of rows: "
     print rowCount

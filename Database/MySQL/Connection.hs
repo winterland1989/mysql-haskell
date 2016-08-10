@@ -123,9 +123,9 @@ command conn@(MySQLConn is os _ _) cmd = do
     guardUnconsumed conn
     writeCommand cmd os
     p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else decodeFromPacket p
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> decodeFromPacket p
+        | otherwise -> throwIO (UnexpectedPacket p)
 {-# INLINE command #-}
 
 readPacket :: InputStream Packet -> IO Packet

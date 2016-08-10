@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP               #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|
@@ -21,7 +21,7 @@ import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
 import           Data.Bits                      ((.&.))
-import           Data.ByteString.Char8          as BC
+import           Data.ByteString                (ByteString)
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -80,7 +80,8 @@ instance Binary ColumnDef where
     get = getField
     put = putField
 
-
+-- | @newtype@ around 'Word8' for represent @MySQL_TYPE@, We don't use sum type here for speed reason.
+--
 newtype FieldType = FieldType Word8 deriving (Show, Eq)
 
 mySQLTypeDecimal, mySQLTypeTiny, mySQLTypeShort, mySQLTypeLong, mySQLTypeFloat :: FieldType
@@ -122,16 +123,10 @@ mySQLTypeString         = FieldType 0xfe
 mySQLTypeGeometry       = FieldType 0xff
 
 getFieldType :: Get FieldType
-getFieldType = word8ToFieldType <$> getWord8
-
-word8ToFieldType :: Word8 -> FieldType
-word8ToFieldType = FieldType
+getFieldType = FieldType <$> getWord8
 
 putFieldType :: FieldType -> Put
-putFieldType = putWord8 . fieldTypeToWord8
-
-fieldTypeToWord8 :: FieldType -> Word8
-fieldTypeToWord8 (FieldType x) = x
+putFieldType (FieldType t) = putWord8 t
 
 instance Binary FieldType where
     get = getFieldType

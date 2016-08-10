@@ -93,8 +93,7 @@ putCommand (COM_STMT_EXECUTE stid params) = do
     unless (null params) $ do
         putByteString . fromBitMap $ makeNullMap params
         putWord8 0x01    -- always use new-params-bound-flag
-        let fts = map mySQLValueType params
-        forM_ fts $ \ (t, s) -> putFieldType t >> putWord8 s
+        mapM_ putParamMySQLType params
         forM_ params putBinaryField
 
 putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid

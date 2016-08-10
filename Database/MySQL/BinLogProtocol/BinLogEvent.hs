@@ -188,7 +188,7 @@ getTableMapEvent fd = do
     _ <- getWord8 -- 0x00
     cc <- getLenEncInt
     colTypBS <- getByteString cc
-    let typs = map word8ToFieldType (B.unpack colTypBS)
+    let typs = map FieldType (B.unpack colTypBS)
     colMetaBS <- getLenEncBytes
 
     metas <- case runGetOrFail (forM typs getBinLogMeta) (L.fromStrict colMetaBS) of

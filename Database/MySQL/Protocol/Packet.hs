@@ -39,6 +39,7 @@ putPacket (Packet len seqN body)  = do
     putWord24le (fromIntegral len)
     putWord8 seqN
     putLazyByteString body
+{-# INLINE putPacket #-}
 
 getPacket :: Get Packet
 getPacket = do
@@ -46,6 +47,7 @@ getPacket = do
     seqN <- getWord8
     body <- getLazyByteString (fromIntegral len)
     return (Packet len seqN body)
+{-# INLINE getPacket #-}
 
 instance Binary Packet where
     put = putPacket
@@ -72,19 +74,19 @@ decodeFromPacket :: Binary a => Packet -> IO a
 decodeFromPacket (Packet _ _ body) = case pushChunks (runGetIncremental get) body of
     Done _  _ r             -> return r
     Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-    Partial _               -> throwIO DecodePcketPartial
+    Partial _               -> throwIO DecodePacketPartial
 {-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
 getFromPacket g (Packet _ _ body) = case pushChunks (runGetIncremental g) body of
     Done _  _ r             -> return r
     Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-    Partial _               -> throwIO DecodePcketPartial
+    Partial _               -> throwIO DecodePacketPartial
 {-# INLINE getFromPacket #-}
 
 data DecodePacketException
     = DecodePacketFailed ByteString ByteOffset String
-    | DecodePcketPartial
+    | DecodePacketPartial
   deriving (Typeable, Show)
 instance Exception DecodePacketException
 

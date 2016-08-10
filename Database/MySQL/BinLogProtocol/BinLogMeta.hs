@@ -97,14 +97,14 @@ getBinLogMeta t
         -- http://bugs.mysql.com/37426
         if high > 0
         then if (high .&. 0x30) /= 0x30
-             then if word8ToFieldType (high .|. 0x30) == mySQLTypeString
+             then if FieldType (high .|. 0x30) == mySQLTypeString
                   then let len = fromIntegral $ (high .&. 0x30) `xor` 0x30
                            len' = len `shiftL` 4 .|. fromIntegral low
                        in pure $! BINLOG_TYPE_STRING len'
                   else let len = fromIntegral high `shiftL` 8 :: Word16
                            len' = len .|. fromIntegral low
                        in pure $! BINLOG_TYPE_STRING len'
-             else let t' = word8ToFieldType high
+             else let t' = FieldType high
                   in if | t' == mySQLTypeSet    -> let nbits = fromIntegral low `shiftL` 3
                                                        nbytes = fromIntegral $ (nbits + 7) `shiftR` 8
                                                    in pure (BINLOG_TYPE_SET nbits nbytes)
