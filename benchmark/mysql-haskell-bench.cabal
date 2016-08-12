@@ -32,6 +32,8 @@ library
 
 
     other-modules:      Database.MySQL.Connection
+                    ,   Database.MySQL.Query
+
     build-depends:      base >=4.7 && <5
                     ,   transformers
                     ,   monad-loops
