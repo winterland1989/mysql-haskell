@@ -10,9 +10,25 @@ Portability : PORTABLE
 This module provide tools for binlog listening and row based binlog decoding.
 -}
 
-module Database.MySQL.BinLog where
+module Database.MySQL.BinLog
+    ( -- * binlog utilities
+      SlaveID
+    , BinLogTracker(..)
+    , registerPesudoSlave
+    , dumpBinLog
+    , RowBinLogEvent(..)
+    , decodeRowBinLogEvent
+    -- * helpers
+    , enableRowQueryEvent
+    , getLastBinLogTracker
+    , isCheckSumEnabled
+    , isSemiSyncEnabled
+    -- * re-export
+    , module Database.MySQL.BinLogProtocol.BinLogEvent
+    , module Database.MySQL.BinLogProtocol.BinLogValue
+    ) where
 
-import           Control.Exception                         (Exception, throwIO)
+import           Control.Exception                         (throwIO)
 import           Control.Monad
 import           Control.Applicative
 import           Data.Binary.Put
@@ -21,18 +37,24 @@ import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
 import           Data.Text.Encoding                        (encodeUtf8)
-import           Data.Typeable
 import           Data.Word
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
+import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)
 import qualified System.IO.Streams                         as Stream
 
-
 type SlaveID = Word32
+
+-- | binlog filename and position you want to listen.
+--
+data BinLogTracker = BinLogTracker
+    { btFileName :: {-# UNPACK #-} !ByteString
+    , btNextPos  :: {-# UNPACK #-} !Word32
+    } deriving (Show, Eq)
 
 -- | Register a pesudo slave to master, although MySQL document suggests you should call this
 -- before calling 'dumpBinLog', but it seems it's not really necessary.
@@ -45,11 +67,11 @@ registerPesudoSlave conn sid = command conn (COM_REGISTER_SLAVE sid "" "" "" 0 0
 --
 dumpBinLog :: MySQLConn               -- ^ connection to be listened
            -> SlaveID                 -- ^ a number for our pesudo slave.
-           -> (ByteString, Word32)    -- ^ binlog position
+           -> BinLogTracker           -- ^ binlog position
            -> Bool                    -- ^ if master support semi-ack, do we want to enable it?
                                       -- if master doesn't support, this parameter will be ignored.
            -> IO (FormatDescription, IORef ByteString, InputStream BinLogPacket)
-dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
+dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) wantAck = do
     guardUnconsumed conn
     checksum <- isCheckSumEnabled conn
     when checksum $ void $ execute_ conn "SET @master_binlog_checksum = @@global.binlog_checksum"
@@ -82,7 +104,7 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
         p <- iop
         case p of
             Just p' -> do
-                if blEventType p' == typ then return p' else throwIO (UnexpectedBinLogEvent p')
+                if blEventType p' == typ then return p' else skipToPacketT iop typ
             Nothing -> throwIO NetworkException
 
     replyAck needAck p fref os' = when (needAck && blSemiAck p) $ do
@@ -99,13 +121,6 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (initfn, initpos) wantAck = do
         if  | isOK p -> Just <$> getFromPacket (getBinLogPacket checksum needAck) p
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
-
--- | Current binlog filename and next position if you resume listening.
---
-data BinLogTracker = BinLogTracker
-    { btFileName :: {-# UNPACK #-} !ByteString
-    , btNextPos  :: {-# UNPACK #-} !Word64
-    } deriving (Show, Eq)
 
 -- | Row based biblog event type.
 --
@@ -159,28 +174,24 @@ decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' 
                                     | otherwise -> loop fd fref is
                     | otherwise -> loop fd fref is
 
-    track p fref = BinLogTracker <$> readIORef fref <*> pure (blLogPos p)
-
+    track p fref = BinLogTracker <$> readIORef fref <*> (pure . fromIntegral . blLogPos) p
 
 -- | Get latest master's binlog filename and position.
 --
-getLastBinLogInfo :: MySQLConn -> IO (ByteString, Word64)
-getLastBinLogInfo conn = do
-    (_, is) <- query_ conn "SHOW MASTER STATUS;"
+getLastBinLogTracker :: MySQLConn -> IO (Maybe BinLogTracker)
+getLastBinLogTracker conn = do
+    (_, is) <- query_ conn "SHOW MASTER STATUS"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just (MySQLText fn : MySQLInt64U pos : _) -> return (encodeUtf8 fn, pos)
-        row'                                       -> throwIO (GetLastBinLogInfoFail row')
-
-data GetLastBinLogInfoFail = GetLastBinLogInfoFail (Maybe [MySQLValue]) deriving (Show, Typeable)
-instance Exception GetLastBinLogInfoFail
+        Just (MySQLText fn : MySQLInt64U pos : _) -> return . Just $ BinLogTracker (encodeUtf8 fn) (fromIntegral pos)
+        row'                                      -> return Nothing
 
 -- | Return True if binlog_checksum = CRC32. Only for MySQL > 5.6
 --
 isCheckSumEnabled :: MySQLConn -> IO Bool
 isCheckSumEnabled conn = do
-    (_, is) <- query_ conn "SHOW GLOBAL VARIABLES LIKE 'binlog_checksum';"
+    (_, is) <- query_ conn "SHOW GLOBAL VARIABLES LIKE 'binlog_checksum'"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
@@ -191,7 +202,7 @@ isCheckSumEnabled conn = do
 --
 isSemiSyncEnabled :: MySQLConn -> IO Bool
 isSemiSyncEnabled conn = do
-    (_, is) <- query_ conn "SHOW VARIABLES LIKE 'rpl_semi_sync_master_enabled';"
+    (_, is) <- query_ conn "SHOW VARIABLES LIKE 'rpl_semi_sync_master_enabled'"
     row <- Stream.read is
     Stream.skipToEof is
     case row of
@@ -202,5 +213,4 @@ isSemiSyncEnabled conn = do
 -- we can get query event in row based binlog.
 --
 enableRowQueryEvent :: MySQLConn -> IO ()
-enableRowQueryEvent conn = void $ execute_ conn "SET @binlog_rows_query_log_events = ON;"
-
+enableRowQueryEvent conn = void $ execute_ conn "SET @binlog_rows_query_log_events='ON'"

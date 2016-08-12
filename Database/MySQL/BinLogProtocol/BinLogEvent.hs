@@ -31,6 +31,7 @@ import           Database.MySQL.Protocol
 import           Control.Exception                         (Exception (..),
                                                             throwIO)
 import           Data.Typeable                             (Typeable)
+import           Database.MySQL.Query
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -105,15 +106,17 @@ getBinLogPacket checksum semi = do
 
 getFromBinLogPacket :: Get a -> BinLogPacket -> IO a
 getFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) =
-    case runGetOrFail g body of
-        Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
-        Right (_, _, r)            -> return r
+    case pushEndOfInput $ pushChunks (runGetIncremental g) body  of
+        Done _  _ r             -> return r
+        Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+        Partial _               -> throwIO DecodePacketPartial
 
 getFromBinLogPacket' :: (BinLogEventType -> Get a) -> BinLogPacket -> IO a
 getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
-    case runGetOrFail (g typ) body of
-        Left (buf, offset, errmsg) -> throwIO (DecodeBinLogEventException (L.toStrict buf) offset errmsg)
-        Right (_, _, r)            -> return r
+    case pushEndOfInput $ pushChunks (runGetIncremental (g typ)) body  of
+        Done _  _ r             -> return r
+        Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+        Partial _               -> throwIO DecodePacketPartial
 
 --------------------------------------------------------------------------------
 
@@ -148,7 +151,7 @@ data QueryEvent = QueryEvent
     , qErrCode      :: !Word16
     , qStatusVars   :: !ByteString
     , qSchemaName   :: !ByteString
-    , qQuery        :: !L.ByteString
+    , qQuery        :: !Query
     } deriving (Show, Eq)
 
 getQueryEvent :: Get QueryEvent
@@ -162,7 +165,7 @@ getQueryEvent = do
     schema <- getByteString (fromIntegral slen)
     _ <- getWord8
     qry <- getRemainingLazyByteString
-    return (QueryEvent pid tim ecode svar schema qry)
+    return (QueryEvent pid tim ecode svar schema (Query qry))
 
 data TableMapEvent = TableMapEvent
     { tmTableId    :: !Word64
@@ -275,13 +278,3 @@ getPresentMap plen poffset = do
                 else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
     pure (BitMap pmap')
 
---------------------------------------------------------------------------------
--- | exception tyoe
-
-data UnexpectedBinLogEvent = UnexpectedBinLogEvent BinLogPacket
-    deriving (Show, Typeable)
-instance Exception UnexpectedBinLogEvent
-
-data DecodeBinLogEventException = DecodeBinLogEventException ByteString ByteOffset String
-    deriving (Show, Typeable)
-instance Exception DecodeBinLogEventException

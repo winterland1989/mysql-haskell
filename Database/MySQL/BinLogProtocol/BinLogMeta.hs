@@ -35,6 +35,7 @@ import           Data.Binary.Get
 import           Data.Bits
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
+import           Debug.Trace
 
 data BinLogMeta
     = BINLOG_TYPE_TINY
@@ -92,27 +93,27 @@ getBinLogMeta t
     | t == mySQLTypeVarString  = BINLOG_TYPE_STRING <$> getWord16le
 
     | t == mySQLTypeString     = do
-        low <- getWord8
-        high <- getWord8
+        byte0 <- getWord8
+        byte1 <- getWord8
         -- http://bugs.mysql.com/37426
-        if high > 0
-        then if (high .&. 0x30) /= 0x30
-             then if FieldType (high .|. 0x30) == mySQLTypeString
-                  then let len = fromIntegral $ (high .&. 0x30) `xor` 0x30
-                           len' = len `shiftL` 4 .|. fromIntegral low
+        if  byte0 > 0
+        then if (byte0 .&. 0x30) /= 0x30
+             then if FieldType (byte0 .|. 0x30) == mySQLTypeString
+                  then let len = fromIntegral $ (byte0 .&. 0x30) `xor` 0x30
+                           len' = len `shiftL` 4 .|. fromIntegral byte1
                        in pure $! BINLOG_TYPE_STRING len'
-                  else let len = fromIntegral high `shiftL` 8 :: Word16
-                           len' = len .|. fromIntegral low
+                  else let len = fromIntegral byte0 `shiftL` 8 :: Word16
+                           len' = len .|. fromIntegral byte1
                        in pure $! BINLOG_TYPE_STRING len'
-             else let t' = FieldType high
-                  in if | t' == mySQLTypeSet    -> let nbits = fromIntegral low `shiftL` 3
+             else let t' = FieldType byte0
+                  in if | t' == mySQLTypeSet    -> let nbits = fromIntegral byte1 `shiftL` 3
                                                        nbytes = fromIntegral $ (nbits + 7) `shiftR` 8
                                                    in pure (BINLOG_TYPE_SET nbits nbytes)
-                        | t' == mySQLTypeEnum   -> pure (BINLOG_TYPE_ENUM low)
-                        | t' == mySQLTypeString -> pure (BINLOG_TYPE_STRING (fromIntegral low))
+                        | t' == mySQLTypeEnum   -> pure (BINLOG_TYPE_ENUM byte1)
+                        | t' == mySQLTypeString -> pure (BINLOG_TYPE_STRING (fromIntegral byte1))
                         | otherwise             -> fail $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
                                                            \ impossible type inside binlog string: " ++ show t'
-        else pure (BINLOG_TYPE_STRING (fromIntegral low))
+        else pure (BINLOG_TYPE_STRING (fromIntegral byte1))
 
     | t == mySQLTypeBlob       = BINLOG_TYPE_BLOB <$> getWord8
     | t == mySQLTypeGeometry   = BINLOG_TYPE_GEOMETRY <$> getWord8

@@ -16,7 +16,7 @@ MySQL packet decoder&encoder, and varities utility.
 module Database.MySQL.Protocol.Packet where
 
 import           Control.Applicative
-import           Control.Exception     (Exception (..), throwIO)
+import           Control.Exception     (Exception(..), throwIO)
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
@@ -71,14 +71,14 @@ isEOF p = L.index (pBody p) 0 == 0xFE
 -- here we choose stability over correctness by omit incomplete consumed case:
 -- if we successful parse a packet, then we don't care if there're bytes left.
 decodeFromPacket :: Binary a => Packet -> IO a
-decodeFromPacket (Packet _ _ body) = case pushChunks (runGetIncremental get) body of
+decodeFromPacket (Packet _ _ body) = case pushEndOfInput $ pushChunks (runGetIncremental get) body of
     Done _  _ r             -> return r
     Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
     Partial _               -> throwIO DecodePacketPartial
 {-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
-getFromPacket g (Packet _ _ body) = case pushChunks (runGetIncremental g) body of
+getFromPacket g (Packet _ _ body) = case pushEndOfInput $ pushChunks (runGetIncremental g) body of
     Done _  _ r             -> return r
     Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
     Partial _               -> throwIO DecodePacketPartial
@@ -106,9 +106,13 @@ putToPacket seqN payload =
 
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
+
+-- | You may get interested in 'OK' packet because it provide informations on
+-- successful operations.
+--
 data OK = OK
-    { okAffectedRows :: !Int
-    , okLastInsertID :: !Int
+    { okAffectedRows :: !Int      -- ^ affected row number
+    , okLastInsertID :: !Int      -- ^ last insert's ID
     , okStatus       :: !Word16
     , okWarningCnt   :: !Word16
     } deriving (Show, Eq)
@@ -138,7 +142,8 @@ data ERR = ERR
     } deriving (Show, Eq)
 
 getERR :: Get ERR
-getERR = ERR <$> getWord16le
+getERR = ERR <$  skip 1
+             <*> getWord16le
              <*  skip 1
              <*> getByteString 5
              <*> getRemainingByteString
@@ -180,7 +185,7 @@ instance Binary EOF where
 putLenEncBytes :: ByteString -> Put
 putLenEncBytes c = do
         let l = B.length c
-        putWord8 $ fromIntegral l
+        putLenEncInt l
         putByteString c
 {-# INLINE putLenEncBytes #-}
 

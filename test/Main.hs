@@ -1,14 +1,18 @@
 module Main where
 
 import Database.MySQL.Base
+import Database.MySQL.BinLog
 import System.Environment
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Monad
+import Control.Exception (bracket)
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified TextRow
 import qualified TextRowNew
 import qualified BinaryRow
 import qualified BinaryRowNew
+import qualified BinLog
 
 main :: IO ()
 
@@ -18,7 +22,10 @@ main = do
     defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
         step "preparing table..."
         c <- connect defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
-        execute_ c  "CREATE TEMPORARY TABLE test(\
+        execute_ c "DROP TABLE IF EXISTS test"
+        execute_ c "DROP TABLE IF EXISTS test57"
+
+        execute_ c  "CREATE TABLE test(\
                     \__id           INT,\
                     \__bit          BIT(16),\
                     \__tinyInt      TINYINT,\
@@ -49,7 +56,7 @@ main = do
                     \__text         TEXT,\
                     \__enum         ENUM('foo', 'bar', 'qux'),\
                     \__set          SET('foo', 'bar', 'qux')\
-                    \) CHARACTER SET utf8;"
+                    \) CHARACTER SET utf8"
 
         resetTestTable c
 
@@ -61,13 +68,16 @@ main = do
         step "testing binary protocol"
         BinaryRow.tests c
 
+        resetTestTable c
+
+
         when (mySQLVer == Just "5.7") $ do
-            execute_ c "CREATE TEMPORARY TABLE test57(\
+            execute_ c "CREATE TABLE test57(\
                        \__id           INT,\
                        \__datetime     DATETIME(2),\
                        \__timestamp    TIMESTAMP(4) NULL,\
                        \__time         TIME(6)\
-                       \) CHARACTER SET utf8;"
+                       \) CHARACTER SET utf8"
 
             resetTest57Table c
 
@@ -79,11 +89,18 @@ main = do
             step "testing MySQL5.7 extra binary protocol"
             BinaryRowNew.tests c
 
+            void $ resetTest57Table c
+
+        step "testing binlog protocol"
+
+        forkIO BinLog.eventProducer
+        BinLog.tests c
+
         close c
 
   where
     resetTestTable c = do
-            execute_ c  "DELETE FROM test WHERE __id=0;"
+            execute_ c  "DELETE FROM test WHERE __id=0"
             execute_ c  "INSERT INTO test VALUES(\
                     \0,\
                     \NULL,\
@@ -115,13 +132,13 @@ main = do
                     \NULL,\
                     \NULL,\
                     \NULL\
-                    \);"
+                    \)"
 
     resetTest57Table c = do
-            execute_ c  "DELETE FROM test57 WHERE __id=0;"
+            execute_ c  "DELETE FROM test57 WHERE __id=0"
             execute_ c  "INSERT INTO test57 VALUES(\
                         \0,\
                         \NULL,\
                         \NULL,\
                         \NULL\
-                        \);"
+                        \)"

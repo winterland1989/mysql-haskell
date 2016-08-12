@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns      #-}
-
 {-|
 Module      : Database.MySQL.BinLogProtocol.BinLogValue
 Description : binlog protocol
@@ -32,6 +30,7 @@ import           Database.MySQL.Protocol.Packet
 import           Data.Scientific
 import           GHC.Generics (Generic)
 
+import           Debug.Trace
 -- | Data type for representing binlog values.
 --
 -- This data type DOES NOT try to parse binlog values into detailed haskell values,
@@ -284,18 +283,17 @@ getMicroSecond _ = pure 0
 
 getBits :: Word16 -> Word8 -> Get Word64
 getBits bits bytes =
-    if bits == 0
-    then fromIntegral <$> getWord8
-    else if | bytes == 1 -> fromIntegral <$> getWord8
-            | bytes == 2 -> fromIntegral <$> getWord16le
-            | bytes == 3 -> fromIntegral <$> getWord24le
-            | bytes == 4 -> fromIntegral <$> getWord32le
-            | bytes == 5 -> fromIntegral <$> getWord40le
-            | bytes == 6 -> fromIntegral <$> getWord48le
-            | bytes == 7 -> fromIntegral <$> getWord56le
-            | bytes == 8 -> fromIntegral <$> getWord64le
-            | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
-                                    \wrong bit length size: " ++ show bytes
+    if  | bytes == 0 -> fromIntegral <$> getWord8
+        | bytes == 1 -> fromIntegral <$> getWord8
+        | bytes == 2 -> fromIntegral <$> getWord16le
+        | bytes == 3 -> fromIntegral <$> getWord24le
+        | bytes == 4 -> fromIntegral <$> getWord32le
+        | bytes == 5 -> fromIntegral <$> getWord40le
+        | bytes == 6 -> fromIntegral <$> getWord48le
+        | bytes == 7 -> fromIntegral <$> getWord56le
+        | bytes == 8 -> fromIntegral <$> getWord64le
+        | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                                \wrong bit length size: " ++ show bytes
 
   where
     getWord40le, getWord56le :: Get Word64
@@ -319,15 +317,15 @@ getBinLogRow metas pmap = do
     go metas (BitMap nullmap) 0 pmap 0
   where
     go :: [BinLogMeta] -> BitMap -> Int -> BitMap -> Int -> Get [BinLogValue]
-    go [] _       _   _          _       = pure []
-    go (f:fs) nullmap !nullpos pmap' !ppos  =
+    go []     _       _       _     _    = pure []
+    go (f:fs) nullmap nullpos pmap' ppos = do
+        let ppos' = ppos + 1
         if isColumnSet pmap' ppos
         then do
             r <- if isColumnSet nullmap nullpos
                     then return BinLogNull
                     else getBinLogField f
             let nullpos' = nullpos + 1
-                ppos' = ppos + 1
-            rest <- go fs nullmap nullpos' pmap' ppos'
+            rest <- nullpos' `seq` ppos' `seq` go fs nullmap nullpos' pmap' ppos'
             return (rest `seq` (r : rest))
-        else go fs nullmap nullpos pmap' (ppos + 1)
+        else ppos' `seq` go fs nullmap nullpos pmap' ppos'

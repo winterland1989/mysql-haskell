@@ -40,8 +40,8 @@ While MySQL may not be the most advanced sql database, it's widely used among Ch
 
 `mysql-haskell` is intended to solve these problems, and provide foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
 
-Building
---------
+Build Test Benchmark
+--------------------
 
 Just use the old way:
 
@@ -52,13 +52,19 @@ cabal install --only-dependencies
 cabal build
 ```
 
-Running tests require creating a user `testMySQLHaskell` and database `testMySQLHaskell`, you can do it use following script:
+Running tests require a local MySQL server, a user `testMySQLHaskell` and a database `testMySQLHaskell`, you can do it use following script:
 
 ```bash
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
 mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
 mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
 mysql -u root -e "FLUSH PRIVILEGES"
+```
+
+You should enable binlog by adding `log_bin = filename` to `my.cnf` or add `--log-bin=filename` to the server, and grant replication access to `testMySQLHaskell` with:
+
+```bash
+mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
 ```
 
 New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping
@@ -70,7 +76,8 @@ an eye on following combinations:
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.6
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.7
 
-There's a c++ multiple threads version as a reference under `benchmark`, you may need to modify `bench.sh`(change the include path) to get it running.
+
+Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to modify `bench.sh`(change the include path) to get c++ version compiled.
 
 Guide
 -----

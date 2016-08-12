@@ -65,11 +65,18 @@ defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" Nothing
 
 --------------------------------------------------------------------------------
 
+-- | socket buffer size.
+--
+-- maybe exposed to 'ConnectInfo' laster?
+--
+bUFSIZE :: Int
+bUFSIZE = 16384
+
 -- | Establish a MySQL connection.
 --
 connect :: ConnectInfo -> IO MySQLConn
 connect ci@(ConnectInfo host port _ _ _ tls) =
-    bracketOnError (TCP.connectWithBufferSize host port 65530)
+    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- Binary.decodeInputStream is
             os' <- Binary.encodeOutputStream os

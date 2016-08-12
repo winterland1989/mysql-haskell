@@ -68,7 +68,7 @@ import           GHC.Generics                       (Generic)
 --  So we use 'LocalTime' to present both @DATETIME@ and @TIMESTAMP@, but the local here is different.
 --
 -- MySQL's @TIME@ type can present time of day, but also elapsed time or a time interval between two events.
--- @TIME@ values may range from '-838:59:59' to '838:59:59', so 'MySQLTime' values consist of a sign and a
+-- @TIME@ values may range from @-838:59:59@ to @838:59:59@, so 'MySQLTime' values consist of a sign and a
 -- 'TimeOfDay' whose hour part may exceeded 24. you can use @timeOfDayToTime@ to get the absolute time interval.
 --
 -- Under MySQL >= 5.7, @DATETIME@, @TIMESTAMP@ and @TIME@ may contain fractional part, which matches haskell's
@@ -340,7 +340,7 @@ getBinaryField f
         || t == mySQLTypeBlob
         || t == mySQLTypeVarString
         || t == mySQLTypeString       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
-                                                    else MySQLBytes <$> getLenEncBytes
+                                                  else MySQLBytes <$> getLenEncBytes
     | t == mySQLTypeBit               = do len <- getLenEncInt
                                            if len == 0 then pure MySQLNull
                                                        else MySQLBit <$> getBits len
