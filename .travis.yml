@@ -30,7 +30,9 @@ before_install:
         sudo mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
         sudo mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         sudo mysql -u root -e "FLUSH PRIVILEGES"
-        sudo cp /etc/mysql/mysql.cnf /etc/my.cnf
+        sudo echo "server-id = 1" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
+        sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
+        sudo service mysql restart
     else
         travis_retry sudo apt-get install -q -y mysql-server-${MYSQLVER} mysql-client-core-${MYSQLVER} mysql-client-${MYSQLVER}
         mysql -V
@@ -39,10 +41,11 @@ before_install:
         mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
         mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         mysql -u root -e "FLUSH PRIVILEGES"
+        sudo echo "[mysqld]" | sudo tee -a /etc/mysql/my.cnf
+        sudo echo "server-id = 1" | sudo tee -a /etc/mysql/my.cnf
+        sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/my.cnf
+        sudo service mysql restart
     fi
-    sudo echo "server-id = 1" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
-    sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
-    sudo service mysql restart
 
 install:
  - cabal --version
