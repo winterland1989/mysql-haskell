@@ -72,7 +72,7 @@ And you should change binlog format with following:
 
 ```
 mysql -u root -e "SET GLOBAL binlog_format = 'ROW'"
-mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'ON'"
+mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'OFF'"
 ```
 
 New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping

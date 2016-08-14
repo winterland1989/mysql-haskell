@@ -32,7 +32,7 @@ before_install:
         sudo mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         sudo mysql -u root -e "FLUSH PRIVILEGES"
         sudo mysql -u root -e "SET GLOBAL binlog_format = 'ROW'"
-        sudo mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'ON'"
+        sudo mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'OFF'"
         sudo echo "server-id = 1" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
         sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
         sudo service mysql restart
@@ -45,7 +45,7 @@ before_install:
         mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         mysql -u root -e "FLUSH PRIVILEGES"
         mysql -u root -e "SET GLOBAL binlog_format = 'ROW'"
-        mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'ON'"
+        mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'OFF'"
         sudo echo "[mysqld]" | sudo tee -a /etc/mysql/my.cnf
         sudo echo "server-id = 1" | sudo tee -a /etc/mysql/my.cnf
         sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/my.cnf

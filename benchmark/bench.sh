@@ -22,7 +22,6 @@ time ./libmysql_prepared 10
 rm ./libmysql_prepared
 echo "=============== benchmark c++ client prepared end ================"
 
-cabal install mysql-0.1.1.8.tar.gz  # it's a shame that the hackage version can't be built
 cabal build
 echo "=============== start benchmark haskell client ============="
 time ./dist/build/bench/bench 1  
@@ -30,7 +29,6 @@ time ./dist/build/bench/bench 2
 time ./dist/build/bench/bench 3  
 time ./dist/build/bench/bench 4  
 time ./dist/build/bench/bench 10 
-time ./dist/build/bench/bench 50 
 echo "=============== benchmark haskell client end ================"
 
 echo "=============== start benchmark haskell client FFI ============="
@@ -38,6 +36,7 @@ time ./dist/build/benchFFI/benchFFI 1
 time ./dist/build/benchFFI/benchFFI 2  
 time ./dist/build/benchFFI/benchFFI 3  
 time ./dist/build/benchFFI/benchFFI 4  
+time ./dist/build/benchFFI/benchFFI 10
 echo "=============== benchmark haskell client FFI end ================"
 
 echo "=============== start benchmark haskell client prepared ============="

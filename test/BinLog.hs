@@ -27,9 +27,6 @@ tests c = do
     x@(fd, _, _) <- dumpBinLog c 1002 blt False
     rowEventStream <- decodeRowBinLogEvent x
 
-    Just (RowQueryEvent _ qe) <- Stream.read rowEventStream
-    assertEqual "decode query event" (qQuery' qe) q1
-
     Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event cloumn" (updateColumnCnt ue) 30
     assertEqual "decode update event rows" (updateRowData ue)
