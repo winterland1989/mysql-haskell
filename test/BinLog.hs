@@ -11,8 +11,10 @@ import Database.MySQL.Protocol
 import Database.MySQL.BinLog
 import qualified System.IO.Streams as Stream
 import Test.Tasty.HUnit
-import Data.Time.Calendar (fromGregorian)
-import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
+import Data.Time.Calendar
+import Data.Time.LocalTime
+import Data.Time.Format
+import Data.Time.Clock.POSIX
 import Data.Text.Encoding (encodeUtf8)
 
 eventProducer :: IO ()
@@ -26,6 +28,10 @@ tests c = do
     Just blt <- getLastBinLogTracker c
     x@(fd, _, _) <- dumpBinLog c 1002 blt False
     rowEventStream <- decodeRowBinLogEvent x
+
+    let Just t = parseTimeM True defaultTimeLocale  "%F %T" "2016-08-08 17:25:59" :: Maybe LocalTime
+    z <- getCurrentTimeZone
+    let timestamp = round $ utcTimeToPOSIXSeconds (localTimeToUTC z t)
 
     Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event cloumn" (updateColumnCnt ue) 30
@@ -79,7 +85,7 @@ tests c = do
                    , BinLogDouble 3.1415926535
                    , BinLogDate 103 24 56
                    , BinLogDateTime2 47 5 8 25 61 59 0
-                   , BinLogTimeStamp2 1470648359 0
+                   , BinLogTimeStamp2 timestamp 0
                    , BinLogTime2 0 824 4 5 0
                    , BinLogYear 1999
                    , BinLogBytes "12345678"

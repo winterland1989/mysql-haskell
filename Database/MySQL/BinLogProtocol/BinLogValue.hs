@@ -43,8 +43,11 @@ import           Debug.Trace
 -- @TINY,SHORT,INT,LONG@, so if you have unsigned columns, use 'fromIntegral' to convert it
 -- to word to get real unsigned value back, for example, @fromIntegral (-1 :: Int) == 255 :: Word@
 --
--- For above reason, we use 'Int24' to present MySQL's @INT24@ type, so that you can get back the
--- right value when try to interpret it as an unsigned word.
+-- For above reason, we use 'Int24' to present MySQL's @INT24@ type, you can get back the
+-- unsigned value using @word24@ package's 'Word24' type.
+--
+-- Timestamp types('BinLogTimeStamp' and 'BinLogTimeStamp2') are values converted into UTC already,
+-- see 'MySQLVaule' 's note.
 --
 -- There's also no infomation about charset, so we use 'ByteString' to present all text
 -- and blob types.
