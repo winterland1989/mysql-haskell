@@ -13,6 +13,7 @@ import qualified System.IO.Streams as Stream
 import Test.Tasty.HUnit
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
+import Data.Text.Encoding (encodeUtf8)
 
 eventProducer :: IO ()
 eventProducer = do
@@ -23,13 +24,13 @@ eventProducer = do
 tests :: MySQLConn -> Assertion
 tests c = do
     Just blt <- getLastBinLogTracker c
-    enableRowQueryEvent c
     x@(fd, _, _) <- dumpBinLog c 1002 blt False
     rowEventStream <- decodeRowBinLogEvent x
-    Just (RowQueryEvent _ qe) <- Stream.read rowEventStream
-    assertEqual "decode query event" (qQuery qe) "BEGIN"
 
-    Just (RowUpdateEvent _ _ ue) <- Stream.read rowEventStream
+    Just (RowQueryEvent _ qe) <- Stream.read rowEventStream
+    assertEqual "decode query event" (qQuery' qe) q1
+
+    Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event cloumn" (updateColumnCnt ue) 30
     assertEqual "decode update event rows" (updateRowData ue)
         [
@@ -65,17 +66,17 @@ tests c = do
                 , BinLogNull
                 , BinLogNull
                 ], [ BinLogLong 0
-                   , BinLogBit 57344
-                   , BinLogTiny 128
-                   , BinLogTiny 255
-                   , BinLogShort 32768
-                   , BinLogShort 65535
-                   , BinLogInt24 8388608
-                   , BinLogInt24 16777215
-                   , BinLogLong 2147483648
-                   , BinLogLong 4294967295
-                   , BinLogLongLong 9223372036854775808
-                   , BinLogLongLong 18446744073709551615
+                   , BinLogBit 224
+                   , BinLogTiny (-128)
+                   , BinLogTiny (-1)
+                   , BinLogShort (-32768)
+                   , BinLogShort (-1)
+                   , BinLogInt24 (-8388608)
+                   , BinLogInt24 (-1)
+                   , BinLogLong (-2147483648)
+                   , BinLogLong (-1)
+                   , BinLogLongLong (-9223372036854775808)
+                   , BinLogLongLong (-1)
                    , BinLogNewDecimal 1.2345678900123456789e9
                    , BinLogFloat 3.14159
                    , BinLogDouble 3.1415926535
@@ -84,14 +85,14 @@ tests c = do
                    , BinLogTimeStamp2 1470648359 0
                    , BinLogTime2 0 824 4 5 0
                    , BinLogYear 1999
-                   , BinLogString "12345678"
-                   , BinLogString "\233\159\169\229\134\172\231\156\159\232\181\158"
-                   , BinLogString "12345678"
-                   , BinLogString "12345678"
-                   , BinLogBlob "12345678"
-                   , BinLogBlob "\233\159\169\229\134\172\231\156\159\232\181\158"
-                   , BinLogBlob "12345678"
-                   , BinLogBlob "\233\159\169\229\134\172\231\156\159\232\181\158"
+                   , BinLogBytes "12345678"
+                   , BinLogBytes (encodeUtf8 "韩冬真赞")
+                   , BinLogBytes "12345678"
+                   , BinLogBytes "12345678"
+                   , BinLogBytes "12345678"
+                   , BinLogBytes (encodeUtf8 "韩冬真赞")
+                   , BinLogBytes "12345678"
+                   , BinLogBytes (encodeUtf8 "韩冬真赞")
                    , BinLogEnum 1
                    , BinLogSet 3
                    ]

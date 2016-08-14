@@ -51,6 +51,7 @@ library
                     ,   scientific
                     ,   bytestring-lexing
                     ,   blaze-textual
+                    ,   word24
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable
@@ -68,6 +69,7 @@ test-suite test
       , base
       , tasty
       , tasty-hunit
+      , text
       , io-streams
       , time
     default-extensions:     MultiWayIf

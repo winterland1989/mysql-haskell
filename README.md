@@ -13,7 +13,7 @@ Roadmap:
 - [x] binlog listening
 - [x] row based binlog parsing
 - [x] stablized API
-- [ ] comprehensive testsuit and benchmark
+- [x] comprehensive testsuit and benchmark
 - [ ] tls support
 
 This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
@@ -21,11 +21,11 @@ This project is still in experimental stage and lack of produciton tests, use on
 Is it fast?
 ----------
 
-In short, it's about 2~3 times slower than pure c/c++, but 3 times faster than old FFI bindings(mysql by Bryan O'Sullivan).
+In short, it's about 2 times slower than pure c/c++, but 5 times faster than old FFI bindings(mysql by Bryan O'Sullivan).
 
-<img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-10.png?raw=true">
+<img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-14.png?raw=true">
 
-Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db), since i haven't taken much time on optimizing, hopefully the figures may improve in future, and more benchmark(insert/delete...) will be added.
+Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db).
 
 Motivation
 ----------
@@ -58,6 +58,7 @@ Running tests require a local MySQL server, a user `testMySQLHaskell` and a data
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
 mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
 mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
+mysql -u root -e "GRANT SUPER ON *.* TO testMySQLHaskell@'localhost'"
 mysql -u root -e "FLUSH PRIVILEGES"
 ```
 
@@ -65,6 +66,13 @@ You should enable binlog by adding `log_bin = filename` to `my.cnf` or add `--lo
 
 ```bash
 mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
+```
+
+And you should change binlog format with following:
+
+```
+mysql -u root -e "SET GLOBAL binlog_format = 'ROW'"
+mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'ON'"
 ```
 
 New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping
@@ -76,6 +84,7 @@ an eye on following combinations:
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.6
 + CABALVER=1.24 GHCVER=8.0.1  MYSQLVER=5.7
 
+Please reference `.travis.yml` if you have problems with setting up test environment.
 
 Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to modify `bench.sh`(change the include path) to get c++ version compiled.
 

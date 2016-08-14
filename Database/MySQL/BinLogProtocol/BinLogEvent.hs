@@ -145,6 +145,9 @@ data RotateEvent = RotateEvent
 getRotateEvent :: Get RotateEvent
 getRotateEvent = RotateEvent <$> getWord64le <*> getRemainingByteString
 
+-- | This's query parser for statement based binlog's query event, it's actually
+-- not used in row based binlog.
+--
 data QueryEvent = QueryEvent
     { qSlaveProxyId :: !Word32
     , qExecTime     :: !Word32
@@ -166,6 +169,15 @@ getQueryEvent = do
     _ <- getWord8
     qry <- getRemainingLazyByteString
     return (QueryEvent pid tim ecode svar schema (Query qry))
+
+-- | This's the query event in row based binlog.
+--
+data QueryEvent' = QueryEvent' { qQuery' :: !Query } deriving (Show, Eq)
+
+getQueryEvent' :: Get QueryEvent'
+getQueryEvent' = do
+    _ <- getWord8
+    QueryEvent' . Query <$> getRemainingLazyByteString
 
 data TableMapEvent = TableMapEvent
     { tmTableId    :: !Word64

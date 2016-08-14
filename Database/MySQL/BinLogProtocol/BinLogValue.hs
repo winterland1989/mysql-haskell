@@ -22,26 +22,39 @@ import           Data.ByteString                          (ByteString)
 import qualified Data.ByteString                          as B
 import qualified Data.ByteString.Unsafe                   as B
 import           Data.Int
+import           Data.Int.Int24
 import           Data.Word
 import           Database.MySQL.BinLogProtocol.BinLogMeta
-import           Database.MySQL.Protocol.MySQLValue       (BitMap (..),
+import           Database.MySQL.Protocol.MySQLValue       (BitMap (..), getBits,
                                                            isColumnSet)
 import           Database.MySQL.Protocol.Packet
 import           Data.Scientific
 import           GHC.Generics (Generic)
 
 import           Debug.Trace
+
 -- | Data type for representing binlog values.
 --
 -- This data type DOES NOT try to parse binlog values into detailed haskell values,
 -- because you may not want to waste performance in situations like database middleware.
 --
+-- Due to the lack of signedness infomation in binlog, we cannot distinguish,
+-- for example, between unsigned tiny 255 and tiny -1, so we use int to present
+-- @TINY,SHORT,INT,LONG@, so if you have unsigned columns, use 'fromIntegral' to convert it
+-- to word to get real unsigned value back, for example, @fromIntegral (-1 :: Int) == 255 :: Word@
+--
+-- For above reason, we use 'Int24' to present MySQL's @INT24@ type, so that you can get back the
+-- right value when try to interpret it as an unsigned word.
+--
+-- There's also no infomation about charset, so we use 'ByteString' to present all text
+-- and blob types.
+--
 data BinLogValue
-    = BinLogTiny       !Word8
-    | BinLogShort      !Word16
-    | BinLogInt24      !Word32
-    | BinLogLong       !Word32
-    | BinLogLongLong   !Word64
+    = BinLogTiny       !Int8
+    | BinLogShort      !Int16
+    | BinLogInt24      !Int24
+    | BinLogLong       !Int32
+    | BinLogLongLong   !Int64
     | BinLogFloat      !Float
     | BinLogDouble     !Double
     | BinLogBit        !Word64          -- ^ a 64bit bitmap.
@@ -57,8 +70,7 @@ data BinLogValue
     | BinLogNewDecimal !Scientific                             -- ^ sign(1= non-negative, 0= negative) integeral part, fractional part
     | BinLogEnum       !Word16                                 -- ^ enum indexing value
     | BinLogSet        !Word64                                 -- ^ set indexing 64bit bitmap.
-    | BinLogBlob       !ByteString
-    | BinLogString     !ByteString                             -- ^ no attempt to do charset decoding here
+    | BinLogBytes      !ByteString
     | BinLogGeometry   !ByteString
     | BinLogNull
   deriving (Show, Eq, Generic)
@@ -67,14 +79,14 @@ data BinLogValue
 -- | BinLog protocol decoder
 --
 getBinLogField :: BinLogMeta -> Get BinLogValue
-getBinLogField BINLOG_TYPE_TINY                = BinLogTiny     <$> getWord8
-getBinLogField BINLOG_TYPE_SHORT               = BinLogShort    <$> getWord16le
-getBinLogField BINLOG_TYPE_INT24               = BinLogInt24    <$> getWord24le
-getBinLogField BINLOG_TYPE_LONG                = BinLogLong     <$> getWord32le
-getBinLogField BINLOG_TYPE_LONGLONG            = BinLogLongLong <$> getWord64le
+getBinLogField BINLOG_TYPE_TINY                = BinLogTiny     <$> getInt8
+getBinLogField BINLOG_TYPE_SHORT               = BinLogShort    <$> getInt16le
+getBinLogField BINLOG_TYPE_INT24               = BinLogInt24 . fromIntegral <$> getWord24le
+getBinLogField BINLOG_TYPE_LONG                = BinLogLong     <$> getInt32le
+getBinLogField BINLOG_TYPE_LONGLONG            = BinLogLongLong <$> getInt64le
 getBinLogField (BINLOG_TYPE_FLOAT  _         ) = BinLogFloat <$> getFloatle
 getBinLogField (BINLOG_TYPE_DOUBLE _         ) = BinLogDouble <$> getDoublele
-getBinLogField (BINLOG_TYPE_BIT    bits bytes) = BinLogBit <$> getBits bits bytes
+getBinLogField (BINLOG_TYPE_BIT    _    bytes) = BinLogBit <$> getBits' bytes
 getBinLogField BINLOG_TYPE_TIMESTAMP           = BinLogTimeStamp <$> getWord32le
 
 -- a integer in @YYYYMMDDhhmmss@, for example:
@@ -247,7 +259,7 @@ getBinLogField (BINLOG_TYPE_ENUM size) =
                               \BINLOG_TYPE_ENUM size: " ++ show size
 
 
-getBinLogField (BINLOG_TYPE_SET bits bytes) = BinLogSet <$> getBits bits bytes
+getBinLogField (BINLOG_TYPE_SET bits bytes) = BinLogSet <$> getBits' bytes
 getBinLogField (BINLOG_TYPE_BLOB lensize) = do
     len <- if  | lensize == 1 -> fromIntegral <$> getWord8
                | lensize == 2 -> fromIntegral <$> getWord16le
@@ -255,12 +267,12 @@ getBinLogField (BINLOG_TYPE_BLOB lensize) = do
                | lensize == 4 -> fromIntegral <$> getWord32le
                | otherwise    -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: \
                                         \wrong BINLOG_TYPE_BLOB length size: " ++ show lensize
-    BinLogBlob <$> getByteString len
+    BinLogBytes <$> getByteString len
 
 getBinLogField (BINLOG_TYPE_STRING size) = do
     len <- if | size < 256 -> fromIntegral <$> getWord8
               | otherwise  -> fromIntegral <$> getWord16le
-    BinLogString <$> getByteString len
+    BinLogBytes <$> getByteString len
 
 getBinLogField (BINLOG_TYPE_GEOMETRY lensize) = do
     len <- if | lensize == 1 -> fromIntegral <$> getWord8
@@ -281,30 +293,11 @@ getMicroSecond 5 = (* 10) . fromIntegral <$> getWord24be
 getMicroSecond 6 = fromIntegral <$> getWord24be
 getMicroSecond _ = pure 0
 
-getBits :: Word16 -> Word8 -> Get Word64
-getBits bits bytes =
-    if  | bytes == 0 -> fromIntegral <$> getWord8
-        | bytes == 1 -> fromIntegral <$> getWord8
-        | bytes == 2 -> fromIntegral <$> getWord16le
-        | bytes == 3 -> fromIntegral <$> getWord24le
-        | bytes == 4 -> fromIntegral <$> getWord32le
-        | bytes == 5 -> fromIntegral <$> getWord40le
-        | bytes == 6 -> fromIntegral <$> getWord48le
-        | bytes == 7 -> fromIntegral <$> getWord56le
-        | bytes == 8 -> fromIntegral <$> getWord64le
-        | otherwise  -> fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
-                                \wrong bit length size: " ++ show bytes
-
-  where
-    getWord40le, getWord56le :: Get Word64
-    getWord40le = do
-        a <- fromIntegral <$> getWord32le
-        b <- fromIntegral <$> getWord8
-        return $! a .|. (b `shiftL` 32)
-    getWord56le = do
-        a <- fromIntegral <$> getWord32le
-        b <- fromIntegral <$> getWord24le
-        return $! a .|. (b `shiftL` 32)
+getBits' :: Word8 -> Get Word64
+getBits' bytes = if bytes <= 8
+    then  getBits (fromIntegral bytes)
+    else fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
+                 \wrong bit length size: " ++ show bytes
 
 --------------------------------------------------------------------------------
 -- | BinLog row decoder

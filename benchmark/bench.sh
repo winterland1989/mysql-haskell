@@ -30,6 +30,7 @@ time ./dist/build/bench/bench 2
 time ./dist/build/bench/bench 3  
 time ./dist/build/bench/bench 4  
 time ./dist/build/bench/bench 10 
+time ./dist/build/bench/bench 50 
 echo "=============== benchmark haskell client end ================"
 
 echo "=============== start benchmark haskell client FFI ============="
@@ -37,7 +38,6 @@ time ./dist/build/benchFFI/benchFFI 1
 time ./dist/build/benchFFI/benchFFI 2  
 time ./dist/build/benchFFI/benchFFI 3  
 time ./dist/build/benchFFI/benchFFI 4  
-time ./dist/build/benchFFI/benchFFI 10 
 echo "=============== benchmark haskell client FFI end ================"
 
 echo "=============== start benchmark haskell client prepared ============="

@@ -74,11 +74,11 @@ getBinLogMeta t
     | t == mySQLTypeDouble     = BINLOG_TYPE_DOUBLE <$> getWord8
 
     | t == mySQLTypeBit        = do
-        nbits <- getWord8
-        nbytes <- getWord8
-        let nbits' = (fromIntegral nbytes * 8) + fromIntegral nbits
-            nbytes' = fromIntegral $ (nbits' + 7) `div` 8
-        pure $! BINLOG_TYPE_BIT nbits' nbytes'
+        byte0 <- getWord8
+        byte1 <- getWord8
+        let nbits = (fromIntegral byte1 `shiftL` 3) .|.  fromIntegral byte0
+            nbytes = fromIntegral $ (nbits + 7) `shiftR` 3
+        pure (BINLOG_TYPE_BIT nbits nbytes)
 
     | t == mySQLTypeTimestamp  = pure BINLOG_TYPE_TIMESTAMP
     | t == mySQLTypeDateTime   = pure BINLOG_TYPE_DATETIME

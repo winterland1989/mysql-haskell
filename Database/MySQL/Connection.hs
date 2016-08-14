@@ -16,7 +16,7 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 module Database.MySQL.Connection where
 
 import           Control.Exception        (Exception, bracketOnError, throwIO)
-import           Control.Monad            (unless)
+import           Control.Monad
 import qualified Crypto.Hash              as Crypto
 import qualified Data.Binary              as Binary
 import qualified Data.Binary.Put          as Binary
@@ -24,6 +24,7 @@ import           Data.Bits
 import qualified Data.ByteArray           as BA
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
+import qualified Data.ByteString.Unsafe          as B
 import qualified Data.ByteString.Lazy     as L
 import           Data.IORef               (IORef, newIORef, readIORef,
                                            writeIORef)
@@ -78,12 +79,12 @@ connect :: ConnectInfo -> IO MySQLConn
 connect ci@(ConnectInfo host port _ _ _ tls) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
-            is' <- Binary.decodeInputStream is
+            is' <- decodeInputStream is
             os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
             let auth = mkAuth ci greet
-            Binary.putToStream (Just (encodeToPacket 1 auth)) os
+            Stream.write (Just (encodeToPacket 1 auth)) os'
             q <- readPacket is'
             if isOK q
             then do
@@ -107,6 +108,31 @@ connect ci@(ConnectInfo host port _ _ _ tls) =
 
     sha1 :: ByteString -> ByteString
     sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
+
+    -- | A specialized 'decodeInputStream' here for speed
+    decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
+    decodeInputStream is = Stream.makeInputStream $ do
+        bs <- Stream.readExactly 4 is
+        let len =  fromIntegral (bs `B.unsafeIndex` 0)
+               .|. fromIntegral (bs `B.unsafeIndex` 1) `shiftL` 8
+               .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
+            seqN = bs `B.unsafeIndex` 3
+        body <- loopRead [] len is
+        pure . Just $ Packet len seqN body
+
+    loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
+    loopRead acc k is = do
+        bs <- Stream.read is
+        case bs of Nothing -> throwIO NetworkException
+                   Just bs' -> do let l = B.length bs'
+                                  if l >= k
+                                  then do
+                                      let (a, rest) = B.splitAt k bs'
+                                      unless (B.null rest) (Stream.unRead rest is)
+                                      return $! L.fromChunks (reverse (a:acc))
+                                  else do
+                                      let k' = k - l
+                                      k' `seq` loopRead (bs':acc) k' is
 
 -- | Close a MySQL connection.
 --
@@ -136,11 +162,13 @@ command conn@(MySQLConn is os _ _) cmd = do
 {-# INLINE command #-}
 
 readPacket :: InputStream Packet -> IO Packet
-readPacket is = Stream.read is >>= maybe (throwIO NetworkException) (\ p@(Packet len _ bs) ->
-        if len < 16777215 then return p else go len [bs]
-    )
+readPacket is = Stream.read is >>= maybe
+    (throwIO NetworkException)
+    (\ p@(Packet len _ bs) -> if len < 16777215 then return p else go len [bs])
   where
-    go len acc = Stream.read is >>= maybe (throwIO NetworkException) (\ (Packet len' seqN bs) -> do
+    go len acc = Stream.read is >>= maybe
+        (throwIO NetworkException)
+        (\ (Packet len' seqN bs) -> do
             let len'' = len + len'
                 acc' = bs:acc
             if len' < 16777215

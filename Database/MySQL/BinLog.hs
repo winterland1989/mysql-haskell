@@ -19,7 +19,6 @@ module Database.MySQL.BinLog
     , RowBinLogEvent(..)
     , decodeRowBinLogEvent
     -- * helpers
-    , enableRowQueryEvent
     , getLastBinLogTracker
     , isCheckSumEnabled
     , isSemiSyncEnabled
@@ -125,13 +124,13 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
 -- | Row based biblog event type.
 --
 -- It's recommended to call 'enableRowQueryEvent' before 'dumpBinLog', so that you can get
--- query event in row based binlog(for exampleit's important for detect a table change).
+-- 'RowQueryEvent' in row based binlog(for exampleit's important for detect a table change).
 --
 -- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
 -- for example, writing 'BinLogPacket' to a zookeeper when you done with an event.
 --
 data RowBinLogEvent
-    = RowQueryEvent   !BinLogTracker !QueryEvent
+    = RowQueryEvent   !BinLogTracker !QueryEvent'
     | RowDeleteEvent  !BinLogTracker !TableMapEvent !DeleteRowsEvent
     | RowWriteEvent   !BinLogTracker !TableMapEvent !WriteRowsEvent
     | RowUpdateEvent  !BinLogTracker !TableMapEvent !UpdateRowsEvent
@@ -148,9 +147,9 @@ decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' 
             Nothing -> return Nothing
             Just p' -> do
                 let t = blEventType p'
-                if  | t == BINLOG_QUERY_EVENT -> do
+                if  | t == BINLOG_ROWS_QUERY_EVENT -> do
                         tr <- track p' fref
-                        e <- getFromBinLogPacket getQueryEvent p'
+                        e <- getFromBinLogPacket getQueryEvent' p'
                         pure (Just (RowQueryEvent tr e))
                     | t == BINLOG_TABLE_MAP_EVENT -> do
                         tme <- getFromBinLogPacket (getTableMapEvent fd) p'
@@ -185,7 +184,7 @@ getLastBinLogTracker conn = do
     Stream.skipToEof is
     case row of
         Just (MySQLText fn : MySQLInt64U pos : _) -> return . Just $ BinLogTracker (encodeUtf8 fn) (fromIntegral pos)
-        row'                                      -> return Nothing
+        _                                         -> return Nothing
 
 -- | Return True if binlog_checksum = CRC32. Only for MySQL > 5.6
 --
@@ -208,9 +207,3 @@ isSemiSyncEnabled conn = do
     case row of
         Just [_, MySQLText "ON"] -> return True
         _                        -> return False
-
--- | Set session varible @binlog_rows_query_log_events@ to @ON@, so that
--- we can get query event in row based binlog.
---
-enableRowQueryEvent :: MySQLConn -> IO ()
-enableRowQueryEvent conn = void $ execute_ conn "SET @binlog_rows_query_log_events='ON'"

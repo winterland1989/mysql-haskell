@@ -377,7 +377,8 @@ getBinaryField f
 --
 getBits :: Int -> Get Word64
 getBits bytes =
-    if  | bytes == 1 -> fromIntegral <$> getWord8
+    if  | bytes == 0
+            || bytes == 1 -> fromIntegral <$> getWord8
         | bytes == 2 -> fromIntegral <$> getWord16be
         | bytes == 3 -> fromIntegral <$> getWord24be
         | bytes == 4 -> fromIntegral <$> getWord32be
@@ -477,9 +478,10 @@ getBinaryRow fields flen = do
     _ <- getWord8           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
-    go fields nullmap (0 :: Int)
+    go fields nullmap 0
   where
-    go [] _       _        = pure []
+    go :: [ColumnDef] -> ByteString -> Int -> Get [MySQLValue]
+    go []     _       _   = pure []
     go (f:fs) nullmap pos = do
         r <- if isNull nullmap pos
                 then return MySQLNull
@@ -491,6 +493,7 @@ getBinaryRow fields flen = do
     isNull nullmap pos =  -- This 'isNull' is special for offset = 2
         let (i, j) = (pos + 2) `quotRem` 8
         in (nullmap `B.unsafeIndex` i) `testBit` j
+    {-# INLINE isNull #-}
 {-# INLINE getBinaryRow #-}
 
 -- | Use 'ByteString' to present a bitmap.

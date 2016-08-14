@@ -160,7 +160,8 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
             q <- readPacket is
-            if  | isEOF q  -> writeIORef consumed True >> return Nothing
+            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q -- fast path for decode rows
+                | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getBinaryRow fields len) q
+                | otherwise -> throwIO NetworkException
         return (fields, rows)
