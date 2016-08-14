@@ -93,7 +93,7 @@ main = do
 
         step "testing binlog protocol"
 
-        forkIO $ threadDelay 100 >> BinLog.eventProducer
+        forkIO BinLog.eventProducer
         BinLog.tests c
 
         close c
