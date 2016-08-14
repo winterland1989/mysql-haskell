@@ -118,7 +118,7 @@ connect ci@(ConnectInfo host port _ _ _ tls) =
                .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
             seqN = bs `B.unsafeIndex` 3
         body <- loopRead [] len is
-        pure . Just $ Packet len seqN body
+        return . Just $ Packet len seqN body
 
     loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
     loopRead acc k is = do

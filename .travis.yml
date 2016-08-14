@@ -24,7 +24,7 @@ before_install:
         wget http://dev.mysql.com/get/mysql-apt-config_0.7.3-1_all.deb
         sudo dpkg -i mysql-apt-config_0.7.3-1_all.deb
         sudo apt-get update
-        sudo apt-get --yes install mysql-server-5.7
+        sudo apt-get --yes install mysql-community-server mysql-common
         sudo mysql -V
         sudo mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
         sudo mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
