@@ -51,6 +51,7 @@ library
                     ,   bytestring-lexing
                     ,   blaze-textual
                     ,   word24
+                    ,   tls
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable

@@ -9,21 +9,20 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : PORTABLE
 
-This module provide column meta decoder for binlog protocol, note this's different from 'BinLogDef'
-used in binary result-set.
+This module provide column meta decoder for binlog protocol.
 
 There're certain type won't appear in binlog event, and some types are compressed into 'mySQLTypeString'
 , please take python version as a reference:  <https://github.com/noplay/python-mysql-replication>
 
 You will not directly meet following 'FieldType' namely:
 
-    * mySQLTypeDECIMAL
-    * mySQLTypeNEWDATE
-    * mySQLTypeENUM
-    * mySQLTypeSET
-    * mySQLTypeTINY_BLOB
-    * mySQLTypeMEDIUM_BLOB
-    * mySQLTypeLONG_BLOB
+    * mySQLTypeDecimal
+    * mySQLTypeNewdate
+    * mySQLTypeEnum
+    * mySQLTypeSet
+    * mySQLTypeTinyBlob
+    * mySQLTypeMediumBlOb
+    * mySQLTypeLongBlob
 
 -}
 
@@ -35,6 +34,8 @@ import           Data.Bits
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 
+-- | An intermedia date type for decoding row-based event's values.
+--
 data BinLogMeta
     = BINLOG_TYPE_TINY
     | BINLOG_TYPE_SHORT

@@ -1,20 +1,21 @@
+{-# LANGUAGE BinaryLiterals      #-}
+{-# LANGUAGE NegativeLiterals    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE NegativeLiterals #-}
 
 module BinaryRow where
 
-import Control.Applicative
-import Control.Monad
-import Control.Exception
-import Database.MySQL.Base
-import qualified System.IO.Streams as Stream
-import Test.Tasty.HUnit
-import Data.Time.Calendar (fromGregorian)
-import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
+import           Control.Applicative
+import           Control.Exception
+import           Control.Monad
+import           Data.Time.Calendar  (fromGregorian)
+import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
+import           Database.MySQL.Base
+import qualified System.IO.Streams   as Stream
+import           Test.Tasty.HUnit
 
 tests :: MySQLConn -> Assertion
 tests c = do
-    selStmt <- prepareStmt c "SELECT * FROM test;"
+    selStmt <- prepareStmt c "SELECT * FROM test"
 
     (f, is) <- queryStmt c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
@@ -86,8 +87,10 @@ tests c = do
 
     Stream.skipToEof is
 
+    let bitV = 0b1010101011100000
+
     execute_ c "UPDATE test SET \
-                \__bit        = b'11100000'                            ,\
+                \__bit        = b'1010101011100000'                    ,\
                 \__tinyInt    = -128                                   ,\
                 \__tinyIntU   = 255                                    ,\
                 \__smallInt   = -32768                                 ,\
@@ -100,7 +103,7 @@ tests c = do
                 \__bigIntU    = 18446744073709551615                   ,\
                 \__decimal    = 1234567890.0123456789                  ,\
                 \__float      = 3.14159                                ,\
-                \__dobule     = 3.1415926535                           ,\
+                \__double     = 3.1415926535                           ,\
                 \__date       = '2016-08-08'                           ,\
                 \__datetime   = '2016-08-08 17:25:59'                  ,\
                 \__timestamp  = '2016-08-08 17:25:59'                  ,\
@@ -115,14 +118,14 @@ tests c = do
                 \__blob       = '12345678'                             ,\
                 \__text       = '韩冬真赞'                             ,\
                 \__enum       = 'foo'                                  ,\
-                \__set        = 'foo,bar' WHERE __id=0;"
+                \__set        = 'foo,bar' WHERE __id=0"
 
     (_, is) <- queryStmt c selStmt []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol" v
         [ MySQLInt32 0
-        , MySQLBit 224
+        , MySQLBit bitV
         , MySQLInt8 (-128)
         , MySQLInt8U 255
         , MySQLInt16 (-32768)
@@ -168,7 +171,7 @@ tests c = do
             \__bigIntU    = ?     ,\
             \__decimal    = ?     ,\
             \__float      = ?     ,\
-            \__dobule     = ?     ,\
+            \__double     = ?     ,\
             \__date       = ?     ,\
             \__datetime   = ?     ,\
             \__timestamp  = ?     ,\
@@ -183,10 +186,10 @@ tests c = do
             \__blob       = ?     ,\
             \__text       = ?     ,\
             \__enum       = ?     ,\
-            \__set        = ? WHERE __id=0;"
+            \__set        = ? WHERE __id=0"
 
     executeStmt c updStmt
-                [ MySQLBit 224
+                [ MySQLBit bitV
                 , MySQLInt8 (-128)
                 , MySQLInt8U 255
                 , MySQLInt16 (-32768)
@@ -224,7 +227,7 @@ tests c = do
 
     assertEqual "roundtrip binary protocol" v
         [ MySQLInt32 0
-        , MySQLBit 224
+        , MySQLBit bitV
         , MySQLInt8 (-128)
         , MySQLInt8U 255
         , MySQLInt16 (-32768)
@@ -254,5 +257,34 @@ tests c = do
         , MySQLText "foo"
         , MySQLText "foo,bar"
         ]
+
+    Stream.skipToEof is
+
+    execute_ c "UPDATE test SET \
+        \__time       = '199:59:59'     ,\
+        \__year       = 0  WHERE __id=0"
+
+    selStmt2 <- prepareStmt c "SELECT __time, __year FROM test"
+    (_, is) <- queryStmt c selStmt2 []
+    Just v <- Stream.read is
+
+    assertEqual "decode binary protocol 2" v
+            [ MySQLTime 0 (TimeOfDay 199 59 59)
+            , MySQLYear 0
+            ]
+
+    Stream.skipToEof is
+
+    updStmt2 <- prepareStmt c "UPDATE test SET \
+                \__time       = ?     ,\
+                \__year       = ?  WHERE __id=0"
+
+    (_, is) <- queryStmt c selStmt2 [ MySQLTime 0 (TimeOfDay 199 59 59), MySQLYear 0]
+    Just v <- Stream.read is
+
+    assertEqual "roundtrip binary protocol 2" v
+            [ MySQLTime 0 (TimeOfDay 199 59 59)
+            , MySQLYear 0
+            ]
 
     Stream.skipToEof is

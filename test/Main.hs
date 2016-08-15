@@ -1,20 +1,20 @@
 module Main where
 
-import Database.MySQL.Base
-import Database.MySQL.BinLog
-import qualified Data.ByteString as B
-import System.Environment
-import Control.Concurrent (threadDelay, forkIO)
-import Control.Monad
-import Control.Exception (bracket)
-import Test.Tasty
-import Test.Tasty.HUnit
-import qualified TextRow
-import qualified TextRowNew
 import qualified BinaryRow
 import qualified BinaryRowNew
 import qualified BinLog
 import qualified BinLogNew
+import           Control.Concurrent    (forkIO, threadDelay)
+import           Control.Exception     (bracket)
+import           Control.Monad
+import qualified Data.ByteString       as B
+import           Database.MySQL.Base
+import           Database.MySQL.BinLog
+import           System.Environment
+import           Test.Tasty
+import           Test.Tasty.HUnit
+import qualified TextRow
+import qualified TextRowNew
 
 main :: IO ()
 
@@ -31,7 +31,7 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
 
 
     execute_ c "DROP TABLE IF EXISTS test"
-    execute_ c "DROP TABLE IF EXISTS test57"
+    execute_ c "DROP TABLE IF EXISTS test_new"
 
     execute_ c  "CREATE TABLE test(\
                 \__id           INT,\
@@ -48,7 +48,7 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
                 \__bigIntU      BIGINT UNSIGNED,\
                 \__decimal      DECIMAL(20,10),\
                 \__float        FLOAT,\
-                \__dobule       DOUBLE,\
+                \__double       DOUBLE,\
                 \__date         DATE,\
                 \__datetime     DATETIME,\
                 \__timestamp    TIMESTAMP NULL,\

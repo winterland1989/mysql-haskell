@@ -1,19 +1,19 @@
+{-# LANGUAGE NegativeLiterals    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE NegativeLiterals #-}
 
 module BinLog where
 
-import Control.Applicative
-import Control.Monad
-import Control.Exception
-import Database.MySQL.Base
-import Database.MySQL.BinLog
-import qualified System.IO.Streams as Stream
-import Test.Tasty.HUnit
-import Data.Time.LocalTime
-import Data.Time.Format
-import Data.Time.Clock.POSIX
-import Data.Text.Encoding (encodeUtf8)
+import           Control.Applicative
+import           Control.Exception
+import           Control.Monad
+import           Data.Text.Encoding    (encodeUtf8)
+import           Data.Time.Clock.POSIX
+import           Data.Time.Format
+import           Data.Time.LocalTime
+import           Database.MySQL.Base
+import           Database.MySQL.BinLog
+import qualified System.IO.Streams     as Stream
+import           Test.Tasty.HUnit
 
 eventProducer :: IO ()
 eventProducer = do

@@ -47,7 +47,7 @@ import qualified System.IO.Streams                         as Stream
 
 type SlaveID = Word32
 
--- | binlog filename and position you want to listen.
+-- | binlog filename and position to start listening.
 --
 data BinLogTracker = BinLogTracker
     { btFileName :: {-# UNPACK #-} !ByteString
@@ -123,7 +123,7 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
 -- | Row based biblog event type.
 --
 -- It's recommended to call 'enableRowQueryEvent' before 'dumpBinLog', so that you can get
--- 'RowQueryEvent' in row based binlog(for exampleit's important for detect a table change).
+-- 'RowQueryEvent' in row based binlog(it's important for detect a table change for example).
 --
 -- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
 -- for example, writing 'BinLogPacket' to a zookeeper when you done with an event.

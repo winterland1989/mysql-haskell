@@ -35,9 +35,9 @@ import           GHC.Generics                             (Generic)
 -- This data type DOES NOT try to parse binlog values into detailed haskell values,
 -- because you may not want to waste performance in situations like database middleware.
 --
--- Due to the lack of signedness infomation in binlog, we cannot distinguish,
+-- Due to the lack of signedness infomation in binlog meta, we cannot distinguish,
 -- for example, between unsigned tiny 255 and tiny -1, so we use int to present
--- @TINY,SHORT,INT,LONG@, so if you have unsigned columns, use 'fromIntegral' to convert it
+-- @TINY,SHORT,INT,LONG@. If you have unsigned columns, use 'fromIntegral' to convert it
 -- to word to get real unsigned value back, for example, @fromIntegral (-1 :: Int) == 255 :: Word@
 --
 -- For above reason, we use 'Int24' to present MySQL's @INT24@ type, you can get back the
@@ -46,8 +46,12 @@ import           GHC.Generics                             (Generic)
 -- Timestamp types('BinLogTimeStamp' and 'BinLogTimeStamp2') are values converted into UTC already,
 -- see 'MySQLVaule' 's note.
 --
--- There's also no infomation about charset, so we use 'ByteString' to present all text
+-- There's also no infomation about charset, so we use 'ByteString' to present both text
 -- and blob types.
+--
+-- The @SET@ and @ENUM@ values are presented by their index's value and bitmap respectively,
+-- if you need get the string value back, you have to perform a 'DESC tablename' to get the
+-- set or enum table.
 --
 data BinLogValue
     = BinLogTiny       !Int8
@@ -70,7 +74,7 @@ data BinLogValue
     | BinLogNewDecimal !Scientific                             -- ^ sign(1= non-negative, 0= negative) integeral part, fractional part
     | BinLogEnum       !Word16                                 -- ^ enum indexing value
     | BinLogSet        !Word64                                 -- ^ set indexing 64bit bitmap.
-    | BinLogBytes      !ByteString
+    | BinLogBytes      !ByteString                             -- ^ all string and blob values.
     | BinLogGeometry   !ByteString
     | BinLogNull
   deriving (Show, Eq, Generic)

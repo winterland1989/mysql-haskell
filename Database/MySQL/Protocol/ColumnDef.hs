@@ -35,13 +35,11 @@ data ColumnDef = ColumnDef
     , columnOrigTable ::  !ByteString             -- ^ Original table name, if table was an alias.
     , columnName      ::  !ByteString             -- ^ Name of column.
     , columnOrigName  ::  !ByteString             -- ^ Original column name, if an alias.
-    -- columnFixedLen ::    !LenEncInt              -- ^ const '0x0C'
     , columnCharSet   ::  !Word16                 -- ^ Character set number.
     , columnLength    ::  !Word32                 -- ^ Width of column (create length).
     , columnType      ::  !FieldType
     , columnFlags     ::  !Word16                 -- ^ Div flags.
     , columnDecimals  ::  !Word8                  -- ^ Number of decimals in field.
-    -- columnFiller :: Word16                     -- const 0x00 0x00
     } deriving (Show, Eq)
 
 getField :: Get ColumnDef
@@ -53,7 +51,7 @@ getField = ColumnDef
         <*> getLenEncBytes          -- name
         <*> getLenEncBytes          -- origName
         <*  skip 1                  -- const 0x0c
-        <*> getWord16le             -- charset,
+        <*> getWord16le             -- charset
         <*> getWord32le             -- length
         <*> getFieldType            -- type
         <*> getWord16le             -- flags

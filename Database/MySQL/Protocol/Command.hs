@@ -30,22 +30,21 @@ import           Database.MySQL.Protocol.Packet
 
 type StmtID = Word32
 
+-- | All support MySQL commands.
+--
 data Command
-    = COM_QUIT                                    --  0x01
-    | COM_INIT_DB        !ByteString              --  0x02
-    | COM_QUERY          !L.ByteString            --  0x03
-    | COM_PING                                    --  0x0E
-    | COM_BINLOG_DUMP    !Word32 !Word16 !Word32 !ByteString
-            -- ^ binlog-pos, flags(0x01), server-id, binlog-filename
-    | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 --  0x15
-            -- ^ server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
-    | COM_STMT_PREPARE   !L.ByteString            -- 0x16
-    | COM_STMT_EXECUTE   !StmtID ![MySQLValue]    -- 0x17
-            -- ^ paramDef, stmtId, params
-    | COM_STMT_SEND_LONG_DATA                     -- 0x18
-    | COM_STMT_CLOSE     !StmtID                        -- 0x19
-    | COM_STMT_RESET     !StmtID                        -- 0x1A
-    | COM_STMT_FETCH                              -- 0x1C
+    = COM_QUIT                                    -- ^ 0x01
+    | COM_INIT_DB        !ByteString              -- ^ 0x02
+    | COM_QUERY          !L.ByteString            -- ^ 0x03
+    | COM_PING                                    -- ^ 0x0E
+    | COM_BINLOG_DUMP    !Word32 !Word16 !Word32 !ByteString -- ^ 0x12
+            -- binlog-pos, flags(0x01), server-id, binlog-filename
+    | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 -- ^ 0x15
+            -- server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
+    | COM_STMT_PREPARE   !L.ByteString            -- ^ 0x16 statement
+    | COM_STMT_EXECUTE   !StmtID ![MySQLValue]    -- ^ 0x17 stmtId, params
+    | COM_STMT_CLOSE     !StmtID                  -- ^ 0x19 stmtId
+    | COM_STMT_RESET     !StmtID                  -- ^ 0x1A stmtId
     | COM_UNSUPPORTED
    deriving (Show, Eq)
 
@@ -62,6 +61,10 @@ getCommand = do
         0x15  -> COM_REGISTER_SLAVE
                     <$> getWord32le <*> getLenEncBytes <*> getLenEncBytes <*> getLenEncBytes
                     <*> getWord16le <*> getWord32le <*> getWord32le
+        0x16  -> COM_STMT_PREPARE <$> getRemainingLazyByteString
+        0x17  -> fail "Database.MySQL.Protocol.Command: decode COM_STMT_EXECUTE need column number"
+        0x19  -> COM_STMT_CLOSE <$> getWord32le
+        0x1A  -> COM_STMT_RESET <$> getWord32le
         _     -> pure COM_UNSUPPORTED
 
 putCommand :: Command -> Put

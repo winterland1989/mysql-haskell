@@ -40,6 +40,9 @@ import           System.IO.Streams               (InputStream, OutputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
+import qualified System.IO.Streams.TLS           as TLS
+import qualified Data.TLSSetting                 as TLS
+import qualified Network.TLS                     as TLS
 
 --------------------------------------------------------------------------------
 
@@ -52,15 +55,17 @@ data MySQLConn = MySQLConn {
 
 -- | Everything you need to establish a MySQL connection.
 --
+-- You may want some helpers in "System.IO.Streams.TLS" to setup TLS connection.
+--
 data ConnectInfo = ConnectInfo
     { ciHost     :: HostName
     , ciPort     :: PortNumber
     , ciDatabase :: ByteString
     , ciUser     :: ByteString
     , ciPassword :: ByteString
-    , ciTLSInfo  :: Maybe (FilePath, [FilePath], FilePath)
-    }
-    deriving Show
+    , ciTLSInfo  :: Maybe (TLS.ClientParams, String) -- ^ If 'TLS.ClientParams' and subject name are provided,
+                                                     -- TLS connection will be used.
+    } deriving Show
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
@@ -69,35 +74,55 @@ defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" Nothing
 
 --------------------------------------------------------------------------------
 
--- | socket buffer size.
+-- | Socket buffer size.
 --
 -- maybe exposed to 'ConnectInfo' laster?
 --
 bUFSIZE :: Int
 bUFSIZE = 16384
 
+-- | Establish a MySQL connection.
+--
 connect :: ConnectInfo -> IO MySQLConn
 connect = fmap snd . connectDetail
 
--- | Establish a MySQL connection.
+-- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
 connectDetail ci@(ConnectInfo host port _ _ _ tls) =
-    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
-       (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
-            is' <- decodeInputStream is
-            os' <- Binary.encodeOutputStream os
-            p <- readPacket is'
-            greet <- decodeFromPacket p
-            let auth = mkAuth ci greet
-            Stream.write (Just (encodeToPacket 1 auth)) os'
-            q <- readPacket is'
-            if isOK q
-            then do
-                consumed <- newIORef True
-                let conn = (MySQLConn is' os' (N.close sock) consumed)
-                return (greet, conn)
-            else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
+    case tls of
+        Nothing ->
+            bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
+               (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
+                    is' <- decodeInputStream is
+                    os' <- Binary.encodeOutputStream os
+                    p <- readPacket is'
+                    greet <- decodeFromPacket p
+                    let auth = mkAuth ci greet
+                    Stream.write (Just (encodeToPacket 1 auth)) os'
+                    q <- readPacket is'
+                    if isOK q
+                    then do
+                        consumed <- newIORef True
+                        let conn = (MySQLConn is' os' (N.close sock) consumed)
+                        return (greet, conn)
+                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
+        Just (cp, sname) ->
+            bracketOnError (TLS.connect cp (Just sname) host port)
+               (\(_, _, ctx) -> TLS.close ctx) $ \ (is, os, ctx) -> do
+                    is' <- decodeInputStream is
+                    os' <- Binary.encodeOutputStream os
+                    p <- readPacket is'
+                    greet <- decodeFromPacket p
+                    let auth = mkAuth ci greet
+                    Stream.write (Just (encodeToPacket 1 auth)) os'
+                    q <- readPacket is'
+                    if isOK q
+                    then do
+                        consumed <- newIORef True
+                        let conn = (MySQLConn is' os' (TLS.close ctx) consumed)
+                        return (greet, conn)
+                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
   where
     mkAuth :: ConnectInfo -> Greeting -> Auth
     mkAuth (ConnectInfo _ _ db user pass _) greet =
@@ -191,6 +216,7 @@ writeCommand a = let bs = Binary.runPut (Binary.put a) in
         if len < 16777215
         then Stream.write (Just (Packet len seqN bs))
         else go (len - 16777215) (seqN + 1) (L.drop 16777215 bs)
+{-# INLINE writeCommand #-}
 
 guardUnconsumed :: MySQLConn -> IO ()
 guardUnconsumed (MySQLConn _ _ _ consumed) = do

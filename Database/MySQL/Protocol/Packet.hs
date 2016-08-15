@@ -29,7 +29,8 @@ import           Data.Typeable
 import           Data.Word.Word24
 
 --------------------------------------------------------------------------------
--- | packet tyoe
+-- | MySQL packet type
+--
 data Packet = Packet
     { pLen  :: !Int
     , pSeqN :: !Word8
@@ -69,9 +70,10 @@ isEOF :: Packet -> Bool
 isEOF p = L.index (pBody p) 0 == 0xFE
 {-# INLINE isEOF #-}
 
--- | get packet inside IO, throw 'DecodePacketException' on fail parsing.
+-- | Decoding packet inside IO, throw 'DecodePacketException' on fail parsing,
 -- here we choose stability over correctness by omit incomplete consumed case:
 -- if we successful parse a packet, then we don't care if there're bytes left.
+--
 decodeFromPacket :: Binary a => Packet -> IO a
 decodeFromPacket (Packet _ _ body) = case pushEndOfInput $ pushChunks (runGetIncremental get) body of
     Done _  _ r             -> return r
@@ -109,7 +111,7 @@ putToPacket seqN payload =
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
 
--- | You may get interested in 'OK' packet because it provide informations on
+-- | You may get interested in 'OK' packet because it provides information about
 -- successful operations.
 --
 data OK = OK

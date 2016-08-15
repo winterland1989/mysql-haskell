@@ -32,6 +32,7 @@ module Database.MySQL.Base
     , query
       -- * prepared query statement
     , prepareStmt
+    , prepareStmtDetail
     , executeStmt
     , queryStmt
     , closeStmt
@@ -81,7 +82,7 @@ execute_ :: MySQLConn -> Query -> IO OK
 execute_ conn (Query qry) = command conn (COM_QUERY qry)
 
 {-
-executeBatch :: MySQL -> OutputStream ByteString -> IO (InputStream OK)
+executeBatch :: MySQLConn -> Query -> OutputStream [MySQLValue] -> IO (InputStream OK)
 executeBatch
 -}
 
@@ -131,6 +132,26 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
         _ <- replicateM colCnt (readPacket is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
         return stid
+
+-- | Ask MySQL to prepare a query statement.
+--
+-- All details from @COM_STMT_PREPARE@ Response are returned: the 'StmtPrepareOK' packet,
+-- params's 'ColumnDef', table's 'ColumnDef'.
+--
+prepareStmtDetail :: MySQLConn -> Query -> IO (StmtPrepareOK, [ColumnDef], [ColumnDef])
+prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_PREPARE stmt) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else do
+        sOK@(StmtPrepareOK _ colCnt paramCnt _) <- getFromPacket getStmtPrepareOK p
+        pdefs <- replicateM paramCnt ((decodeFromPacket <=< readPacket) is)
+        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
+        cdefs <- replicateM colCnt ((decodeFromPacket <=< readPacket) is)
+        _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
+        return (sOK, pdefs, cdefs)
 
 -- | Ask MySQL to closed a query statement.
 --

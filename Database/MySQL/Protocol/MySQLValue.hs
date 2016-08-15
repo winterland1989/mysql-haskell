@@ -238,6 +238,7 @@ putTextField MySQLNull           = putBuilder "NULL"
 
 putInQuotes :: Put -> Put
 putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
+{-# INLINE putInQuotes #-}
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
@@ -486,7 +487,7 @@ getBinaryRow fields flen = do
 -- When used for represent bits values, the underlining 'ByteString' follows:
 --
 --  * byteString: head       -> tail
---  * bit:        big endian -> little endian
+--  * bit:        high bit   -> low bit
 --
 -- When used as a null-map/present-map, every bit inside a byte
 -- is mapped to a column, the mapping order is following:
@@ -494,7 +495,10 @@ getBinaryRow fields flen = do
 --  * byteString: head -> tail
 --  * column:     left -> right
 --
+-- We don't use 'Int64' here because there maybe more than 64 columns.
+--
 newtype BitMap = BitMap { fromBitMap :: ByteString } deriving (Eq, Show)
+
 -- | test if a column is set
 --
 -- The number counts from left to right.
@@ -503,6 +507,7 @@ isColumnSet :: BitMap -> Int -> Bool
 isColumnSet (BitMap bitmap) pos =
     let (i, j) = pos `quotRem` 8
     in (bitmap `B.unsafeIndex` i) `testBit` j
+{-# INLINE isColumnSet #-}
 
 -- | make a nullmap for params without offset.
 --

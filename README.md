@@ -14,7 +14,7 @@ Roadmap:
 - [x] row based binlog parsing
 - [x] stablized API
 - [x] comprehensive testsuit and benchmark
-- [ ] tls support
+- [x] tls support
 
 This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
 
@@ -58,7 +58,6 @@ Running tests require a local MySQL server, a user `testMySQLHaskell` and a data
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
 mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
 mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
-mysql -u root -e "GRANT SUPER ON *.* TO testMySQLHaskell@'localhost'"
 mysql -u root -e "FLUSH PRIVILEGES"
 ```
 
@@ -68,12 +67,7 @@ You should enable binlog by adding `log_bin = filename` to `my.cnf` or add `--lo
 mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
 ```
 
-And you should change binlog format with following:
-
-```
-mysql -u root -e "SET GLOBAL binlog_format = 'ROW'"
-mysql -u root -e "SET GLOBAL binlog_rows_query_log_events = 'OFF'"
-```
+And you should set binlog to `row` by adding `binlog_format = ROW` to `my.cnf`.
 
 New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping
 an eye on following combinations:
