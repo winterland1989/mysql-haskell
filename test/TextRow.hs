@@ -7,7 +7,6 @@ import           Control.Applicative
 import           Data.Time.Calendar      (fromGregorian)
 import           Data.Time.LocalTime     (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
-import           Database.MySQL.Protocol
 import qualified System.IO.Streams       as Stream
 import           Test.Tasty.HUnit
 

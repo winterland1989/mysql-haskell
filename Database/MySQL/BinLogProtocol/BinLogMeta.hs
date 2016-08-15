@@ -1,4 +1,3 @@
-{-# LANGUAGE MultiWayIf #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 
 {-|
@@ -35,7 +34,6 @@ import           Data.Binary.Get
 import           Data.Bits
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
-import           Debug.Trace
 
 data BinLogMeta
     = BINLOG_TYPE_TINY

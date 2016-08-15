@@ -44,7 +44,6 @@ data ColumnDef = ColumnDef
     -- columnFiller :: Word16                     -- const 0x00 0x00
     } deriving (Show, Eq)
 
-
 getField :: Get ColumnDef
 getField = ColumnDef
         <$> (skip 4                 -- const "def"
@@ -78,7 +77,9 @@ putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
 
 instance Binary ColumnDef where
     get = getField
+    {-# INLINE get #-}
     put = putField
+    {-# INLINE put #-}
 
 -- | @newtype@ around 'Word8' for represent @MySQL_TYPE@, We don't use sum type here for speed reason.
 --
@@ -130,7 +131,9 @@ putFieldType (FieldType t) = putWord8 t
 
 instance Binary FieldType where
     get = getFieldType
+    {-# INLINE get #-}
     put = putFieldType
+    {-# INLINE put #-}
 
 --------------------------------------------------------------------------------
 --  Field flags
@@ -159,6 +162,7 @@ flagUniqueKey      flags = flags .&. UNIQUE_KEY_FLAG       == UNIQUE_KEY_FLAG
 flagMultipleKey    flags = flags .&. MULT_KEY_FLAG         == MULT_KEY_FLAG
 flagBlob           flags = flags .&. BLOB_FLAG             == BLOB_FLAG
 flagUnsigned       flags = flags .&. UNSIGNED_FLAG         == UNSIGNED_FLAG
+{-# INLINE flagUnsigned #-}
 flagZeroFill       flags = flags .&. ZEROFILL_FLAG         == ZEROFILL_FLAG
 flagBinary         flags = flags .&. BINARY_FLAG           == BINARY_FLAG
 flagEnum           flags = flags .&. ENUM_FLAG             == ENUM_FLAG

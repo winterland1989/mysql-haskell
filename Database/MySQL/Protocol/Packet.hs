@@ -16,7 +16,7 @@ MySQL packet decoder&encoder, and varities utility.
 module Database.MySQL.Protocol.Packet where
 
 import           Control.Applicative
-import           Control.Exception     (Exception(..), throwIO)
+import           Control.Exception     (Exception (..), throwIO)
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
@@ -24,9 +24,9 @@ import           Data.Bits
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
+import           Data.Int.Int24
 import           Data.Typeable
 import           Data.Word.Word24
-import           Data.Int.Int24
 
 --------------------------------------------------------------------------------
 -- | packet tyoe
@@ -135,7 +135,9 @@ putOK (OK row lid stat wcnt) = do
 
 instance Binary OK where
     get = getOK
+    {-# INLINE get #-}
     put = putOK
+    {-# INLINE put #-}
 
 data ERR = ERR
     { errCode  :: !Word16
@@ -160,7 +162,9 @@ putERR (ERR code stat msg) = do
 
 instance Binary ERR where
     get = getERR
+    {-# INLINE get #-}
     put = putERR
+    {-# INLINE put #-}
 
 data EOF = EOF
     { eofWarningCnt :: !Word16
@@ -179,7 +183,9 @@ putEOF (EOF wcnt stat) = do
 
 instance Binary EOF where
     get = getEOF
+    {-# INLINE get #-}
     put = putEOF
+    {-# INLINE put #-}
 
 --------------------------------------------------------------------------------
 --  Helpers
@@ -237,18 +243,22 @@ putWord48le :: Word64 -> Put
 putWord48le v = do
     putWord32le $ fromIntegral v
     putWord16le $ fromIntegral (v `shiftR` 32)
+{-# INLINE putWord48le #-}
 
 getWord48le :: Get Word64
 getWord48le = do
     a <- fromIntegral <$> getWord32le
     b <- fromIntegral <$> getWord16le
     return $! a .|. (b `shiftL` 32)
+{-# INLINE getWord48le #-}
 
 getByteStringNul :: Get ByteString
 getByteStringNul = L.toStrict <$> getLazyByteStringNul
+{-# INLINE getByteStringNul #-}
 
 getRemainingByteString :: Get ByteString
 getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
+{-# INLINE getRemainingByteString #-}
 
 getWord24be :: Get Word24
 getWord24be = do
@@ -277,3 +287,6 @@ getWord56be = do
     a <- fromIntegral <$> getWord32be
     b <- fromIntegral <$> getWord24be
     return $! (a `shiftL` 24) .|. b
+{-# INLINE getWord40be #-}
+{-# INLINE getWord48be #-}
+{-# INLINE getWord56be #-}

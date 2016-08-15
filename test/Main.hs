@@ -25,7 +25,7 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
     (greet, c) <- connectDetail defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
 
     let ver = greetingVersion greet
-        isNew = "5.6.4" `B.isPrefixOf` ver
+        isNew = "5.6" `B.isPrefixOf` ver
                 || "5.7" `B.isPrefixOf` ver  -- from MySQL 5.6.4 and up
                                              -- TIME, DATETIME, and TIMESTAMP support fractional seconds
 

@@ -15,28 +15,31 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 
 module Database.MySQL.Connection where
 
-import           Control.Exception        (Exception, bracketOnError, throwIO)
+import           Control.Exception               (Exception, bracketOnError,
+                                                  throwIO)
 import           Control.Monad
-import qualified Crypto.Hash              as Crypto
-import qualified Data.Binary              as Binary
-import qualified Data.Binary.Put          as Binary
+import qualified Crypto.Hash                     as Crypto
+import qualified Data.Binary                     as Binary
+import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-import qualified Data.ByteArray           as BA
-import           Data.ByteString          (ByteString)
-import qualified Data.ByteString          as B
+import qualified Data.ByteArray                  as BA
+import           Data.ByteString                 (ByteString)
+import qualified Data.ByteString                 as B
+import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Unsafe          as B
-import qualified Data.ByteString.Lazy     as L
-import           Data.IORef               (IORef, newIORef, readIORef,
-                                           writeIORef)
+import           Data.IORef                      (IORef, newIORef, readIORef,
+                                                  writeIORef)
 import           Data.Typeable
 import           Data.Word
-import           Database.MySQL.Protocol
-import           Network.Socket           (HostName, PortNumber)
-import qualified Network.Socket           as N
-import           System.IO.Streams        (InputStream, OutputStream)
-import qualified System.IO.Streams        as Stream
-import qualified System.IO.Streams.Binary as Binary
-import qualified System.IO.Streams.TCP    as TCP
+import           Database.MySQL.Protocol.Auth
+import           Database.MySQL.Protocol.Command
+import           Database.MySQL.Protocol.Packet
+import           Network.Socket                  (HostName, PortNumber)
+import qualified Network.Socket                  as N
+import           System.IO.Streams               (InputStream, OutputStream)
+import qualified System.IO.Streams               as Stream
+import qualified System.IO.Streams.Binary        as Binary
+import qualified System.IO.Streams.TCP           as TCP
 
 --------------------------------------------------------------------------------
 

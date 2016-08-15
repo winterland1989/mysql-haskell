@@ -7,7 +7,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Exception
 import Database.MySQL.Base
-import Database.MySQL.Protocol
 import qualified System.IO.Streams as Stream
 import Test.Tasty.HUnit
 import Data.Time.Calendar (fromGregorian)

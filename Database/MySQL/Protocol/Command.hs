@@ -22,7 +22,6 @@ import           Data.Binary.Get
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
 import qualified          Data.ByteString.Lazy               as L
-import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
 

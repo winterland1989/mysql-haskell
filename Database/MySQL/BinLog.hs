@@ -27,9 +27,9 @@ module Database.MySQL.BinLog
     , module Database.MySQL.BinLogProtocol.BinLogValue
     ) where
 
+import           Control.Applicative
 import           Control.Exception                         (throwIO)
 import           Control.Monad
-import           Control.Applicative
 import           Data.Binary.Put
 import           Data.ByteString                           (ByteString)
 import           Data.IORef                                (IORef, newIORef,
@@ -41,7 +41,6 @@ import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Connection
-import           Database.MySQL.Protocol
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)
 import qualified System.IO.Streams                         as Stream

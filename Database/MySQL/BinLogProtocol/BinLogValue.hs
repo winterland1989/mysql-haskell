@@ -23,15 +23,12 @@ import qualified Data.ByteString                          as B
 import qualified Data.ByteString.Unsafe                   as B
 import           Data.Int
 import           Data.Int.Int24
+import           Data.Scientific
 import           Data.Word
 import           Database.MySQL.BinLogProtocol.BinLogMeta
-import           Database.MySQL.Protocol       (BitMap (..), getBits,
-                                                           isColumnSet, getWord24be)
+import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
-import           Data.Scientific
-import           GHC.Generics (Generic)
-
-import           Debug.Trace
+import           GHC.Generics                             (Generic)
 
 -- | Data type for representing binlog values.
 --
@@ -293,7 +290,7 @@ getMicroSecond _ = pure 0
 
 getBits' :: Word8 -> Get Word64
 getBits' bytes = if bytes <= 8
-    then  getBits (fromIntegral bytes)
+    then getBits (fromIntegral bytes)
     else fail $  "Database.MySQL.BinLogProtocol.BinLogValue: \
                  \wrong bit length size: " ++ show bytes
 

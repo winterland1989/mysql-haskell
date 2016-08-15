@@ -20,7 +20,6 @@ source-repository head
 
 library
     exposed-modules:    Database.MySQL.Base
-                    ,   Database.MySQL.Protocol
                     ,   Database.MySQL.Protocol.Auth
                     ,   Database.MySQL.Protocol.Command
                     ,   Database.MySQL.Protocol.ColumnDef

@@ -26,11 +26,11 @@ import qualified Data.ByteString.Lazy                      as L
 import qualified Data.ByteString.Unsafe                    as B
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
-import           Database.MySQL.Protocol
+import           Database.MySQL.Protocol.Packet
+import           Database.MySQL.Protocol.MySQLValue
+import           Database.MySQL.Protocol.ColumnDef
 
-import           Control.Exception                         (Exception (..),
-                                                            throwIO)
-import           Data.Typeable                             (Typeable)
+import           Control.Exception                         (throwIO)
 import           Database.MySQL.Query
 
 --------------------------------------------------------------------------------
