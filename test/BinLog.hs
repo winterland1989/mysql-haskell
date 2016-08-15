@@ -106,7 +106,7 @@ tests c = do
         [
             (
                 [ BinLogLong 0
-                , BinLogBit 224
+                , BinLogBit 224   -- 0b11100000
                 , BinLogTiny (-128)
                 , BinLogTiny (-1)
                 , BinLogShort (-32768)
@@ -136,7 +136,7 @@ tests c = do
                 , BinLogEnum 1
                 , BinLogSet 3
                 ],  [ BinLogLong 0
-                , BinLogBit 224
+                , BinLogBit 57514   -- 0b1110000010101010
                 , BinLogTiny (-1)
                 , BinLogTiny (-1)
                 , BinLogShort (-32768)
@@ -183,7 +183,7 @@ q1 =  "UPDATE test SET \
             \__bigIntU    = 18446744073709551615                   ,\
             \__decimal    = 1234567890.0123456789                  ,\
             \__float      = 3.14159                                ,\
-            \__dobule     = 3.1415926535                           ,\
+            \__double     = 3.1415926535                           ,\
             \__date       = '2016-08-08'                           ,\
             \__datetime   = '2016-08-08 17:25:59'                  ,\
             \__timestamp  = '2016-08-08 17:25:59'                  ,\
@@ -203,7 +203,7 @@ q1 =  "UPDATE test SET \
 
 q2 :: Query
 q2 =  "UPDATE test SET \
-            \__bit        = b'11100000'                            ,\
+            \__bit        = b'1110000010101010'                    ,\
             \__tinyInt    = -1                                     ,\
             \__tinyIntU   = 255                                    ,\
             \__smallInt   = -32768                                 ,\
@@ -216,7 +216,7 @@ q2 =  "UPDATE test SET \
             \__bigIntU    = 18446744073709551615                   ,\
             \__decimal    = -1234567890.0123456789                 ,\
             \__float      = -3.14159                                ,\
-            \__dobule     = -3.1415926535                           ,\
+            \__double     = -3.1415926535                           ,\
             \__date       = '1800-08-08'                           ,\
             \__datetime   = '1800-08-08 17:25:59'                  ,\
             \__timestamp  = '2016-08-08 17:25:59'                  ,\

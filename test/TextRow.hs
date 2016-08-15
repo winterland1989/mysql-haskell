@@ -1,4 +1,3 @@
-{-# LANGUAGE BinaryLiterals      #-}
 {-# LANGUAGE NegativeLiterals    #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -84,7 +83,7 @@ tests c = do
 
     Stream.skipToEof is
 
-    let bitV = 0b1110000010101010
+    let bitV = 57514 -- 0b1110000010101010
 
     execute_ c "UPDATE test SET \
                 \__bit        = b'1110000010101010'                    ,\
@@ -255,6 +254,93 @@ tests c = do
 
     Stream.skipToEof is
 
+
+    execute_ c "UPDATE test SET \
+        \__mediumInt  = null         ,\
+        \__double     = null         ,\
+        \__text = null WHERE __id=0"
+
+    (_, is) <- query_ c "SELECT * FROM test"
+    Just v <- Stream.read is
+
+    assertEqual "decode text protocol with null" v
+        [ MySQLInt32 0
+        , MySQLBit bitV
+        , MySQLInt8 (-128)
+        , MySQLInt8U 255
+        , MySQLInt16 (-32768)
+        , MySQLInt16U 65535
+        , MySQLNull
+        , MySQLInt32U 16777215
+        , MySQLInt32 (-2147483648)
+        , MySQLInt32U 4294967295
+        , MySQLInt64 (-9223372036854775808)
+        , MySQLInt64U 18446744073709551615
+        , MySQLDecimal 1234567890.0123456789
+        , MySQLFloat 3.14159
+        , MySQLNull
+        , MySQLDate (fromGregorian 2016 08 08)
+        , MySQLDateTime (LocalTime (fromGregorian 2016 08 08) (TimeOfDay 17 25 59))
+        , MySQLTimeStamp (LocalTime (fromGregorian 2016 08 08) (TimeOfDay 17 25 59))
+        , MySQLTime 1 (TimeOfDay 199 59 59)
+        , MySQLYear 1999
+        , MySQLText "12345678"
+        , MySQLText "韩冬真赞"
+        , MySQLBytes "12345678"
+        , MySQLBytes "12345678"
+        , MySQLBytes "12345678"
+        , MySQLText "韩冬真赞"
+        , MySQLBytes "12345678"
+        , MySQLNull
+        , MySQLText "foo"
+        , MySQLText "foo,bar"
+        ]
+
+    Stream.skipToEof is
+
+    execute c "UPDATE test SET \
+        \__decimal  = ?         ,\
+        \__date     = ?         ,\
+        \__timestamp = ? WHERE __id=0"
+        [MySQLNull, MySQLNull, MySQLNull]
+
+    (_, is) <- query_ c "SELECT * FROM test"
+    Just v <- Stream.read is
+
+    assertEqual "roundtrip text protocol with null" v
+        [ MySQLInt32 0
+        , MySQLBit bitV
+        , MySQLInt8 (-128)
+        , MySQLInt8U 255
+        , MySQLInt16 (-32768)
+        , MySQLInt16U 65535
+        , MySQLNull
+        , MySQLInt32U 16777215
+        , MySQLInt32 (-2147483648)
+        , MySQLInt32U 4294967295
+        , MySQLInt64 (-9223372036854775808)
+        , MySQLInt64U 18446744073709551615
+        , MySQLNull
+        , MySQLFloat 3.14159
+        , MySQLNull
+        , MySQLNull
+        , MySQLDateTime (LocalTime (fromGregorian 2016 08 08) (TimeOfDay 17 25 59))
+        , MySQLNull
+        , MySQLTime 1 (TimeOfDay 199 59 59)
+        , MySQLYear 1999
+        , MySQLText "12345678"
+        , MySQLText "韩冬真赞"
+        , MySQLBytes "12345678"
+        , MySQLBytes "12345678"
+        , MySQLBytes "12345678"
+        , MySQLText "韩冬真赞"
+        , MySQLBytes "12345678"
+        , MySQLNull
+        , MySQLText "foo"
+        , MySQLText "foo,bar"
+        ]
+
+    Stream.skipToEof is
 
     execute_ c "UPDATE test SET \
         \__time       = '199:59:59'     ,\
