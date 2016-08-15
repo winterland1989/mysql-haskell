@@ -13,7 +13,7 @@ import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 
 tests :: MySQLConn -> Assertion
 tests c = do
-    selStmt <- prepareStmt c "SELECT * FROM test57;"
+    selStmt <- prepareStmt c "SELECT * FROM test_new;"
 
     (f, is) <- queryStmt c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
@@ -33,7 +33,7 @@ tests c = do
 
     Stream.skipToEof is
 
-    execute_ c "UPDATE test57 SET \
+    execute_ c "UPDATE test_new SET \
                 \__datetime   = '2016-08-08 17:25:59.12'                  ,\
                 \__timestamp  = '2016-08-08 17:25:59.1234'                ,\
                 \__time       = '-199:59:59.123456' WHERE __id=0;"
@@ -51,7 +51,7 @@ tests c = do
     Stream.skipToEof is
 
     updStmt <- prepareStmt c
-            "UPDATE test57 SET \
+            "UPDATE test_new SET \
             \__datetime   = ?     ,\
             \__timestamp  = ?     ,\
             \__time       = ? WHERE __id=0;"

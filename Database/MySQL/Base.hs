@@ -22,6 +22,7 @@ module Database.MySQL.Base
     , ConnectInfo(..)
     , defaultConnectInfo
     , connect
+    , connectDetail
     , close
     , ping
       -- * direct query
@@ -35,12 +36,11 @@ module Database.MySQL.Base
     , queryStmt
     , closeStmt
     , resetStmt
-      -- * MySQL datatype
-    , MySQLValue(..)
+      -- * MySQL protocol
+    , module Database.MySQL.Protocol
       -- * helpers
     , Query(..)
     , renderParams
-    , OK(..)
     , command
     , Stream.skipToEof
     ) where

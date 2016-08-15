@@ -25,8 +25,8 @@ import           Data.Int
 import           Data.Int.Int24
 import           Data.Word
 import           Database.MySQL.BinLogProtocol.BinLogMeta
-import           Database.MySQL.Protocol.MySQLValue       (BitMap (..), getBits,
-                                                           isColumnSet)
+import           Database.MySQL.Protocol       (BitMap (..), getBits,
+                                                           isColumnSet, getWord24be)
 import           Database.MySQL.Protocol.Packet
 import           Data.Scientific
 import           GHC.Generics (Generic)
@@ -92,6 +92,21 @@ getBinLogField (BINLOG_TYPE_DOUBLE _         ) = BinLogDouble <$> getDoublele
 getBinLogField (BINLOG_TYPE_BIT    _    bytes) = BinLogBit <$> getBits' bytes
 getBinLogField BINLOG_TYPE_TIMESTAMP           = BinLogTimeStamp <$> getWord32le
 
+-- ^ a integer in @YYYYMMDD@ format, for example:
+-- 99991231 stand for @9999-12-31@
+getBinLogField BINLOG_TYPE_DATE = do
+    i <- getWord24le
+    let (i', dd) = i `quotRem` 32
+        (yyyy, mm) = i' `quotRem` 16
+    pure (BinLogDate (fromIntegral yyyy)
+                     (fromIntegral mm)
+                     (fromIntegral dd))
+
+getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp) = do
+    s <- getWord32be -- big-endian here!
+    ms <- fromIntegral <$> getMicroSecond fsp
+    pure (BinLogTimeStamp2 s ms)
+
 -- a integer in @YYYYMMDDhhmmss@, for example:
 -- 99991231235959 stand for @9999-12-31 23:59:59@
 getBinLogField BINLOG_TYPE_DATETIME = do
@@ -107,34 +122,6 @@ getBinLogField BINLOG_TYPE_DATETIME = do
                          (fromIntegral h)
                          (fromIntegral m)
                          (fromIntegral s))
-
--- ^ a integer in @YYYYMMDD@ format, for example:
--- 99991231 stand for @9999-12-31@
-getBinLogField BINLOG_TYPE_DATE = do
-    i <- getWord24le
-    let (yyyy, i')   = i      `quotRem` 10000
-        (mm, dd)     = i'     `quotRem` 100
-    pure (BinLogDate (fromIntegral yyyy)
-                     (fromIntegral mm)
-                     (fromIntegral dd))
-
--- ^ a integer in @hhmmss@ format(can be negative), for example:
--- 8385959 stand for @838:59:59@
-getBinLogField BINLOG_TYPE_TIME = do
-    i <- getWord24le
-    let i' =  fromIntegral i :: Int32
-        sign = if i' >= 0 then 1 else 0
-        ui = abs i
-    let (h, ui')     = ui     `quotRem` 10000
-        (m, s)       = ui'    `quotRem` 100
-    pure (BinLogTime sign (fromIntegral h)
-                          (fromIntegral m)
-                          (fromIntegral s))
-
-getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp) = do
-    s <- getWord32be -- big-endian here!
-    ms <- getMicroSecond fsp
-    pure (BinLogTimeStamp2 s ms)
 
 -- BINLOG_TYPE_DATETIME2(big endian)
 --
@@ -158,14 +145,20 @@ getBinLogField (BINLOG_TYPE_DATETIME2 fsp) = do
         h =  fromIntegral $ iPart `shiftR` 12 .&. 0x1F -- 0b00011111
         m =  fromIntegral $ iPart `shiftR` 6 .&. 0x3F  -- 0b00111111
         s =  fromIntegral $ iPart .&. 0x3F             -- 0b00111111
-    ms <- getMicroSecond fsp
+    ms <- fromIntegral <$> getMicroSecond fsp
     pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
-  where
-    getWord40be :: Get Word64
-    getWord40be = do
-        a <- getWord8
-        b <- getWord32be
-        pure (fromIntegral a `shiftL` 8  .|. fromIntegral b)
+
+-- ^ a integer in @hhmmss@ format(can be negative), for example:
+-- 8385959 stand for @838:59:59@
+getBinLogField BINLOG_TYPE_TIME = do
+    i <- getWord24le
+    let i' =  fromIntegral i :: Int24
+        sign = if i' >= 0 then 1 else 0
+    let (h, i'')     = i'     `quotRem` 10000
+        (m, s)       = i''    `quotRem` 100
+    pure (BinLogTime sign (fromIntegral (abs h))
+                          (fromIntegral (abs m))
+                          (fromIntegral (abs s)))
 
 -- BINLOG_TYPE_TIME2(big endian)
 --
@@ -181,11 +174,13 @@ getBinLogField (BINLOG_TYPE_DATETIME2 fsp) = do
 getBinLogField (BINLOG_TYPE_TIME2 fsp) = do
     iPart <- getWord24be
     let sign = fromIntegral $ iPart `shiftR` 23
-        h = fromIntegral (iPart `shiftR` 12) .&. 0x03FF -- 0b0000001111111111
-        m = fromIntegral (iPart `shiftR` 6) .&. 0x3F    -- 0b00111111
-        s = fromIntegral iPart .&. 0x3F               -- 0b00111111
-    ms <- getMicroSecond fsp
-    pure (BinLogTime2 sign h m s ms)
+        iPart' = if sign == 0 then 0x800000 - iPart - 1 else iPart
+        h = fromIntegral (iPart' `shiftR` 12) .&. 0x03FF -- 0b0000001111111111
+        m = fromIntegral (iPart' `shiftR` 6) .&. 0x3F    -- 0b00111111
+        s = fromIntegral iPart' .&. 0x3F               -- 0b00111111
+    ms <- abs <$> getMicroSecond fsp
+    let ms' = abs (fromIntegral ms :: Int)
+    pure (BinLogTime2 sign h m s (fromIntegral ms'))
 
 getBinLogField BINLOG_TYPE_YEAR                = do
     y <- getWord8
@@ -262,7 +257,7 @@ getBinLogField (BINLOG_TYPE_ENUM size) =
                               \BINLOG_TYPE_ENUM size: " ++ show size
 
 
-getBinLogField (BINLOG_TYPE_SET bits bytes) = BinLogSet <$> getBits' bytes
+getBinLogField (BINLOG_TYPE_SET _ bytes) = BinLogSet <$> getBits' bytes
 getBinLogField (BINLOG_TYPE_BLOB lensize) = do
     len <- if  | lensize == 1 -> fromIntegral <$> getWord8
                | lensize == 2 -> fromIntegral <$> getWord16le
@@ -286,14 +281,14 @@ getBinLogField (BINLOG_TYPE_GEOMETRY lensize) = do
                                         \wrong BINLOG_TYPE_GEOMETRY length size: " ++ show lensize
     BinLogGeometry <$> getByteString len
 
-getMicroSecond :: Word8 -> Get Word32
+getMicroSecond :: Word8 -> Get Int32
 getMicroSecond 0 = pure 0
-getMicroSecond 1 = (* 100000) . fromIntegral <$> getWord8
-getMicroSecond 2 = (* 10000) . fromIntegral <$> getWord8
-getMicroSecond 3 = (* 1000) . fromIntegral <$> getWord16be
-getMicroSecond 4 = (* 100) . fromIntegral <$> getWord16be
-getMicroSecond 5 = (* 10) . fromIntegral <$> getWord24be
-getMicroSecond 6 = fromIntegral <$> getWord24be
+getMicroSecond 1 = (* 100000) . fromIntegral <$> getInt8
+getMicroSecond 2 = (* 10000) . fromIntegral <$> getInt8
+getMicroSecond 3 = (* 1000) . fromIntegral <$> getInt16be
+getMicroSecond 4 = (* 100) . fromIntegral <$> getInt16be
+getMicroSecond 5 = (* 10) . fromIntegral <$> getInt24be
+getMicroSecond 6 = fromIntegral <$> getInt24be
 getMicroSecond _ = pure 0
 
 getBits' :: Word8 -> Get Word64

@@ -25,6 +25,8 @@ import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
 import           Data.Typeable
+import           Data.Word.Word24
+import           Data.Int.Int24
 
 --------------------------------------------------------------------------------
 -- | packet tyoe
@@ -248,13 +250,30 @@ getByteStringNul = L.toStrict <$> getLazyByteStringNul
 getRemainingByteString :: Get ByteString
 getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
 
-getWord24be :: Get Word32
+getWord24be :: Get Word24
 getWord24be = do
     a <- fromIntegral <$> getWord16be
     b <- fromIntegral <$> getWord8
     return $! b .|. (a `shiftL` 8)
+{-# INLINE getWord24be #-}
 
-putWord24be :: Word32 -> Put
-putWord24be v = do
-    putWord16be $ fromIntegral (v `shiftR` 8)
-    putWord8 $ fromIntegral v
+getInt24be :: Get Int24
+getInt24be = do
+    a <- fromIntegral <$> getWord16be
+    b <- fromIntegral <$> getWord8
+    return $! fromIntegral $ (b .|. (a `shiftL` 8) :: Word24)
+{-# INLINE getInt24be #-}
+
+getWord40be, getWord48be, getWord56be :: Get Word64
+getWord40be = do
+    a <- fromIntegral <$> getWord32be
+    b <- fromIntegral <$> getWord8
+    return $! (a `shiftL` 8) .|. b
+getWord48be = do
+    a <- fromIntegral <$> getWord32be
+    b <- fromIntegral <$> getWord16be
+    return $! (a `shiftL` 16) .|. b
+getWord56be = do
+    a <- fromIntegral <$> getWord32be
+    b <- fromIntegral <$> getWord24be
+    return $! (a `shiftL` 24) .|. b

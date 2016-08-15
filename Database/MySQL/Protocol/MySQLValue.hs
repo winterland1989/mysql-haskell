@@ -42,7 +42,6 @@ import           Data.Time.Format                   (defaultTimeLocale,
                                                      formatTime)
 import           Data.Time.LocalTime                (LocalTime (..),
                                                      TimeOfDay (..))
-import           Data.Typeable
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
@@ -388,20 +387,6 @@ getBits bytes =
         | bytes == 8 -> fromIntegral <$> getWord64be
         | otherwise  -> fail $  "Database.MySQL.Protocol.MySQLValue: \
                                 \wrong bit length size: " ++ show bytes
-  where
-    getWord40be, getWord48be, getWord56be :: Get Word64
-    getWord40be = do
-        a <- fromIntegral <$> getWord32be
-        b <- fromIntegral <$> getWord8
-        return $! (a `shiftL` 8) .|. b
-    getWord48be = do
-        a <- fromIntegral <$> getWord32be
-        b <- fromIntegral <$> getWord16be
-        return $! (a `shiftL` 16) .|. b
-    getWord56be = do
-        a <- fromIntegral <$> getWord32be
-        b <- fromIntegral <$> getWord24be
-        return $! (a `shiftL` 24) .|. b
 {-# INLINE getBits #-}
 
 putTextBits :: Word64 -> Put

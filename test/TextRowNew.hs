@@ -13,7 +13,7 @@ import Data.Time.LocalTime (LocalTime(..), TimeOfDay(..))
 
 tests :: MySQLConn -> Assertion
 tests c = do
-    (f, is) <- query_ c "SELECT * FROM test57;"
+    (f, is) <- query_ c "SELECT * FROM test_new;"
 
     assertEqual "decode Field types" (columnType <$> f)
         [ mySQLTypeLong
@@ -32,12 +32,12 @@ tests c = do
 
     Stream.skipToEof is
 
-    execute_ c "UPDATE test57 SET \
+    execute_ c "UPDATE test_new SET \
                 \__datetime   = '2016-08-08 17:25:59.12'                  ,\
                 \__timestamp  = '2016-08-08 17:25:59.1234'                ,\
                 \__time       = '-199:59:59.123456' WHERE __id=0;"
 
-    (_, is) <- query_ c "SELECT * FROM test57;"
+    (_, is) <- query_ c "SELECT * FROM test_new;"
     Just v <- Stream.read is
 
     assertEqual "decode text protocol" v
@@ -49,7 +49,7 @@ tests c = do
 
     Stream.skipToEof is
 
-    execute c "UPDATE test57 SET \
+    execute c "UPDATE test_new SET \
             \__datetime   = ?     ,\
             \__timestamp  = ?     ,\
             \__time       = ?  WHERE __id=0;"
@@ -59,7 +59,7 @@ tests c = do
                 ]
 
 
-    (_, is) <- query_ c "SELECT * FROM test57;"
+    (_, is) <- query_ c "SELECT * FROM test_new;"
     Just v <- Stream.read is
 
     assertEqual "roundtrip text protocol" v

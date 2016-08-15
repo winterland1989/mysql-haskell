@@ -73,10 +73,13 @@ defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" Nothing
 bUFSIZE :: Int
 bUFSIZE = 16384
 
+connect :: ConnectInfo -> IO MySQLConn
+connect = fmap snd . connectDetail
+
 -- | Establish a MySQL connection.
 --
-connect :: ConnectInfo -> IO MySQLConn
-connect ci@(ConnectInfo host port _ _ _ tls) =
+connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
+connectDetail ci@(ConnectInfo host port _ _ _ tls) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
@@ -90,7 +93,7 @@ connect ci@(ConnectInfo host port _ _ _ tls) =
             then do
                 consumed <- newIORef True
                 let conn = (MySQLConn is' os' (N.close sock) consumed)
-                return conn
+                return (greet, conn)
             else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
   where
     mkAuth :: ConnectInfo -> Greeting -> Auth
