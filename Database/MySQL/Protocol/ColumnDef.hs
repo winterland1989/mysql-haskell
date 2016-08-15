@@ -162,7 +162,6 @@ flagUniqueKey      flags = flags .&. UNIQUE_KEY_FLAG       == UNIQUE_KEY_FLAG
 flagMultipleKey    flags = flags .&. MULT_KEY_FLAG         == MULT_KEY_FLAG
 flagBlob           flags = flags .&. BLOB_FLAG             == BLOB_FLAG
 flagUnsigned       flags = flags .&. UNSIGNED_FLAG         == UNSIGNED_FLAG
-{-# INLINE flagUnsigned #-}
 flagZeroFill       flags = flags .&. ZEROFILL_FLAG         == ZEROFILL_FLAG
 flagBinary         flags = flags .&. BINARY_FLAG           == BINARY_FLAG
 flagEnum           flags = flags .&. ENUM_FLAG             == ENUM_FLAG

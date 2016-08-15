@@ -6,7 +6,6 @@ module Main where
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Database.MySQL.Base
-import           Database.MySQL.Protocol
 import           System.Environment
 import           System.IO.Streams        (fold)
 import  qualified Data.ByteString as B
