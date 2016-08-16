@@ -9,11 +9,19 @@ Portability : PORTABLE
 
 This module provide common MySQL operations,
 
-NOTEs on 'Exception's: This package use 'Exception' to deal with unexpected situations, and
-all exception type are documented, but you shouldn't try to catch them if you don't have a recover plan,
-for example: 1) there's no meaning to catch a 'AuthException' unless you want to try different passwords.
-2) a 'UnconsumedResultSet' indicates your program have operation problems.
-.
+NOTEs on 'Exception's: This package use 'Exception' to deal with unexpected situations,
+but you shouldn't try to catch them if you don't have a recovery plan,
+for example: there's no meaning to catch a 'ERRException' during authentication unless you want to try different passwords.
+By using this library you will meet:
+
+    * 'NetworkException':  underline network is broken.
+    * 'UnconsumedResultSet':  you should consume previous resultset before sending new command.
+    * 'ERRException':  you receive a 'ERR' packet when you shouldn't.
+    * 'UnexpectedPacket':  you receive a unexpected packet when you shouldn't.
+    * 'DecodePacketException': there's a packet we can't decode.
+    * 'WrongParamsCount': you're giving wrong number of params to 'renderParams'.
+
+Both 'UnexpectedPacket' and 'DecodePacketException' may indicate a bug of this library rather your code, so please report!
 
 -}
 module Database.MySQL.Base
@@ -193,5 +201,5 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
             if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q -- fast path for decode rows
                 | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> throwIO NetworkException
+                | otherwise -> throwIO (UnexpectedPacket q)
         return (fields, rows)

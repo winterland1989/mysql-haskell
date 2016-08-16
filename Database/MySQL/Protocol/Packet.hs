@@ -192,6 +192,14 @@ instance Binary EOF where
 --------------------------------------------------------------------------------
 --  Helpers
 
+getByteStringNul :: Get ByteString
+getByteStringNul = L.toStrict <$> getLazyByteStringNul
+{-# INLINE getByteStringNul #-}
+
+getRemainingByteString :: Get ByteString
+getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
+{-# INLINE getRemainingByteString #-}
+
 putLenEncBytes :: ByteString -> Put
 putLenEncBytes c = do
         let l = B.length c
@@ -253,14 +261,6 @@ getWord48le = do
     b <- fromIntegral <$> getWord16le
     return $! a .|. (b `shiftL` 32)
 {-# INLINE getWord48le #-}
-
-getByteStringNul :: Get ByteString
-getByteStringNul = L.toStrict <$> getLazyByteStringNul
-{-# INLINE getByteStringNul #-}
-
-getRemainingByteString :: Get ByteString
-getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
-{-# INLINE getRemainingByteString #-}
 
 getWord24be :: Get Word24
 getWord24be = do

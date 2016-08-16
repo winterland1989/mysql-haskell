@@ -106,7 +106,7 @@ connectDetail ci@(ConnectInfo host port _ _ _ tls) =
                         consumed <- newIORef True
                         let conn = (MySQLConn is' os' (N.close sock) consumed)
                         return (greet, conn)
-                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
+                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
         Just (cp, sname) ->
             bracketOnError (TLS.connect cp (Just sname) host port)
                (\(_, _, ctx) -> TLS.close ctx) $ \ (is, os, ctx) -> do
@@ -122,7 +122,7 @@ connectDetail ci@(ConnectInfo host port _ _ _ tls) =
                         consumed <- newIORef True
                         let conn = (MySQLConn is' os' (TLS.close ctx) consumed)
                         return (greet, conn)
-                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . AuthException
+                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
   where
     mkAuth :: ConnectInfo -> Greeting -> Auth
     mkAuth (ConnectInfo _ _ db user pass _) greet =
@@ -282,9 +282,6 @@ instance Exception UnconsumedResultSet
 
 data ERRException = ERRException ERR deriving (Typeable, Show)
 instance Exception ERRException
-
-data AuthException = AuthException ERR deriving (Typeable, Show)
-instance Exception AuthException
 
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket

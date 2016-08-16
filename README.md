@@ -5,17 +5,6 @@ mysql-haskell
 
 `mysql-haskell` is a MySQL driver written entirely in haskell by @winterland1989 at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
 
-Roadmap:
-
-- [x] username/password authenticate
-- [x] text protocol decoding
-- [x] binary protocol decoding
-- [x] binlog listening
-- [x] row based binlog parsing
-- [x] stablized API
-- [x] comprehensive testsuit and benchmark
-- [x] tls support
-
 This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
 
 Is it fast?
