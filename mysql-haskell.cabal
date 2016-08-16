@@ -45,7 +45,7 @@ library
                     ,   bytestring    >= 0.10.2.0
                     ,   text          >= 1.1 && < 1.3
                     ,   cryptonite    == 0.*
-                    ,   memory        >= 0.8
+                    ,   memory
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
                     ,   bytestring-lexing == 0.5.*
@@ -69,7 +69,8 @@ test-suite test
         mysql-haskell
       , base
       , bytestring
-      , tasty
+      , optparse-applicative < 0.13
+      , tasty == 0.11.*
       , tasty-hunit
       , text
       , io-streams
