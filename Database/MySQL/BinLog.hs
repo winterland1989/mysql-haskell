@@ -44,6 +44,7 @@ import           Database.MySQL.Connection
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)
 import qualified System.IO.Streams                         as Stream
+import qualified Data.Vector as Vector
 
 type SlaveID = Word32
 
@@ -182,8 +183,11 @@ getLastBinLogTracker conn = do
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just (MySQLText fn : MySQLInt64U pos : _) -> return . Just $ BinLogTracker (encodeUtf8 fn) (fromIntegral pos)
-        _                                         -> return Nothing
+      Just v | Vector.length v >= 2
+             , Just (MySQLText fn) <- Vector.indexM v 0
+             , Just (MySQLInt64U pos) <- Vector.indexM v 1 ->
+               return . Just $ BinLogTracker (encodeUtf8 fn) (fromIntegral pos)
+      _                                         -> return Nothing
 
 -- | Return True if binlog_checksum = CRC32. Only for MySQL > 5.6
 --
@@ -193,8 +197,10 @@ isCheckSumEnabled conn = do
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just [_, MySQLText "CRC32"] -> return True
-        _                           -> return False
+      Just v | Vector.length v == 2
+             , Just (MySQLText "CRC32") <- Vector.indexM v 1
+             -> return True
+      _                           -> return False
 
 -- | Return True if rpl_semi_sync_master_enabled = ON. Only for MySQL > 5.5
 --
@@ -204,5 +210,7 @@ isSemiSyncEnabled conn = do
     row <- Stream.read is
     Stream.skipToEof is
     case row of
-        Just [_, MySQLText "ON"] -> return True
-        _                        -> return False
+      Just v | Vector.length v == 2
+             , Just (MySQLText "ON") <- Vector.indexM v 1
+             -> return True
+      _                           -> return False
