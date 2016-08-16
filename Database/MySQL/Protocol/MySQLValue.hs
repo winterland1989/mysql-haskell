@@ -42,6 +42,8 @@ import           Data.Time.Format                   (defaultTimeLocale,
                                                      formatTime)
 import           Data.Time.LocalTime                (LocalTime (..),
                                                      TimeOfDay (..))
+import           Data.Vector                        (Vector)
+import qualified Data.Vector                        as Vector
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
@@ -242,8 +244,8 @@ putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
-getTextRow :: [ColumnDef] -> Get [MySQLValue]
-getTextRow fs = forM fs $ \ f -> do
+getTextRow :: Vector ColumnDef -> Get (Vector MySQLValue)
+getTextRow fs = Vector.forM fs $ \ f -> do
     p <- lookAhead getWord8
     if p == 0xFB
     then getWord8 >> return MySQLNull
@@ -459,22 +461,17 @@ putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
 --
 -- MySQL use a special null bitmap without offset = 2 here.
 --
-getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
-getBinaryRow fields flen = do
+getBinaryRow :: Vector ColumnDef -> Get (Vector MySQLValue)
+getBinaryRow fields = do
     _ <- getWord8           -- 0x00
-    let maplen = (flen + 7 + 2) `shiftR` 3
+    let maplen = (Vector.length fields + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
-    go fields nullmap 0
+    Vector.imapM (go nullmap) fields
   where
-    go :: [ColumnDef] -> ByteString -> Int -> Get [MySQLValue]
-    go []     _       _   = pure []
-    go (f:fs) nullmap pos = do
-        r <- if isNull nullmap pos
-                then return MySQLNull
-                else getBinaryField f
-        let pos' = pos + 1
-        rest <- pos' `seq` go fs nullmap pos'
-        return (r `seq` (r : rest))
+    go :: ByteString -> Int -> ColumnDef -> Get MySQLValue
+    go nullmap pos f
+      | isNull nullmap pos = return MySQLNull
+      | otherwise          = getBinaryField f
 
     isNull nullmap pos =  -- This 'isNull' is special for offset = 2
         let (i, j) = (pos + 2) `quotRem` 8

@@ -62,6 +62,8 @@ import           Control.Applicative
 import           Control.Exception         (throwIO)
 import           Control.Monad
 import           Data.IORef                (writeIORef)
+import           Data.Vector               (Vector)
+import qualified Data.Vector               as Vector
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
@@ -100,12 +102,12 @@ executeBatch
 -- the same 'MySQLConn', or an 'UnconsumedResultSet' will be thrown.
 -- if you want to skip the result-set, use 'Stream.skipToEof'.
 --
-query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
+query :: MySQLConn -> Query -> [MySQLValue] -> IO (Vector ColumnDef, InputStream (Vector MySQLValue))
 query conn qry params = query_ conn (renderParams qry params)
 
 -- | Execute a MySQL query which return a resultSet.
 --
-query_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream [MySQLValue])
+query_ :: MySQLConn -> Query -> IO (Vector ColumnDef, InputStream (Vector MySQLValue))
 query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
@@ -114,7 +116,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
     then decodeFromPacket p >>= throwIO . ERRException
     else do
         len <- getFromPacket getLenEncInt p
-        fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+        fields <- Vector.replicateM len $ (decodeFromPacket <=< readPacket) is
         _ <- readPacket is -- eof packet, we don't verify this though
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
@@ -135,9 +137,9 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
     then decodeFromPacket p >>= throwIO . ERRException
     else do
         StmtPrepareOK stid colCnt paramCnt _ <- getFromPacket getStmtPrepareOK p
-        _ <- replicateM paramCnt (readPacket is)
+        _ <- replicateM_ paramCnt (readPacket is)
         _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
-        _ <- replicateM colCnt (readPacket is)
+        _ <- replicateM_ colCnt (readPacket is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
         return stid
 
@@ -146,7 +148,7 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
 -- All details from @COM_STMT_PREPARE@ Response are returned: the 'StmtPrepareOK' packet,
 -- params's 'ColumnDef', table's 'ColumnDef'.
 --
-prepareStmtDetail :: MySQLConn -> Query -> IO (StmtPrepareOK, [ColumnDef], [ColumnDef])
+prepareStmtDetail :: MySQLConn -> Query -> IO (StmtPrepareOK, Vector ColumnDef, Vector ColumnDef)
 prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
     guardUnconsumed conn
     writeCommand (COM_STMT_PREPARE stmt) os
@@ -155,9 +157,9 @@ prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
     then decodeFromPacket p >>= throwIO . ERRException
     else do
         sOK@(StmtPrepareOK _ colCnt paramCnt _) <- getFromPacket getStmtPrepareOK p
-        pdefs <- replicateM paramCnt ((decodeFromPacket <=< readPacket) is)
+        pdefs <- Vector.replicateM paramCnt ((decodeFromPacket <=< readPacket) is)
         _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
-        cdefs <- replicateM colCnt ((decodeFromPacket <=< readPacket) is)
+        cdefs <- Vector.replicateM colCnt ((decodeFromPacket <=< readPacket) is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
         return (sOK, pdefs, cdefs)
 
@@ -184,7 +186,7 @@ executeStmt conn stid params = command conn (COM_STMT_EXECUTE stid params)
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --
-queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
+queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO (Vector ColumnDef, InputStream (Vector MySQLValue))
 queryStmt conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params) os
@@ -193,12 +195,12 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
     then decodeFromPacket p >>= throwIO . ERRException
     else do
         len <- getFromPacket getLenEncInt p
-        fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+        fields <- Vector.replicateM len $ (decodeFromPacket <=< readPacket) is
         _ <- readPacket is -- eof packet, we don't verify this though
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
             q <- readPacket is
-            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q -- fast path for decode rows
+            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields) q -- fast path for decode rows
                 | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
                 | otherwise -> throwIO (UnexpectedPacket q)
