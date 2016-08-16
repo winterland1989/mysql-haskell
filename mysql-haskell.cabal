@@ -63,6 +63,7 @@ library
 test-suite test
     type: exitcode-stdio-1.0
     main-is: Main.hs
+    other-modules:      BinaryRow, BinaryRowNew, BinLog, BinLogNew, TextRow, TextRowNew
     hs-source-dirs: test
     build-depends:
         mysql-haskell
