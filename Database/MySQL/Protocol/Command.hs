@@ -112,7 +112,7 @@ instance Binary Command where
 
 -- | call 'isOK' with this packet return true
 data StmtPrepareOK = StmtPrepareOK
-    { stmtId        :: !Word32
+    { stmtId        :: !StmtID
     , stmtColumnCnt :: !Int
     , stmtParamCnt  :: !Int
     , stmtWarnCnt   :: !Int

@@ -15,7 +15,7 @@ In short, it's about 2 times slower than pure c/c++, but 5 times faster than old
 
 <img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-14.png?raw=true">
 
-Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db).
+Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db), run by my MacBook Pro 13' 2015.
 
 Motivation
 ----------
@@ -59,8 +59,7 @@ mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMyS
 
 And you should set binlog to `row` by adding `binlog_format = ROW` to `my.cnf`.
 
-New features in MySQL 5.7 are tested seperately, you can run them by setting environment varible `MYSQLVER=5.7`, travis is keeping
-an eye on following combinations:
+New features will be automatically tested by inspecting MySQL server's version, travis is keeping an eye on following combinations:
 
 + CABALVER=1.18 GHCVER=7.8.4  MYSQLVER=5.5
 + CABALVER=1.22 GHCVER=7.10.2 MYSQLVER=5.5
@@ -70,7 +69,7 @@ an eye on following combinations:
 
 Please reference `.travis.yml` if you have problems with setting up test environment.
 
-Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to modify `bench.sh`(change the include path) to get c++ version compiled.
+Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to modify `bench.sh`(change the include path) to get c++ version compiled, and you may need to adjust rts options `-N` to get best results, with `-N10` on my company's 24-core machine, binary protocol performs almost identical to c version!
 
 Guide
 -----

@@ -24,27 +24,27 @@ echo "=============== benchmark c++ client prepared end ================"
 
 cabal build
 echo "=============== start benchmark haskell client ============="
-time ./dist/build/bench/bench 1  
-time ./dist/build/bench/bench 2  
-time ./dist/build/bench/bench 3  
-time ./dist/build/bench/bench 4  
-time ./dist/build/bench/bench 10 
+time ./dist/build/bench/bench 1          +RTS -N4 -RTS
+time ./dist/build/bench/bench 2          +RTS -N4 -RTS
+time ./dist/build/bench/bench 3          +RTS -N4 -RTS
+time ./dist/build/bench/bench 4          +RTS -N4 -RTS
+time ./dist/build/bench/bench 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end ================"
 
 echo "=============== start benchmark haskell client FFI ============="
-time ./dist/build/benchFFI/benchFFI 1  
-time ./dist/build/benchFFI/benchFFI 2  
-time ./dist/build/benchFFI/benchFFI 3  
-time ./dist/build/benchFFI/benchFFI 4  
-time ./dist/build/benchFFI/benchFFI 10
+time ./dist/build/benchFFI/benchFFI 1          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 2          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 3          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 4          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client FFI end ================"
 
 echo "=============== start benchmark haskell client prepared ============="
-time ./dist/build/benchPrepared/benchPrepared 1  
-time ./dist/build/benchPrepared/benchPrepared 2  
-time ./dist/build/benchPrepared/benchPrepared 3  
-time ./dist/build/benchPrepared/benchPrepared 4  
-time ./dist/build/benchPrepared/benchPrepared 10 
+time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 3          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client prepared end ================"
 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DROP TABLE employees;"
