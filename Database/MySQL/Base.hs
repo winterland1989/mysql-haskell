@@ -45,17 +45,17 @@ module Database.MySQL.Base
     , queryStmt
     , closeStmt
     , resetStmt
+      -- * helpers
+    , Query(..)
+    , renderParams
+    , command
+    , Stream.skipToEof
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command
     , module  Database.MySQL.Protocol.ColumnDef
     , module  Database.MySQL.Protocol.Packet
     , module  Database.MySQL.Protocol.MySQLValue
-      -- * helpers
-    , Query(..)
-    , renderParams
-    , command
-    , Stream.skipToEof
     ) where
 
 import           Control.Applicative
@@ -135,9 +135,9 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
     then decodeFromPacket p >>= throwIO . ERRException
     else do
         StmtPrepareOK stid colCnt paramCnt _ <- getFromPacket getStmtPrepareOK p
-        _ <- replicateM paramCnt (readPacket is)
+        _ <- replicateM_ paramCnt (readPacket is)
         _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
-        _ <- replicateM colCnt (readPacket is)
+        _ <- replicateM_ colCnt (readPacket is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
         return stid
 
