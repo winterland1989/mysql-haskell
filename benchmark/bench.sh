@@ -31,6 +31,14 @@ time ./dist/build/bench/bench 4          +RTS -N4 -RTS
 time ./dist/build/bench/bench 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end ================"
 
+echo "=============== start benchmark haskell client (vector) ============="
+time ./dist/build/bench-vector/bench-vector 1          +RTS -N4 -RTS
+time ./dist/build/bench-vector/bench-vector 2          +RTS -N4 -RTS
+time ./dist/build/bench-vector/bench-vector 3          +RTS -N4 -RTS
+time ./dist/build/bench-vector/bench-vector 4          +RTS -N4 -RTS
+time ./dist/build/bench-vector/bench-vector 10         +RTS -N4 -RTS
+echo "=============== benchmark haskell client (vector) end ================"
+
 echo "=============== start benchmark haskell client FFI ============="
 time ./dist/build/benchFFI/benchFFI 1          +RTS -N4 -RTS
 time ./dist/build/benchFFI/benchFFI 2          +RTS -N4 -RTS

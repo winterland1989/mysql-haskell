@@ -47,6 +47,7 @@ import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
 import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                       (Generic)
+import qualified Data.Vector                        as V
 
 --------------------------------------------------------------------------------
 -- | Data type mapping between MySQL values and haskell values.
@@ -242,6 +243,7 @@ putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
+--
 getTextRow :: [ColumnDef] -> Get [MySQLValue]
 getTextRow fs = forM fs $ \ f -> do
     p <- lookAhead getWord8
@@ -249,6 +251,16 @@ getTextRow fs = forM fs $ \ f -> do
     then getWord8 >> return MySQLNull
     else getTextField f
 {-# INLINE getTextRow #-}
+
+-- | Text row decoder using vector
+--
+getTextRowVector :: V.Vector ColumnDef -> Get (V.Vector MySQLValue)
+getTextRowVector fs = V.forM fs $ \ f -> do
+    p <- lookAhead getWord8
+    if p == 0xFB
+    then getWord8 >> return MySQLNull
+    else getTextField f
+{-# INLINE getTextRowVector #-}
 
 --------------------------------------------------------------------------------
 -- | Binary protocol decoder
@@ -481,6 +493,7 @@ getBinaryRow fields flen = do
         in (nullmap `B.unsafeIndex` i) `testBit` j
     {-# INLINE isNull #-}
 {-# INLINE getBinaryRow #-}
+
 
 -- | Use 'ByteString' to present a bitmap.
 --

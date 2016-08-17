@@ -52,6 +52,7 @@ library
                     ,   blaze-textual     == 0.2.*
                     ,   word24            == 1.*
                     ,   tls               >= 1.3.5 && <1.4
+                    ,   vector
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable

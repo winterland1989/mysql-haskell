@@ -37,6 +37,7 @@ module Database.MySQL.Base
     , execute
     , execute_
     , query_
+    , queryV_
     , query
       -- * prepared query statement
     , prepareStmt
@@ -72,6 +73,7 @@ import           Database.MySQL.Protocol.Packet
 import           System.IO.Streams         (InputStream, OutputStream)
 import qualified System.IO.Streams         as Stream
 import           Database.MySQL.Query
+import qualified          Data.Vector as V
 
 --------------------------------------------------------------------------------
 
@@ -122,6 +124,27 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             if  | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
                 | otherwise -> Just <$> getFromPacket (getTextRow fields) q
+        return (fields, rows)
+
+-- | Execute a MySQL query which return a resultSet.
+--
+queryV_ :: MySQLConn -> Query -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
+queryV_ conn@(MySQLConn is os _ consumed) (Query qry) = do
+    guardUnconsumed conn
+    writeCommand (COM_QUERY qry) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else do
+        len <- getFromPacket getLenEncInt p
+        fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+        _ <- readPacket is -- eof packet, we don't verify this though
+        writeIORef consumed False
+        rows <- Stream.makeInputStream $ do
+            q <- readPacket is
+            if  | isEOF q  -> writeIORef consumed True >> return Nothing
+                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
+                | otherwise -> Just <$> getFromPacket (getTextRowVector fields) q
         return (fields, rows)
 
 -- | Ask MySQL to prepare a query statement.
