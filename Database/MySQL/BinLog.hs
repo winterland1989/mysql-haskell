@@ -61,7 +61,7 @@ registerPesudoSlave :: MySQLConn -> SlaveID -> IO OK
 registerPesudoSlave conn sid = command conn (COM_REGISTER_SLAVE sid "" "" "" 0 0 0)
 
 -- | Setup binlog listening on given connection, during listening
--- the connection *can not* be used to do query, or an 'UnconsumedResultSet' will be thrown.
+-- the connection CAN NOT be used to do query, or an 'UnconsumedResultSet' will be thrown.
 --
 dumpBinLog :: MySQLConn               -- ^ connection to be listened
            -> SlaveID                 -- ^ a number for our pesudo slave.
@@ -69,6 +69,7 @@ dumpBinLog :: MySQLConn               -- ^ connection to be listened
            -> Bool                    -- ^ if master support semi-ack, do we want to enable it?
                                       -- if master doesn't support, this parameter will be ignored.
            -> IO (FormatDescription, IORef ByteString, InputStream BinLogPacket)
+                -- ^ 'FormatDescription', 'IORef' contains current binlog filename, 'BinLogPacket' stream.
 dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) wantAck = do
     guardUnconsumed conn
     checksum <- isCheckSumEnabled conn
@@ -122,11 +123,12 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
 
 -- | Row based biblog event type.
 --
--- It's recommended to call 'enableRowQueryEvent' before 'dumpBinLog', so that you can get
--- 'RowQueryEvent' in row based binlog(it's important for detect a table change for example).
+-- It's recommended to enable row query event before 'dumpBinLog', so that you can get
+-- 'RowQueryEvent' in row based binlog(it's important for detect a table change for example),
+-- more information please refer <http://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html#sysvar_binlog_rows_query_log_events sysvar_binlog_rows_query_log_events>
 --
 -- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
--- for example, writing 'BinLogPacket' to a zookeeper when you done with an event.
+-- for example, writing the tracker to zookeeper when you done with an event.
 --
 data RowBinLogEvent
     = RowQueryEvent   !BinLogTracker !QueryEvent'

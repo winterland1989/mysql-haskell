@@ -184,6 +184,8 @@ executeStmt conn stid params = command conn (COM_STMT_EXECUTE stid params)
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --
+-- Rules about 'UnconsumedResultSet' applied here too.
+--
 queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmt conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
