@@ -11,9 +11,11 @@ import qualified Data.ByteString       as B
 import           Database.MySQL.Base
 import           Database.MySQL.BinLog
 import           System.Environment
+import qualified          System.IO.Streams as Stream
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import qualified TextRow
+import qualified ExecuteMany
 import qualified TextRowNew
 
 main :: IO ()
@@ -65,6 +67,11 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
                 \__enum         ENUM('foo', 'bar', 'qux'),\
                 \__set          SET('foo', 'bar', 'qux')\
                 \) CHARACTER SET utf8"
+
+    resetTestTable c
+
+    step "testing executeMany"
+    ExecuteMany.tests c
 
     resetTestTable c
 

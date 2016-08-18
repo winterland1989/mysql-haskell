@@ -59,6 +59,16 @@ echo "=============== benchmark haskell client end ================"
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 
+echo "=============== start benchmark haskell client (executeMany) ============="
+time ./dist/build/bench-insert-many/bench-insert-many 1          +RTS -N4 -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 2          +RTS -N4 -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 3          +RTS -N4 -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 4          +RTS -N4 -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 10         +RTS -N4 -RTS
+echo "=============== benchmark haskell client (executeMany) end ================"
+
+mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
+mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 echo "=============== start benchmark haskell client prepared ============="
 time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -RTS
 time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -RTS

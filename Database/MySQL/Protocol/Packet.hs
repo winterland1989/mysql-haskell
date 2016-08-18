@@ -25,6 +25,7 @@ import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
 import           Data.Int.Int24
+import           Data.Int
 import           Data.Typeable
 import           Data.Word.Word24
 
@@ -32,7 +33,7 @@ import           Data.Word.Word24
 -- | MySQL packet type
 --
 data Packet = Packet
-    { pLen  :: !Int
+    { pLen  :: !Int64
     , pSeqN :: !Word8
     , pBody :: !L.ByteString
     } deriving (Show, Eq)

@@ -215,7 +215,6 @@ tests c = do
                 , MySQLText "foo,bar"
                 ]
 
-
     (_, is) <- query_ c "SELECT * FROM test"
     Just v <- Stream.read is
 

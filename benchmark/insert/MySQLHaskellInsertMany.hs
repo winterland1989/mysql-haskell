@@ -23,8 +23,7 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
                                     }
 
     execute_ c "BEGIN"
-    replicateM_ 1000 $
-        execute_ c "INSERT INTO insert_test values (\
+    executeMany c "INSERT INTO insert_test values (\
                    \ 0                                      ,\
                    \ b'1110000010101010'                    ,\
                    \ -128                                   ,\
@@ -55,6 +54,7 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
                    \ '韩冬真赞'                             ,\
                    \ 'foo'                                  ,\
                    \ 'foo,bar')"
+                   (replicate 1000 [])
 
     execute_ c "COMMIT"
     return ()

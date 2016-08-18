@@ -35,6 +35,7 @@ module Database.MySQL.Base
     , ping
       -- * direct query
     , execute
+    , executeMany
     , execute_
     , query_
     , query
@@ -63,6 +64,7 @@ import           Control.Applicative
 import           Control.Exception         (throwIO, mask, onException)
 import           Control.Monad
 import           Data.IORef                (writeIORef)
+import      qualified    Data.ByteString.Lazy      as L
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
@@ -76,7 +78,7 @@ import           Database.MySQL.Query
 
 --------------------------------------------------------------------------------
 
--- | Execute a MySQL query with parameters which don't return a resultSet.
+-- | Execute a MySQL query with parameters which don't return a result-set.
 --
 -- The query may contain placeholders @?@, for filling up parameters, the parameters
 -- will be escaped before get filled into the query, please DO NOT enable @NO_BACKSLASH_ESCAPES@,
@@ -85,15 +87,25 @@ import           Database.MySQL.Query
 execute :: MySQLConn -> Query -> [MySQLValue] -> IO OK
 execute conn qry params = execute_ conn (renderParams qry params)
 
--- | Execute a MySQL query which don't return a resultSet.
+-- | Execute a multi-row query which don't return result-set.
+--
+-- Leverage MySQL's multi-statement support to do batch insert/update/delete,
+-- you may want to use 'withTransaction' to make sure it's atomic,
+-- use `sum . map okAffectedRows` to get all affected rows count.
+--
+-- @since 0.2.0.0
+--
+executeMany :: MySQLConn -> Query -> [[MySQLValue]]-> IO [OK]
+executeMany conn@(MySQLConn is os _ _) qry paramsList = do
+    guardUnconsumed conn
+    let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
+    writeCommand (COM_QUERY qry') os
+    mapM (\ _ -> waitCommandReply is) paramsList
+
+-- | Execute a MySQL query which don't return a result-set.
 --
 execute_ :: MySQLConn -> Query -> IO OK
 execute_ conn (Query qry) = command conn (COM_QUERY qry)
-
-{-
-executeBatch :: MySQLConn -> Query -> OutputStream [MySQLValue] -> IO (InputStream OK)
-executeBatch
--}
 
 -- | Execute a MySQL query which return a result-set with parameters.
 --
@@ -104,7 +116,7 @@ executeBatch
 query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 query conn qry params = query_ conn (renderParams qry params)
 
--- | Execute a MySQL query which return a resultSet.
+-- | Execute a MySQL query which return a result-set.
 --
 query_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream [MySQLValue])
 query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
@@ -213,7 +225,7 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
 --
 withTransaction :: MySQLConn -> IO a -> IO a
 withTransaction conn procedure = mask $ \restore -> do
-  execute_ conn "BEGIN"
-  a <- restore procedure `onException` (execute_ conn "ROLLBACK")
-  execute_ conn "COMMIT"
-  pure a
+  _ <- execute_ conn "BEGIN"
+  r <- restore procedure `onException` (execute_ conn "ROLLBACK")
+  _ <- execute_ conn "COMMIT"
+  pure r

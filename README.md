@@ -13,9 +13,14 @@ Is it fast?
 
 In short, it's about 2 times slower than pure c/c++, but 5 times faster than old FFI bindings(mysql by Bryan O'Sullivan).
 
-<img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/benchmark2016-08-14.png?raw=true">
+![result figure](https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/result.png?raw=true)
 
-Above figures showed the time to perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db), run by my MacBook Pro 13' 2015.
+Above figures showed the time to:
+
+* perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db)
+* insert 1000 rows into a 29-columns table per thread with auto-commit off.
+
+The benchmarks are run by my MacBook Pro 13' 2015.
 
 Motivation
 ----------

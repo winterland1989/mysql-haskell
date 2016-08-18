@@ -155,10 +155,10 @@ connectDetail ci@(ConnectInfo host port _ _ _ tls) =
     loopRead acc k is = do
         bs <- Stream.read is
         case bs of Nothing -> throwIO NetworkException
-                   Just bs' -> do let l = B.length bs'
+                   Just bs' -> do let l = fromIntegral (B.length bs')
                                   if l >= k
                                   then do
-                                      let (a, rest) = B.splitAt k bs'
+                                      let (a, rest) = B.splitAt (fromIntegral k) bs'
                                       unless (B.null rest) (Stream.unRead rest is)
                                       return $! L.fromChunks (reverse (a:acc))
                                   else do
@@ -183,14 +183,19 @@ ping = flip command COM_PING
 -- | Send a 'Command' which don't return a resultSet.
 --
 command :: MySQLConn -> Command -> IO OK
-command conn@(MySQLConn is os _ _) cmd = do
+command conn@(MySQLConn is os _ consumed) cmd = do
     guardUnconsumed conn
     writeCommand cmd os
+    waitCommandReply is
+{-# INLINE command #-}
+
+waitCommandReply :: InputStream Packet -> IO OK
+waitCommandReply is = do
     p <- readPacket is
     if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
         | isOK  p -> decodeFromPacket p
         | otherwise -> throwIO (UnexpectedPacket p)
-{-# INLINE command #-}
+{-# INLINE waitCommandReply #-}
 
 readPacket :: InputStream Packet -> IO Packet
 readPacket is = Stream.read is >>= maybe
@@ -209,18 +214,19 @@ readPacket is = Stream.read is >>= maybe
 {-# INLINE readPacket #-}
 
 writeCommand :: Command -> OutputStream Packet -> IO ()
-writeCommand a = let bs = Binary.runPut (Binary.put a) in
-    go (fromIntegral (L.length bs)) 0 bs
+writeCommand a os = let bs = Binary.runPut (Binary.put a) in
+    go (fromIntegral (L.length bs)) 0 bs os
   where
-    go len seqN bs =
+    go len seqN bs os' = do
         if len < 16777215
-        then Stream.write (Just (Packet len seqN bs))
+        then Stream.write (Just (Packet len seqN bs)) os'
         else do
             let (bs', rest) = L.splitAt 16777215 bs
                 seqN' = seqN + 1
                 len'  = len - 16777215
-            Stream.write (Just (Packet 16777215 seqN bs'))
-            seqN' `seq` len' `seq` go len' seqN' rest
+
+            Stream.write (Just (Packet 16777215 seqN bs')) os'
+            seqN' `seq` len' `seq` go len' seqN' rest os'
 {-# INLINE writeCommand #-}
 
 guardUnconsumed :: MySQLConn -> IO ()
