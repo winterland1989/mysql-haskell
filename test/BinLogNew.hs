@@ -32,7 +32,7 @@ tests c = do
     z <- getCurrentTimeZone
     let timestamp = round $ utcTimeToPOSIXSeconds (localTimeToUTC z t)
 
-    Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
+    Just (RowUpdateEvent _ _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event cloumn" (updateColumnCnt ue) 4
     assertEqual "decode update event rows" (updateRowData ue)
         [
@@ -49,7 +49,7 @@ tests c = do
             )
         ]
 
-    Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
+    Just (RowUpdateEvent _ _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event rows" (updateRowData ue)
         [
             (
@@ -65,7 +65,7 @@ tests c = do
             )
         ]
 
-    Just (RowUpdateEvent _ tme ue) <- Stream.read rowEventStream
+    Just (RowUpdateEvent _ _ tme ue) <- Stream.read rowEventStream
     assertEqual "decode update event rows" (updateRowData ue)
         [
             (

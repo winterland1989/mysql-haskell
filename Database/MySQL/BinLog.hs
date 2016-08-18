@@ -130,11 +130,13 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
 -- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
 -- for example, writing the tracker to zookeeper when you done with an event.
 --
+-- The first 'Word32' field is a timestamp present when this event is logged.
+--
 data RowBinLogEvent
-    = RowQueryEvent   !BinLogTracker !QueryEvent'
-    | RowDeleteEvent  !BinLogTracker !TableMapEvent !DeleteRowsEvent
-    | RowWriteEvent   !BinLogTracker !TableMapEvent !WriteRowsEvent
-    | RowUpdateEvent  !BinLogTracker !TableMapEvent !UpdateRowsEvent
+    = RowQueryEvent  !Word32 !BinLogTracker !QueryEvent'
+    | RowDeleteEvent !Word32 !BinLogTracker !TableMapEvent !DeleteRowsEvent
+    | RowWriteEvent  !Word32 !BinLogTracker !TableMapEvent !WriteRowsEvent
+    | RowUpdateEvent !Word32 !BinLogTracker !TableMapEvent !UpdateRowsEvent
   deriving (Show, Eq)
 
 -- | decode row based event from 'BinLogPacket' stream.
@@ -151,7 +153,7 @@ decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' 
                 if  | t == BINLOG_ROWS_QUERY_EVENT -> do
                         tr <- track p' fref
                         e <- getFromBinLogPacket getQueryEvent' p'
-                        pure (Just (RowQueryEvent tr e))
+                        pure (Just (RowQueryEvent (blTimestamp p') tr e))
                     | t == BINLOG_TABLE_MAP_EVENT -> do
                         tme <- getFromBinLogPacket (getTableMapEvent fd) p'
                         q <- Stream.read is
@@ -162,15 +164,15 @@ decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' 
                                 if  | u == BINLOG_WRITE_ROWS_EVENTv1 || u == BINLOG_WRITE_ROWS_EVENTv2 -> do
                                         tr <- track q' fref
                                         e <- getFromBinLogPacket' (getWriteRowEvent fd tme) q'
-                                        pure (Just (RowWriteEvent tr tme e))
+                                        pure (Just (RowWriteEvent (blTimestamp q') tr tme e))
                                     | u == BINLOG_DELETE_ROWS_EVENTv1 || u == BINLOG_DELETE_ROWS_EVENTv2 -> do
                                         tr <- track q' fref
                                         e <- getFromBinLogPacket' (getDeleteRowEvent fd tme) q'
-                                        pure (Just (RowDeleteEvent tr tme e))
+                                        pure (Just (RowDeleteEvent (blTimestamp q') tr tme e))
                                     | u == BINLOG_UPDATE_ROWS_EVENTv1 || u == BINLOG_UPDATE_ROWS_EVENTv2 -> do
                                         tr <- track q' fref
                                         e <- getFromBinLogPacket' (getUpdateRowEvent fd tme) q'
-                                        pure (Just (RowUpdateEvent tr tme e))
+                                        pure (Just (RowUpdateEvent (blTimestamp q') tr tme e))
                                     | otherwise -> loop fd fref is
                     | otherwise -> loop fd fref is
 

@@ -122,7 +122,8 @@ data OK = OK
     } deriving (Show, Eq)
 
 getOK :: Get OK
-getOK = OK <$> getLenEncInt
+getOK = OK <$ skip 1
+           <*> getLenEncInt
            <*> getLenEncInt
            <*> getWord16le
            <*> getWord16le
@@ -174,7 +175,8 @@ data EOF = EOF
     } deriving (Show, Eq)
 
 getEOF :: Get EOF
-getEOF = EOF <$> getWord16le
+getEOF = EOF <$  skip 1
+             <*> getWord16le
              <*> getWord16le
 
 putEOF :: EOF -> Put
