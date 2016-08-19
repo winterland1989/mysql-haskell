@@ -32,6 +32,7 @@ import           Database.MySQL.Protocol.ColumnDef
 
 import           Control.Exception                         (throwIO)
 import           Database.MySQL.Query
+import           GHC.Generics                              (Generic)
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -127,7 +128,7 @@ data FormatDescription = FormatDescription
     -- , eventHeaderLen :: !Word8  -- const 19
     , fdEventHeaderLenVector :: !ByteString  -- ^ a array indexed by Binlog Event Type - 1
                                              -- to extract the length of the event specific header.
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getFormatDescription :: Get FormatDescription
 getFormatDescription = FormatDescription <$> getWord16le
@@ -155,7 +156,7 @@ data QueryEvent = QueryEvent
     , qStatusVars   :: !ByteString
     , qSchemaName   :: !ByteString
     , qQuery        :: !Query
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getQueryEvent :: Get QueryEvent
 getQueryEvent = do
@@ -188,7 +189,7 @@ data TableMapEvent = TableMapEvent
     , tmColumnType :: ![FieldType]
     , tmColumnMeta :: ![BinLogMeta]
     , tmNullMap    :: !ByteString
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getTableMapEvent :: FormatDescription -> Get TableMapEvent
 getTableMapEvent fd = do
@@ -220,7 +221,7 @@ data DeleteRowsEvent = DeleteRowsEvent
     , deleteColumnCnt  :: !Int
     , deletePresentMap :: !BitMap
     , deleteRowData    :: ![[BinLogValue]]
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get DeleteRowsEvent
 getDeleteRowEvent fd tme typ = do
@@ -242,7 +243,7 @@ data WriteRowsEvent = WriteRowsEvent
     , writeColumnCnt  :: !Int
     , writePresentMap :: !BitMap
     , writeRowData    :: ![[BinLogValue]]
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
 getWriteRowEvent fd tme typ = do
@@ -264,7 +265,7 @@ data UpdateRowsEvent = UpdateRowsEvent
     , updateColumnCnt  :: !Int
     , updatePresentMap :: !(BitMap, BitMap)
     , updateRowData    :: ![ ([BinLogValue], [BinLogValue]) ]
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 getUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get UpdateRowsEvent
 getUpdateRowEvent fd tme typ = do
