@@ -25,6 +25,7 @@ module Database.MySQL.BinLog
     -- * re-export
     , module Database.MySQL.BinLogProtocol.BinLogEvent
     , module Database.MySQL.BinLogProtocol.BinLogValue
+    , module Database.MySQL.BinLogProtocol.BinLogMeta
     ) where
 
 import           Control.Applicative
@@ -40,6 +41,7 @@ import           Data.Word
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.BinLogProtocol.BinLogValue
+import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.Connection
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)

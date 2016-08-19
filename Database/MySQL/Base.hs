@@ -89,9 +89,9 @@ execute conn qry params = execute_ conn (renderParams qry params)
 
 -- | Execute a multi-row query which don't return result-set.
 --
--- Leverage MySQL's multi-statement support to do batch insert/update/delete,
--- you may want to use 'withTransaction' to make sure it's atomic,
--- use `sum . map okAffectedRows` to get all affected rows count.
+-- Leverage MySQL's multi-statement support to do batch insert\/update\/delete,
+-- you may want to use 'withTransaction' to make sure it's atomic, and
+-- use @sum . map okAffectedRows@ to get all affected rows count.
 --
 -- @since 0.2.0.0
 --

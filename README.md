@@ -47,7 +47,9 @@ cabal install --only-dependencies
 cabal build
 ```
 
-Running tests require a local MySQL server, a user `testMySQLHaskell` and a database `testMySQLHaskell`, you can do it use following script:
+Running tests require
+
+* A local MySQL server, a user `testMySQLHaskell` and a database `testMySQLHaskell`, you can do it use following script:
 
 ```bash
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
@@ -56,13 +58,15 @@ mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskel
 mysql -u root -e "FLUSH PRIVILEGES"
 ```
 
-You should enable binlog by adding `log_bin = filename` to `my.cnf` or add `--log-bin=filename` to the server, and grant replication access to `testMySQLHaskell` with:
+* Enable binlog by adding `log_bin = filename` to `my.cnf` or add `--log-bin=filename` to the server, and grant replication access to `testMySQLHaskell` with:
 
 ```bash
 mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
 ```
 
-And you should set binlog to `row` by adding `binlog_format = ROW` to `my.cnf`.
+* Set `binlog_format` to `ROW`.
+
+* Set `max_allowed_packet` to larger than 64MB(for test large packet).
 
 New features will be automatically tested by inspecting MySQL server's version, travis is keeping an eye on following combinations:
 

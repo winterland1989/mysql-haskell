@@ -183,7 +183,7 @@ ping = flip command COM_PING
 -- | Send a 'Command' which don't return a resultSet.
 --
 command :: MySQLConn -> Command -> IO OK
-command conn@(MySQLConn is os _ consumed) cmd = do
+command conn@(MySQLConn is os _ _) cmd = do
     guardUnconsumed conn
     writeCommand cmd os
     waitCommandReply is

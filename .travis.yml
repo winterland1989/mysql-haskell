@@ -31,6 +31,7 @@ before_install:
         sudo mysql -u root -e "GRANT ALL PRIVILEGES ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost'"
         sudo mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         sudo mysql -u root -e "FLUSH PRIVILEGES"
+        sudo echo "max_allowed_packet=256M" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
         sudo echo "server-id = 1" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
         sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/mysql.conf.d/mysqld.cnf
         sudo service mysql restart
@@ -43,6 +44,7 @@ before_install:
         mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMySQLHaskell'@'localhost';"
         mysql -u root -e "FLUSH PRIVILEGES"
         sudo echo "[mysqld]" | sudo tee -a /etc/mysql/my.cnf
+        sudo echo "max_allowed_packet=256M" | sudo tee -a /etc/mysql/my.cnf
         sudo echo "server-id = 1" | sudo tee -a /etc/mysql/my.cnf
         sudo echo "log_bin = /var/log/mysql/mysql-bin.log" | sudo tee -a /etc/mysql/my.cnf
         sudo echo "binlog_format = ROW" | sudo tee -a /etc/mysql/my.cnf
