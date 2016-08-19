@@ -47,7 +47,7 @@ cabal install --only-dependencies
 cabal build
 ```
 
-Running tests require
+Running tests require:
 
 * A local MySQL server, a user `testMySQLHaskell` and a database `testMySQLHaskell`, you can do it use following script:
 
