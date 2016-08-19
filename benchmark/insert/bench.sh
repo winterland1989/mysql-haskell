@@ -49,32 +49,32 @@ mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 
 cabal build
 echo "=============== start benchmark haskell client ============="
-time ./dist/build/bench/bench 1          +RTS -N4 -RTS
-time ./dist/build/bench/bench 2          +RTS -N4 -RTS
-time ./dist/build/bench/bench 3          +RTS -N4 -RTS
-time ./dist/build/bench/bench 4          +RTS -N4 -RTS
-time ./dist/build/bench/bench 10         +RTS -N4 -RTS
+time ./dist/build/bench/bench 1          +RTS -N4 -A128M -RTS
+time ./dist/build/bench/bench 2          +RTS -N4 -A128M -RTS
+time ./dist/build/bench/bench 3          +RTS -N4 -A128M -RTS
+time ./dist/build/bench/bench 4          +RTS -N4 -A128M -RTS
+time ./dist/build/bench/bench 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client end ================"
 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 
 echo "=============== start benchmark haskell client (executeMany) ============="
-time ./dist/build/bench-insert-many/bench-insert-many 1          +RTS -N4 -RTS
-time ./dist/build/bench-insert-many/bench-insert-many 2          +RTS -N4 -RTS
-time ./dist/build/bench-insert-many/bench-insert-many 3          +RTS -N4 -RTS
-time ./dist/build/bench-insert-many/bench-insert-many 4          +RTS -N4 -RTS
-time ./dist/build/bench-insert-many/bench-insert-many 10         +RTS -N4 -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 1          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 2          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 3          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 4          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-insert-many/bench-insert-many 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client (executeMany) end ================"
 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 echo "=============== start benchmark haskell client prepared ============="
-time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -RTS
-time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -RTS
-time ./dist/build/benchPrepared/benchPrepared 3          +RTS -N4 -RTS
-time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -RTS
-time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -A128M -RTS
+time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -A128M -RTS
+time ./dist/build/benchPrepared/benchPrepared 3          +RTS -N4 -A128M -RTS
+time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -A128M -RTS
+time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client prepared end ================"
 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
