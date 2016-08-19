@@ -61,10 +61,10 @@ module Database.MySQL.Base
     ) where
 
 import           Control.Applicative
-import           Control.Exception         (throwIO, mask, onException)
+import           Control.Exception                  (mask, onException, throwIO)
 import           Control.Monad
-import           Data.IORef                (writeIORef)
-import      qualified    Data.ByteString.Lazy      as L
+import qualified Data.ByteString.Lazy               as L
+import           Data.IORef                         (writeIORef)
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
@@ -72,9 +72,9 @@ import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
 
-import           System.IO.Streams         (InputStream, OutputStream)
-import qualified System.IO.Streams         as Stream
 import           Database.MySQL.Query
+import           System.IO.Streams                  (InputStream, OutputStream)
+import qualified System.IO.Streams                  as Stream
 
 --------------------------------------------------------------------------------
 

@@ -40,13 +40,13 @@ import           Data.Text.Encoding                        (encodeUtf8)
 import           Data.Word
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
-import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.BinLogProtocol.BinLogMeta
+import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Connection
+import           GHC.Generics                              (Generic)
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)
 import qualified System.IO.Streams                         as Stream
-import           GHC.Generics                              (Generic)
 
 type SlaveID = Word32
 

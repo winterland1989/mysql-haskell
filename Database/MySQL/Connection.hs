@@ -29,6 +29,7 @@ import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Unsafe          as B
 import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
+import qualified Data.TLSSetting                 as TLS
 import           Data.Typeable
 import           Data.Word
 import           Database.MySQL.Protocol.Auth
@@ -36,13 +37,12 @@ import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           Network.Socket                  (HostName, PortNumber)
 import qualified Network.Socket                  as N
+import qualified Network.TLS                     as TLS
 import           System.IO.Streams               (InputStream, OutputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
 import qualified System.IO.Streams.TLS           as TLS
-import qualified Data.TLSSetting                 as TLS
-import qualified Network.TLS                     as TLS
 
 --------------------------------------------------------------------------------
 
