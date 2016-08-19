@@ -44,6 +44,7 @@ import           Database.MySQL.Connection
 import           System.IO.Streams                         (InputStream,
                                                             OutputStream)
 import qualified System.IO.Streams                         as Stream
+import           GHC.Generics                              (Generic)
 
 type SlaveID = Word32
 
@@ -52,7 +53,7 @@ type SlaveID = Word32
 data BinLogTracker = BinLogTracker
     { btFileName :: {-# UNPACK #-} !ByteString
     , btNextPos  :: {-# UNPACK #-} !Word32
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Generic)
 
 -- | Register a pesudo slave to master, although MySQL document suggests you should call this
 -- before calling 'dumpBinLog', but it seems it's not really necessary.
@@ -137,7 +138,7 @@ data RowBinLogEvent
     | RowDeleteEvent !Word32 !BinLogTracker !TableMapEvent !DeleteRowsEvent
     | RowWriteEvent  !Word32 !BinLogTracker !TableMapEvent !WriteRowsEvent
     | RowUpdateEvent !Word32 !BinLogTracker !TableMapEvent !UpdateRowsEvent
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 -- | decode row based event from 'BinLogPacket' stream.
 decodeRowBinLogEvent :: (FormatDescription, IORef ByteString, InputStream BinLogPacket)

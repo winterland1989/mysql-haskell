@@ -215,7 +215,12 @@ writeCommand a = let bs = Binary.runPut (Binary.put a) in
     go len seqN bs =
         if len < 16777215
         then Stream.write (Just (Packet len seqN bs))
-        else go (len - 16777215) (seqN + 1) (L.drop 16777215 bs)
+        else do
+            let (bs', rest) = L.splitAt 16777215 bs
+                seqN' = seqN + 1
+                len'  = len - 16777215
+            Stream.write (Just (Packet 16777215 seqN bs'))
+            seqN' `seq` len' `seq` go len' seqN' rest
 {-# INLINE writeCommand #-}
 
 guardUnconsumed :: MySQLConn -> IO ()

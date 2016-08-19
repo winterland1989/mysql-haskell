@@ -46,6 +46,7 @@ module Database.MySQL.Base
     , closeStmt
     , resetStmt
       -- * helpers
+    , withTransaction
     , Query(..)
     , renderParams
     , command
@@ -59,7 +60,7 @@ module Database.MySQL.Base
     ) where
 
 import           Control.Applicative
-import           Control.Exception         (throwIO)
+import           Control.Exception         (throwIO, mask, onException)
 import           Control.Monad
 import           Data.IORef                (writeIORef)
 import           Database.MySQL.Connection
@@ -205,3 +206,14 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
                 | otherwise -> throwIO (UnexpectedPacket q)
         return (fields, rows)
+
+-- | Run querys inside a transaction, querys will be rolled back if exception arise.
+--
+-- @since 0.2.0.0
+--
+withTransaction :: MySQLConn -> IO a -> IO a
+withTransaction conn procedure = mask $ \restore -> do
+  execute_ conn "BEGIN"
+  a <- restore procedure `onException` (execute_ conn "ROLLBACK")
+  execute_ conn "COMMIT"
+  pure a

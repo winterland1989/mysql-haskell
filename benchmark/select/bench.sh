@@ -1,5 +1,6 @@
 #!/bin/bash
 
+mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DROP TABLE IF EXISTS employees"
 mysql -utestMySQLHaskell < employees.sql
 
 g++ ./libmysql.cpp -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl -I/usr/local/include/mysql -o libmysql
@@ -47,4 +48,3 @@ time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -RTS
 time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client prepared end ================"
 
-mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DROP TABLE employees;"
