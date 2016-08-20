@@ -152,9 +152,7 @@ getTextField f
         || t == mySQLTypeNewDate      = feedLenEncBytes t MySQLDate dateParser
     | t == mySQLTypeTime
         || t == mySQLTypeTime2        = feedLenEncBytes t id $ \ bs ->
-                                            if B.null bs
-                                            then pure MySQLNull
-                                            else if bs `BC.index` 0 == '-'
+                                            if bs `B.unsafeIndex` 0 == 45  -- '-'
                                                  then MySQLTime 1 <$> timeParser (B.unsafeDrop 1 bs)
                                                  else MySQLTime 0 <$> timeParser bs
 
@@ -169,9 +167,7 @@ getTextField f
         || t == mySQLTypeVarString
         || t == mySQLTypeString       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
 
-    | t == mySQLTypeBit               = do len <- getLenEncInt
-                                           if len == 0 then pure MySQLNull
-                                                       else MySQLBit <$> getBits len
+    | t == mySQLTypeBit               = MySQLBit <$> (getBits =<< getLenEncInt)
 
     | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
   where
@@ -194,9 +190,7 @@ getTextField f
 
     feedLenEncBytes typ con parser = do
         bs <- getLenEncBytes
-        if B.null bs
-        then return MySQLNull
-        else case parser bs of
+        case parser bs of
             Just v -> return (con v)
             Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, \
                               \input: " ++ BC.unpack bs
@@ -246,7 +240,7 @@ getTextRow :: [ColumnDef] -> Get [MySQLValue]
 getTextRow fs = forM fs $ \ f -> do
     p <- lookAhead getWord8
     if p == 0xFB
-    then getWord8 >> return MySQLNull
+    then skip 1 >> return MySQLNull
     else getTextField f
 {-# INLINE getTextRow #-}
 
@@ -341,9 +335,7 @@ getBinaryField f
         || t == mySQLTypeVarString
         || t == mySQLTypeString       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
                                                   else MySQLBytes <$> getLenEncBytes
-    | t == mySQLTypeBit               = do len <- getLenEncInt
-                                           if len == 0 then pure MySQLNull
-                                                       else MySQLBit <$> getBits len
+    | t == mySQLTypeBit               = MySQLBit <$> (getBits =<< getLenEncInt)
     | otherwise                       = fail $ "Database.MySQL.Protocol.MySQLValue:\
                                                \ missing binary decoder for " ++ show t
   where
@@ -436,6 +428,7 @@ putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
                     putWord16le (fromIntegral yyyy)
                     putWord8 (fromIntegral mm)
                     putWord8 (fromIntegral dd)
+{-# INLINE putBinaryDay #-}
 
 putBinaryTime' :: TimeOfDay -> Put
 putBinaryTime' (TimeOfDay hh mm ss) = do let s = floor ss
@@ -444,6 +437,8 @@ putBinaryTime' (TimeOfDay hh mm ss) = do let s = floor ss
                                          putWord8 (fromIntegral mm)
                                          putWord8 s
                                          putWord32le ms
+{-# INLINE putBinaryTime' #-}
+
 putBinaryTime :: TimeOfDay -> Put
 putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
                                             ms = floor $ (ss - realToFrac s) * 1000000
@@ -453,6 +448,7 @@ putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
                                         putWord8 (fromIntegral mm)
                                         putWord8 s
                                         putWord32le ms
+{-# INLINE putBinaryTime #-}
 
 --------------------------------------------------------------------------------
 -- | Binary row decoder
@@ -461,7 +457,7 @@ putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
 --
 getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
 getBinaryRow fields flen = do
-    _ <- getWord8           -- 0x00
+    skip 1           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
     go fields nullmap 0

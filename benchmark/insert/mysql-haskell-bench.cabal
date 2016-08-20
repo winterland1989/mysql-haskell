@@ -34,7 +34,6 @@ library
                     ,   Database.MySQL.Query
 
     build-depends:      base          >= 4.7 && <5
-                    ,   transformers  >= 0.3 && < 0.6
                     ,   monad-loops   == 0.4.*
                     ,   network       >= 2.3 && < 3.0
                     ,   io-streams    >= 1.2 && < 2.0

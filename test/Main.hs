@@ -62,8 +62,8 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
                 \__varbinary    VARBINARY(1024),\
                 \__tinyblob     TINYBLOB,\
                 \__tinytext     TINYTEXT,\
-                \__blob         BLOB,\
-                \__text         TEXT,\
+                \__blob         BLOB(1000000),\
+                \__text         TEXT(1000000),\
                 \__enum         ENUM('foo', 'bar', 'qux'),\
                 \__set          SET('foo', 'bar', 'qux')\
                 \) CHARACTER SET utf8"

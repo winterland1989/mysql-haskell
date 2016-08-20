@@ -355,6 +355,20 @@ tests c = do
 
     Stream.skipToEof is
 
+    execute_ c "UPDATE test SET \
+        \__text       = ''     ,\
+        \__blob       = ''  WHERE __id=0"
+
+    (_, is) <- query_ c "SELECT __text, __blob FROM test"
+    Just v <- Stream.read is
+
+    assertEqual "decode text protocol 3" v
+            [ MySQLText ""
+            , MySQLBytes ""
+            ]
+
+    Stream.skipToEof is
+
     execute c "UPDATE test SET \
         \__time       = ?     ,\
         \__year       = ?  WHERE __id=0"

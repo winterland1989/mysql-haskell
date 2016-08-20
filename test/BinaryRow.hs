@@ -11,6 +11,8 @@ import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
+import qualified Data.Text as T
+import qualified Data.ByteString as B
 
 tests :: MySQLConn -> Assertion
 tests c = do
@@ -85,7 +87,7 @@ tests c = do
         ]
 
     Stream.skipToEof is
-
+--------------------------------------------------------------------------------
     let bitV = 43744 -- 0b1010101011100000
 
     execute_ c "UPDATE test SET \
@@ -155,6 +157,7 @@ tests c = do
         , MySQLText "foo,bar"]
 
     Stream.skipToEof is
+--------------------------------------------------------------------------------
     updStmt <- prepareStmt c
             "UPDATE test SET \
             \__bit        = ?     ,\
@@ -258,7 +261,7 @@ tests c = do
         ]
 
     Stream.skipToEof is
-
+--------------------------------------------------------------------------------
     execute_ c "UPDATE test SET \
         \__mediumInt  = null         ,\
         \__double     = null         ,\
@@ -301,7 +304,7 @@ tests c = do
         ]
 
     Stream.skipToEof is
-
+--------------------------------------------------------------------------------
     updStmt1 <- prepareStmt c "UPDATE test SET \
         \__decimal  = ?         ,\
         \__date     = ?         ,\
@@ -343,7 +346,7 @@ tests c = do
         , MySQLText "foo"
         , MySQLText "foo,bar"
         ]
-
+--------------------------------------------------------------------------------
     Stream.skipToEof is
     execute_ c "UPDATE test SET \
         \__time       = '199:59:59'     ,\
@@ -359,17 +362,51 @@ tests c = do
             ]
 
     Stream.skipToEof is
-
+--------------------------------------------------------------------------------
     updStmt2 <- prepareStmt c "UPDATE test SET \
                 \__time       = ?     ,\
                 \__year       = ?  WHERE __id=0"
 
-    (_, is) <- queryStmt c selStmt2 [ MySQLTime 0 (TimeOfDay 199 59 59), MySQLYear 0]
+    executeStmt c updStmt2 [ MySQLTime 0 (TimeOfDay 00 00 00), MySQLYear 2055]
+
+    (_, is) <- queryStmt c selStmt2 []
+    Just v <- Stream.read is
+    assertEqual "roundtrip binary protocol 2" v
+            [ MySQLTime 0 (TimeOfDay 00 00 00)
+            , MySQLYear 2055
+            ]
+
+    Stream.skipToEof is
+--------------------------------------------------------------------------------
+    execute_ c "UPDATE test SET \
+        \__text       = ''     ,\
+        \__blob       = ''  WHERE __id=0"
+
+    selStmt3 <- prepareStmt c "SELECT __text, __blob FROM test"
+    (_, is) <- queryStmt c selStmt3 []
     Just v <- Stream.read is
 
-    assertEqual "roundtrip binary protocol 2" v
-            [ MySQLTime 0 (TimeOfDay 199 59 59)
-            , MySQLYear 0
+    assertEqual "decode binary protocol 3" v
+            [ MySQLText ""
+            , MySQLBytes ""
             ]
+
+    Stream.skipToEof is
+--------------------------------------------------------------------------------
+    updStmt3 <- prepareStmt c "UPDATE test SET \
+                \__text       = ?     ,\
+                \__blob       = ?  WHERE __id=0"
+
+    executeStmt c updStmt3
+        [ MySQLText (T.replicate 100000 "xyz")
+        , MySQLBytes (B.replicate 1000000 64)
+        ]
+
+    (_, is) <- queryStmt c selStmt3 []
+    Just v <- Stream.read is
+    assertEqual "roundtrip binary protocol 3" v
+        [ MySQLText (T.replicate 100000 "xyz")
+        , MySQLBytes (B.replicate 1000000 64)
+        ]
 
     Stream.skipToEof is

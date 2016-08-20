@@ -120,10 +120,10 @@ data StmtPrepareOK = StmtPrepareOK
 
 getStmtPrepareOK :: Get StmtPrepareOK
 getStmtPrepareOK = do
-    _ <- getWord8 -- OK byte
+    skip 1 -- OK byte
     stmtid <- getWord32le
     cc <- fromIntegral <$> getWord16le
     pc <- fromIntegral <$> getWord16le
-    _ <- getWord8 -- reserved
+    skip 1 -- reserved
     wc <- fromIntegral <$> getWord16le
     return (StmtPrepareOK stmtid cc pc wc)

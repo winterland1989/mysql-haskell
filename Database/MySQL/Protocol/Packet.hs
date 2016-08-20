@@ -205,17 +205,12 @@ getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
 
 putLenEncBytes :: ByteString -> Put
 putLenEncBytes c = do
-        let l = B.length c
-        putLenEncInt l
-        putByteString c
+    putLenEncInt (B.length c)
+    putByteString c
 {-# INLINE putLenEncBytes #-}
 
 getLenEncBytes :: Get ByteString
-getLenEncBytes = do
-    b <- lookAhead getWord8
-    if b == 0xfb
-    then getWord8 >> return B.empty
-    else getLenEncInt >>= getByteString
+getLenEncBytes = getLenEncInt >>= getByteString
 {-# INLINE getLenEncBytes #-}
 
 -- | length encoded int
@@ -224,19 +219,19 @@ getLenEncInt:: Get Int
 getLenEncInt = getWord8 >>= word2Len
   where
     word2Len l
-         | l <  0xfb  = return (fromIntegral l)
-         | l == 0xfc  = fromIntegral <$> getWord16le
-         | l == 0xfd  = fromIntegral <$> getWord24le
-         | l == 0xfe  = fromIntegral <$> getWord64le
+         | l <  0xFB  = pure (fromIntegral l)
+         | l == 0xFC  = fromIntegral <$> getWord16le
+         | l == 0xFD  = fromIntegral <$> getWord24le
+         | l == 0xFE  = fromIntegral <$> getWord64le
          | otherwise = fail $ "invalid length val " ++ show l
 {-# INLINE getLenEncInt #-}
 
 putLenEncInt:: Int -> Put
 putLenEncInt x
-         | x <  251      = putWord8    (fromIntegral x)
-         | x < 65536     = putWord16le (fromIntegral x)
-         | x < 16777216  = putWord24le (fromIntegral x)
-         | otherwise     = putWord64le (fromIntegral x)
+         | x <  251      = putWord8 (fromIntegral x)
+         | x < 65536     = putWord8 0xFC >> putWord16le (fromIntegral x)
+         | x < 16777216  = putWord8 0xFD >> putWord24le (fromIntegral x)
+         | otherwise     = putWord8 0xFE >> putWord64le (fromIntegral x)
 {-# INLINE putLenEncInt #-}
 
 putWord24le :: Word32 -> Put
