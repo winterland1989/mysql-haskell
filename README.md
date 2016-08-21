@@ -13,7 +13,7 @@ Is it fast?
 
 In short, `select`(decode) is about 2 times slower than pure c/c++, `insert` (encode) is about 1.5 times slower than pure c/c++, there're many factors affecting though(tls, prepared statment, batch using multiple statement).
 
-![result figure](https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/result.png?raw=true)
+![result figure](https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/result.png?raw=true  {width="100%"})
 
 Above figures showed the time to:
 
