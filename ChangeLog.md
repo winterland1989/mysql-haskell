@@ -1,5 +1,11 @@
 # Revision history for mysql-haskell
 
+## 0.3.0.0  -- 2016-8-19
+
+* Fix tls connection, change TLS implementation to HsOpenSSL, add benchmarks.
+* Fix a bug in 'putLenEncInt' which cause sending large field fail.
+* Various optimizations.
+
 ## 0.2.0.0  -- 2016-8-19
 
 * Fix OK packet decoder.
