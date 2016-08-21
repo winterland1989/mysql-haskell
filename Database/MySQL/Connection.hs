@@ -214,7 +214,7 @@ readPacket is = Stream.read is >>= maybe
 {-# INLINE readPacket #-}
 
 writeCommand :: Command -> OutputStream Packet -> IO ()
-writeCommand a os = let bs = Binary.runPut (Binary.put a) in
+writeCommand a os = let bs = Binary.runPut (putCommand a) in
     go (fromIntegral (L.length bs)) 0 bs os
   where
     go len seqN bs os' = do

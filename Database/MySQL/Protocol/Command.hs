@@ -21,7 +21,7 @@ import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
-import qualified          Data.ByteString.Lazy               as L
+import qualified Data.ByteString.Lazy               as L
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
 
@@ -47,25 +47,6 @@ data Command
     | COM_STMT_RESET     !StmtID                  -- ^ 0x1A stmtId
     | COM_UNSUPPORTED
    deriving (Show, Eq)
-
-getCommand :: Get Command
-getCommand = do
-    cmdId <- getWord8
-    case cmdId of
-        0x01  -> pure COM_QUIT
-        0x02  -> COM_INIT_DB <$> getRemainingByteString
-        0x03  -> COM_QUERY   <$> getRemainingLazyByteString
-        0x0E  -> pure COM_PING
-        0x12  -> COM_BINLOG_DUMP
-                    <$> getWord32le <*> getWord16le <*> getWord32le <*> getRemainingByteString
-        0x15  -> COM_REGISTER_SLAVE
-                    <$> getWord32le <*> getLenEncBytes <*> getLenEncBytes <*> getLenEncBytes
-                    <*> getWord16le <*> getWord32le <*> getWord32le
-        0x16  -> COM_STMT_PREPARE <$> getRemainingLazyByteString
-        0x17  -> fail "Database.MySQL.Protocol.Command: decode COM_STMT_EXECUTE need column number"
-        0x19  -> COM_STMT_CLOSE <$> getWord32le
-        0x1A  -> COM_STMT_RESET <$> getWord32le
-        _     -> pure COM_UNSUPPORTED
 
 putCommand :: Command -> Put
 putCommand COM_QUIT              = putWord8 0x01
@@ -102,10 +83,6 @@ putCommand (COM_STMT_EXECUTE stid params) = do
 putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid
 putCommand (COM_STMT_RESET stid) = putWord8 0x1A >> putWord32le stid
 putCommand _                     = fail "unsupported command"
-
-instance Binary Command where
-    get = getCommand
-    put = putCommand
 
 --------------------------------------------------------------------------------
 --  Prepared statment related

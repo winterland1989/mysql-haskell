@@ -321,3 +321,4 @@ getBinLogRow metas pmap = do
             rest <- nullpos' `seq` ppos' `seq` go fs nullmap nullpos' pmap' ppos'
             return (rest `seq` (r : rest))
         else ppos' `seq` go fs nullmap nullpos pmap' ppos'
+

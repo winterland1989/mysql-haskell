@@ -188,13 +188,15 @@ getTextField f
         (ss, _) <- LexFrac.readDecimal (B.unsafeTail rest')
         return (TimeOfDay hh mm ss)
 
-    feedLenEncBytes typ con parser = do
-        bs <- getLenEncBytes
-        case parser bs of
-            Just v -> return (con v)
-            Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, \
-                              \input: " ++ BC.unpack bs
-    {-# INLINE feedLenEncBytes #-}
+
+feedLenEncBytes :: FieldType -> (t -> b) -> (ByteString -> Maybe t) -> Get b
+feedLenEncBytes typ con parser = do
+    bs <- getLenEncBytes
+    case parser bs of
+        Just v -> return (con v)
+        Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, \
+                          \input: " ++ BC.unpack bs
+{-# INLINE feedLenEncBytes #-}
 
 --------------------------------------------------------------------------------
 -- | Text protocol encoder
@@ -355,13 +357,6 @@ getBinaryField f
         ms <- fromIntegral <$> getWord32le :: Get Int
         pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
 
-    feedLenEncBytes typ con parser = do
-        bs <- getLenEncBytes
-        case parser bs of
-            Just v -> return (con v)
-            Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: \
-                              \parsing " ++ show typ ++ " failed, input: " ++ BC.unpack bs
-    {-# INLINE feedLenEncBytes #-}
 
 -- | convert a bit sequence to a Word64
 --
@@ -478,6 +473,7 @@ getBinaryRow fields flen = do
     {-# INLINE isNull #-}
 {-# INLINE getBinaryRow #-}
 
+--------------------------------------------------------------------------------
 -- | Use 'ByteString' to present a bitmap.
 --
 -- When used for represent bits values, the underlining 'ByteString' follows:
