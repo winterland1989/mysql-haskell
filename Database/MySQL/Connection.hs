@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP #-}
-
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment
@@ -37,12 +35,13 @@ import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           Network.Socket                  (HostName, PortNumber)
 import qualified Network.Socket                  as N
-import qualified Network.TLS                     as TLS
+import qualified OpenSSL.Session                 as Session
 import           System.IO.Streams               (InputStream, OutputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
-import qualified System.IO.Streams.TLS           as TLS
+import qualified System.IO.Streams.OpenSSL       as SSL
+import Data.Maybe
 
 --------------------------------------------------------------------------------
 
@@ -63,9 +62,11 @@ data ConnectInfo = ConnectInfo
     , ciDatabase :: ByteString
     , ciUser     :: ByteString
     , ciPassword :: ByteString
-    , ciTLSInfo  :: Maybe (TLS.ClientParams, String) -- ^ If 'TLS.ClientParams' and subject name are provided,
-                                                     -- TLS connection will be used.
-    } deriving Show
+    , ciTLSInfo  :: Maybe Session.SSLContext -- ^ If 'Session.SSLContext' is provided, and server support
+                                             -- TLS, then TLS connection will be used, currently the only
+                                             -- TLS implementation supported is openssl's binding, If someone
+                                             -- can get tls package work, please send me a patch.
+    }
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
@@ -90,39 +91,40 @@ connect = fmap snd . connectDetail
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
 connectDetail ci@(ConnectInfo host port _ _ _ tls) =
-    case tls of
-        Nothing ->
-            bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
-               (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
-                    is' <- decodeInputStream is
-                    os' <- Binary.encodeOutputStream os
-                    p <- readPacket is'
-                    greet <- decodeFromPacket p
+    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
+       (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
+            is' <- decodeInputStream is
+            os' <- Binary.encodeOutputStream os
+            p <- readPacket is'
+            greet <- decodeFromPacket p
+            if supportTLS (greetingCaps greet) && isJust tls
+            then SSL.withOpenSSL $ do
+                let Just ctx = tls
+                Stream.write (Just (encodeToPacket 1 sslRequest)) os'
+                bracketOnError (Session.connection ctx sock) SSL.close $ \ ssl -> do
+                    Session.connect ssl
+                    (sslIs, sslOs) <- SSL.sslToStreams ssl
+                    sslIs' <- decodeInputStream sslIs
+                    sslOs' <- Binary.encodeOutputStream sslOs
                     let auth = mkAuth ci greet
-                    Stream.write (Just (encodeToPacket 1 auth)) os'
-                    q <- readPacket is'
+                    Stream.write (Just (encodeToPacket 2 auth)) sslOs'
+                    q <- readPacket sslIs'
                     if isOK q
                     then do
                         consumed <- newIORef True
-                        let conn = (MySQLConn is' os' (N.close sock) consumed)
+                        let conn = (MySQLConn sslIs' sslOs' (SSL.close ssl) consumed)
                         return (greet, conn)
-                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
-        Just (cp, sname) ->
-            bracketOnError (TLS.connect cp (Just sname) host port)
-               (\(_, _, ctx) -> TLS.close ctx) $ \ (is, os, ctx) -> do
-                    is' <- decodeInputStream is
-                    os' <- Binary.encodeOutputStream os
-                    p <- readPacket is'
-                    greet <- decodeFromPacket p
-                    let auth = mkAuth ci greet
-                    Stream.write (Just (encodeToPacket 1 auth)) os'
-                    q <- readPacket is'
-                    if isOK q
-                    then do
-                        consumed <- newIORef True
-                        let conn = (MySQLConn is' os' (TLS.close ctx) consumed)
-                        return (greet, conn)
-                    else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
+                    else Stream.write Nothing sslOs' >> decodeFromPacket q >>= throwIO . ERRException
+            else do
+                let auth = mkAuth ci greet
+                Stream.write (Just (encodeToPacket 1 auth)) os'
+                q <- readPacket is'
+                if isOK q
+                then do
+                    consumed <- newIORef True
+                    let conn = (MySQLConn is' os' (N.close sock) consumed)
+                    return (greet, conn)
+                else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
   where
     mkAuth :: ConnectInfo -> Greeting -> Auth
     mkAuth (ConnectInfo _ _ db user pass _) greet =
@@ -238,50 +240,6 @@ guardUnconsumed (MySQLConn _ _ _ consumed) = do
 writeIORef' :: IORef a -> a -> IO ()
 writeIORef' ref x = x `seq` writeIORef ref x
 {-# INLINE writeIORef' #-}
-
---------------------------------------------------------------------------------
--- default Capability Flags
-
-#define CLIENT_LONG_PASSWORD                  0x00000001
-#define CLIENT_FOUND_ROWS                     0x00000002
-#define CLIENT_LONG_FLAG                      0x00000004
-#define CLIENT_CONNECT_WITH_DB                0x00000008
-#define CLIENT_NO_SCHEMA                      0x00000010
-#define CLIENT_COMPRESS                       0x00000020
-#define CLIENT_ODBC                           0x00000040
-#define CLIENT_LOCAL_FILES                    0x00000080
-#define CLIENT_IGNORE_SPACE                   0x00000100
-#define CLIENT_PROTOCOL_41                    0x00000200
-#define CLIENT_INTERACTIVE                    0x00000400
-#define CLIENT_SSL                            0x00000800
-#define CLIENT_IGNORE_SIGPIPE                 0x00001000
-#define CLIENT_TRANSACTIONS                   0x00002000
-#define CLIENT_RESERVED                       0x00004000
-#define CLIENT_SECURE_CONNECTION              0x00008000
-#define CLIENT_MULTI_STATEMENTS               0x00010000
-#define CLIENT_MULTI_RESULTS                  0x00020000
-#define CLIENT_PS_MULTI_RESULTS               0x00040000
-#define CLIENT_PLUGIN_AUTH                    0x00080000
-#define CLIENT_CONNECT_ATTRS                  0x00100000
-#define CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA 0x00200000
-
-clientCap :: Word32
-clientCap =  CLIENT_LONG_PASSWORD
-                .|. CLIENT_LONG_FLAG
-                .|. CLIENT_CONNECT_WITH_DB
-                .|. CLIENT_IGNORE_SPACE
-                .|. CLIENT_PROTOCOL_41
-                .|. CLIENT_TRANSACTIONS
-                .|. CLIENT_MULTI_STATEMENTS
-                .|. CLIENT_SECURE_CONNECTION
-
-clientMaxPacketSize :: Word32
-clientMaxPacketSize = 0x00ffffff :: Word32
-
--- | Always use @utf8_general_ci@ when connecting mysql server,
--- since this will simplify string decoding.
-clientCharset :: Word8
-clientCharset = 0x21 :: Word8
 
 --------------------------------------------------------------------------------
 -- Exceptions

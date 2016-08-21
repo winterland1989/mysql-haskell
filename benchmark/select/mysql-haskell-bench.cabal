@@ -49,7 +49,7 @@ library
                     ,   bytestring-lexing == 0.5.*
                     ,   blaze-textual     == 0.2.*
                     ,   word24            == 1.*
-                    ,   tls               >= 1.3.5 && <1.4
+                    ,   HsOpenSSL
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable
@@ -63,6 +63,15 @@ executable bench
     hs-source-dirs:   .
     main-is:          MySQLHaskell.hs
     ghc-options:      -O2 -threaded -rtsopts
+    extra-lib-dirs: /usr/local/opt/openssl/lib
+
+executable bench-tls
+    build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async, tcp-streams
+    default-language: Haskell2010
+    hs-source-dirs:   .
+    main-is:          MySQLHaskellTLS.hs
+    ghc-options:      -O2 -threaded -rtsopts
+    extra-lib-dirs: /usr/local/opt/openssl/lib
 
 executable benchPrepared
     build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async
@@ -70,6 +79,7 @@ executable benchPrepared
     hs-source-dirs:   .
     main-is:          MySQLHaskellPrepared.hs
     ghc-options:      -O2 -threaded -rtsopts
+    extra-lib-dirs: /usr/local/opt/openssl/lib
 
 executable benchFFI
     build-depends:    base, async, mysql, text, mysql-simple, time
@@ -77,3 +87,4 @@ executable benchFFI
     hs-source-dirs:   .
     main-is:          MySQLFFI.hs
     ghc-options:      -O2 -threaded -rtsopts
+    extra-lib-dirs: /usr/local/opt/openssl/lib

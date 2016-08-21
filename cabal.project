@@ -1,4 +1,0 @@
-packages: mysql-haskell.cabal
-
-package tcp-streams
-  flags: -openssl

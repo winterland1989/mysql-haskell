@@ -50,7 +50,7 @@ library
                     ,   bytestring-lexing == 0.5.*
                     ,   blaze-textual     == 0.2.*
                     ,   word24            == 1.*
-                    ,   tls               >= 1.3.5 && <1.4
+                    ,   HsOpenSSL
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable

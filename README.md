@@ -11,7 +11,7 @@ This project is still in experimental stage and lack of produciton tests, use on
 Is it fast?
 ----------
 
-In short, it's about 2 times slower than pure c/c++, but 5 times faster than old FFI bindings(mysql by Bryan O'Sullivan).
+In short, `select`(decode) is about 2 times slower than pure c/c++, `insert` (encode) is about 1.5 times slower than pure c/c++, there're many factors affecting though(tls, prepared statment, batch using multiple statement).
 
 ![result figure](https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/result.png?raw=true)
 
@@ -78,12 +78,14 @@ New features will be automatically tested by inspecting MySQL server's version, 
 
 Please reference `.travis.yml` if you have problems with setting up test environment.
 
-Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to modify `bench.sh`(change the include path) to get c++ version compiled, and you may need to adjust rts options `-N` to get best results, with `-N10` on my company's 24-core machine, binary protocol performs almost identical to c version!
+Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to:
 
-Guide
------
++ modify `bench.sh`(change the include path) to get c++ version compiled.
++ modify `mysql-haskell-bench.cabal`(change the openssl's lib path) to get haskell version compiled.
++ modify `MySQLHaskellTLS.hs` to change the CA file's path.
++ adjust rts options `-N` to get best results.
 
-Run `cabal haddock` and you will get pretty decent document.
+With `-N10` on my company's 24-core machine, binary protocol performs almost identical to c version!
 
 Reference
 ---------
