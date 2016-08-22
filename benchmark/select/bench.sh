@@ -33,11 +33,11 @@ time ./dist/build/bench/bench 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client end ================"
 
 echo "=============== start benchmark haskell client tls ============="
-time ./dist/build/bench-tls/bench-tls 1          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 2          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 3          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 4          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 10         +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 1          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 2          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 3          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 4          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client end tls ================"
 
 echo "=============== start benchmark haskell client FFI ============="

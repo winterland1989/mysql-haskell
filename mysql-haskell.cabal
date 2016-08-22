@@ -18,8 +18,13 @@ source-repository head
   type:     git
   location: git://github.com/winterland1989/mysql-haskell.git
 
+flag openssl
+  description:  Enable openssl support via @HsOpenSSL@
+  default:      True
+
 library
     exposed-modules:    Database.MySQL.Base
+                    -- ,   Database.MySQL.TLS       
                     ,   Database.MySQL.Protocol.Auth
                     ,   Database.MySQL.Protocol.Command
                     ,   Database.MySQL.Protocol.ColumnDef
@@ -30,15 +35,17 @@ library
                     ,   Database.MySQL.BinLogProtocol.BinLogEvent
                     ,   Database.MySQL.BinLogProtocol.BinLogValue
                     ,   Database.MySQL.BinLogProtocol.BinLogMeta
+    if flag(openssl)
+        exposed-modules: Database.MySQL.OpenSSL
 
 
     other-modules:      Database.MySQL.Connection
                     ,   Database.MySQL.Query
-    build-depends:      base          >= 4.7 && <5
+    build-depends:      base          >= 4.7 && < 5
                     ,   monad-loops   == 0.4.*
                     ,   network       >= 2.3 && < 3.0
                     ,   io-streams    >= 1.2 && < 2.0
-                    ,   tcp-streams   == 0.3.*
+                    ,   tcp-streams   == 0.4.*
                     ,   wire-streams  >= 0.0.2 && < 0.1
                     ,   binary        >= 0.8.4
                     ,   bytestring    >= 0.10.2.0
@@ -50,7 +57,19 @@ library
                     ,   bytestring-lexing == 0.5.*
                     ,   blaze-textual     == 0.2.*
                     ,   word24            == 1.*
-                    ,   HsOpenSSL
+                    -- ,   tls           >=1.3.5 && < 1.4
+
+    if flag(openssl)
+        build-depends:      HsOpenSSL      >=0.10.3 && <0.12
+        if os(mingw32) || os(windows)
+            extra-libraries: eay32, ssl32
+        else
+            if os(osx)
+                extra-libraries: crypto
+                extra-lib-dirs: /usr/local/lib
+                include-dirs: /usr/local/include
+          else
+                extra-libraries: crypto
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable

@@ -17,7 +17,6 @@ import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
-import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
 import qualified Data.ByteArray                  as BA
@@ -27,21 +26,16 @@ import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Unsafe          as B
 import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
-import qualified Data.TLSSetting                 as TLS
 import           Data.Typeable
-import           Data.Word
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           Network.Socket                  (HostName, PortNumber)
 import qualified Network.Socket                  as N
-import qualified OpenSSL.Session                 as Session
 import           System.IO.Streams               (InputStream, OutputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
-import qualified System.IO.Streams.OpenSSL       as SSL
-import Data.Maybe
 
 --------------------------------------------------------------------------------
 
@@ -62,16 +56,12 @@ data ConnectInfo = ConnectInfo
     , ciDatabase :: ByteString
     , ciUser     :: ByteString
     , ciPassword :: ByteString
-    , ciTLSInfo  :: Maybe Session.SSLContext -- ^ If 'Session.SSLContext' is provided, and server support
-                                             -- TLS, then TLS connection will be used, currently the only
-                                             -- TLS implementation supported is openssl's binding, If someone
-                                             -- can get tls package work, please send me a patch.
     }
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
 defaultConnectInfo :: ConnectInfo
-defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" Nothing
+defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" ""
 
 --------------------------------------------------------------------------------
 
@@ -90,48 +80,29 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail ci@(ConnectInfo host port _ _ _ tls) =
+connectDetail ci@(ConnectInfo host port _ _ _) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
             os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
-            if supportTLS (greetingCaps greet) && isJust tls
-            then SSL.withOpenSSL $ do
-                let Just ctx = tls
-                Stream.write (Just (encodeToPacket 1 sslRequest)) os'
-                bracketOnError (Session.connection ctx sock) SSL.close $ \ ssl -> do
-                    Session.connect ssl
-                    (sslIs, sslOs) <- SSL.sslToStreams ssl
-                    sslIs' <- decodeInputStream sslIs
-                    sslOs' <- Binary.encodeOutputStream sslOs
-                    let auth = mkAuth ci greet
-                    Stream.write (Just (encodeToPacket 2 auth)) sslOs'
-                    q <- readPacket sslIs'
-                    if isOK q
-                    then do
-                        consumed <- newIORef True
-                        let conn = (MySQLConn sslIs' sslOs' (SSL.close ssl) consumed)
-                        return (greet, conn)
-                    else Stream.write Nothing sslOs' >> decodeFromPacket q >>= throwIO . ERRException
-            else do
-                let auth = mkAuth ci greet
-                Stream.write (Just (encodeToPacket 1 auth)) os'
-                q <- readPacket is'
-                if isOK q
-                then do
-                    consumed <- newIORef True
-                    let conn = (MySQLConn is' os' (N.close sock) consumed)
-                    return (greet, conn)
-                else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
-  where
-    mkAuth :: ConnectInfo -> Greeting -> Auth
-    mkAuth (ConnectInfo _ _ db user pass _) greet =
-        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
-            scambleBuf = scramble salt pass
-        in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
+            let auth = mkAuth ci greet
+            Stream.write (Just (encodeToPacket 1 auth)) os'
+            q <- readPacket is'
+            if isOK q
+            then do
+                consumed <- newIORef True
+                let conn = MySQLConn is' os' (N.close sock) consumed
+                return (greet, conn)
+            else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
 
+mkAuth :: ConnectInfo -> Greeting -> Auth
+mkAuth (ConnectInfo _ _ db user pass) greet =
+    let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
+        scambleBuf = scramble salt pass
+    in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
+  where
     scramble :: ByteString -> ByteString -> ByteString
     scramble salt pass
         | B.null pass = B.empty
@@ -142,17 +113,17 @@ connectDetail ci@(ConnectInfo host port _ _ _ tls) =
     sha1 :: ByteString -> ByteString
     sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
 
-    -- | A specialized 'decodeInputStream' here for speed
-    decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
-    decodeInputStream is = Stream.makeInputStream $ do
-        bs <- Stream.readExactly 4 is
-        let len =  fromIntegral (bs `B.unsafeIndex` 0)
-               .|. fromIntegral (bs `B.unsafeIndex` 1) `shiftL` 8
-               .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
-            seqN = bs `B.unsafeIndex` 3
-        body <- loopRead [] len is
-        return . Just $ Packet len seqN body
-
+-- | A specialized 'decodeInputStream' here for speed
+decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
+decodeInputStream is = Stream.makeInputStream $ do
+    bs <- Stream.readExactly 4 is
+    let len =  fromIntegral (bs `B.unsafeIndex` 0)
+           .|. fromIntegral (bs `B.unsafeIndex` 1) `shiftL` 8
+           .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
+        seqN = bs `B.unsafeIndex` 3
+    body <- loopRead [] len is
+    return . Just $ Packet len seqN body
+  where
     loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
     loopRead acc k is = do
         bs <- Stream.read is
