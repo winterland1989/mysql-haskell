@@ -9,7 +9,6 @@ import           Database.MySQL.Base  hiding (connect, connectDetail)
 import           Database.MySQL.TLS
 import           System.Environment
 import           System.IO.Streams        (fold)
-import           Data.TLSSetting
 import  qualified Data.ByteString as B
 
 main :: IO ()
@@ -26,7 +25,7 @@ go n = do
         c <- connect defaultConnectInfo { ciUser = "testMySQLHaskell"
                                         , ciDatabase = "testMySQLHaskell"
                                         }
-                     cparams
+                     (cparams, "MySQL")
 
         (fs, is) <- query_ c "SELECT * FROM employees"
         (rowCount :: Int) <- fold (\s _ -> s+1) 0 is

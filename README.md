@@ -82,7 +82,7 @@ Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) my
 
 + modify `bench.sh`(change the include path) to get c++ version compiled.
 + modify `mysql-haskell-bench.cabal`(change the openssl's lib path) to get haskell version compiled.
-+ setup MySQL's TLS support, modify `MySQLHaskellOpenSSL.hs` to change the CA file's path.
++ setup MySQL's TLS support, modify `MySQLHaskellOpenSSL.hs/MySQLHaskellTLS.hs` to change the CA file's path, and certificate's subject name.
 + adjust rts options `-N` to get best results.
 
 With `-N10` on my company's 24-core machine, binary protocol performs almost identical to c version!

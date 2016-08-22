@@ -7,33 +7,39 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : PORTABLE
 
-This is an internal module, the 'MySQLConn' type should not directly acessed to user.
+This module provides secure MySQL connection using 'tls' package, please make sure your certificate is v3 extension enabled.
 
 -}
 
-module Database.MySQL.TLS where
+module Database.MySQL.TLS (
+      connect
+    , connectDetail
+    , module Data.TLSSetting
+    ) where
 
-import           Control.Exception               (bracketOnError,
-                                                  throwIO)
+import           Control.Exception              (bracketOnError, throwIO)
 import           Control.Monad
-import           Data.IORef                      (newIORef)
+import           Data.IORef                     (newIORef)
+import           Data.TLSSetting
+import           Database.MySQL.Connection      hiding (connect, connectDetail)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet
-import qualified Network.Socket                  as N
-import qualified Network.TLS                     as TLS
-import qualified System.IO.Streams               as Stream
-import qualified System.IO.Streams.Binary        as Binary
-import qualified System.IO.Streams.TLS           as TLS
-import qualified System.IO.Streams.TCP           as TCP
-import           Database.MySQL.Connection       hiding (connect, connectDetail)
+import qualified Network.Socket                 as N
+import qualified Network.TLS                    as TLS
+import qualified System.IO.Streams              as Stream
+import qualified System.IO.Streams.Binary       as Binary
+import qualified System.IO.Streams.TCP          as TCP
+import qualified System.IO.Streams.TLS          as TLS
 
 --------------------------------------------------------------------------------
 
-connect :: ConnectInfo -> TLS.ClientParams -> IO MySQLConn
+-- | Provide a 'TLS.ClientParams' and a subject name to establish a TLS connection.
+--
+connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connect c cp = fmap snd (connectDetail c cp)
 
-connectDetail :: ConnectInfo -> TLS.ClientParams -> IO (Greeting, MySQLConn)
-connectDetail ci@(ConnectInfo host port _ _ _) cparams =
+connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
+connectDetail ci@(ConnectInfo host port _ _ _) (cparams, subName) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
@@ -42,8 +48,12 @@ connectDetail ci@(ConnectInfo host port _ _ _) cparams =
             greet <- decodeFromPacket p
             if supportTLS (greetingCaps greet)
             then do
+                let cparams' = cparams {
+                            TLS.clientUseServerNameIndication = False
+                        ,   TLS.clientServerIdentification = (subName, "")
+                        }
                 Stream.write (Just (encodeToPacket 1 sslRequest)) os'
-                bracketOnError (TLS.contextNew sock cparams) TLS.close $ \ ctx -> do
+                bracketOnError (TLS.contextNew sock cparams') TLS.close $ \ ctx -> do
                     TLS.handshake ctx
                     (tlsIs, tlsOs) <- TLS.tlsToStreams ctx
                     tlsIs' <- decodeInputStream tlsIs
