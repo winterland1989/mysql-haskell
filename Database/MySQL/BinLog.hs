@@ -136,10 +136,10 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
 -- The first 'Word32' field is a timestamp present when this event is logged.
 --
 data RowBinLogEvent
-    = RowQueryEvent  !Word32 !BinLogTracker !QueryEvent'
-    | RowDeleteEvent !Word32 !BinLogTracker !TableMapEvent !DeleteRowsEvent
-    | RowWriteEvent  !Word32 !BinLogTracker !TableMapEvent !WriteRowsEvent
-    | RowUpdateEvent !Word32 !BinLogTracker !TableMapEvent !UpdateRowsEvent
+    = RowQueryEvent  {-# UNPACK #-} !Word32 !BinLogTracker !QueryEvent'
+    | RowDeleteEvent {-# UNPACK #-} !Word32 !BinLogTracker !TableMapEvent !DeleteRowsEvent
+    | RowWriteEvent  {-# UNPACK #-} !Word32 !BinLogTracker !TableMapEvent !WriteRowsEvent
+    | RowUpdateEvent {-# UNPACK #-} !Word32 !BinLogTracker !TableMapEvent !UpdateRowsEvent
   deriving (Show, Eq, Generic)
 
 -- | decode row based event from 'BinLogPacket' stream.

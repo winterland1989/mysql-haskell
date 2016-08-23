@@ -35,6 +35,62 @@ While MySQL may not be the most advanced sql database, it's widely used among Ch
 
 `mysql-haskell` is intended to solve these problems, and provide foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
 
+Guide
+-----
+
+The `Database.MySQL.Base` module provides everything you need to start making queries:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+module Main where
+
+import Database.MySQL.Base
+import qualified System.IO.Streams as Streams
+
+main :: IO () 
+main = do
+    conn <- connect defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
+    (defs, is) <- query_ conn "SELECT * FROM some_table"
+    print =<< Streams.toList is
+```
+
+`query/query_` will return a column definition list, and an `InputStream` of rows, you should consume this stream completely before start new queries.
+
+It's recommanded to use prepared statement to improve query speed:
+
+```haskell
+    ...
+    s <- prepareStmt conn "SELECT * FROM some_table where person_age > ?"
+    ...
+    (defs, is) <- queryStmt s [MySQLInt32U 18]
+    ...
+```
+
+If you want to do batch inserting/deleting/updating, you can use `executeMany` to save considerable time.
+
+The `Database.MySQL.BinLog` module provides binlog listenning functions and row-based event decoder, following program will automatically get last binlog position, and print every row event it receives:
+
+```haskell
+{-# LANGUAGE LambdaCase #-}
+module Main where
+
+import qualified Database.MySQL.BinLog as MySQL
+import qualified System.IO.Streams     as Streams
+
+main :: IO () 
+main = do
+    conn <- connect defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
+    MySQL.getLastBinLogTracker conn >>= \ case
+        Just tracker -> do
+            es <- MySQL.decodeRowBinLogEvent =<< MySQL.dumpBinLog conn 1024 tracker False
+            forever $ do
+                Streams.read es >>= \ case
+                    Just v  -> print v
+                    Nothing -> return ()
+        Nothing -> error "can't get latest binlog position"
+```
+
 Build Test Benchmark
 --------------------
 
