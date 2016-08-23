@@ -83,7 +83,7 @@ import qualified System.IO.Streams     as Streams
 main :: IO () 
 main = do
     conn <- MySQL.connect 
-        defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
+        MySQL.defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
     MySQL.getLastBinLogTracker conn >>= \ case
         Just tracker -> do
             es <- MySQL.decodeRowBinLogEvent =<< MySQL.dumpBinLog conn 1024 tracker False
