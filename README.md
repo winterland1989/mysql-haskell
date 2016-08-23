@@ -76,6 +76,7 @@ The `Database.MySQL.BinLog` module provides binlog listenning functions and row-
 {-# LANGUAGE LambdaCase #-}
 module Main where
 
+import           Control.Monad         (forever)
 import qualified Database.MySQL.BinLog as MySQL
 import qualified System.IO.Streams     as Streams
 
