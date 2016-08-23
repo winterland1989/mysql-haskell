@@ -50,7 +50,8 @@ import qualified System.IO.Streams as Streams
 
 main :: IO () 
 main = do
-    conn <- connect defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
+    conn <- connect
+        defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
     (defs, is) <- query_ conn "SELECT * FROM some_table"
     print =<< Streams.toList is
 ```
@@ -80,7 +81,8 @@ import qualified System.IO.Streams     as Streams
 
 main :: IO () 
 main = do
-    conn <- connect defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
+    conn <- MySQL.connect 
+        defaultConnectInfo {ciUser = "username", ciPassword = "password", ciDatabase = "dbname"}
     MySQL.getLastBinLogTracker conn >>= \ case
         Just tracker -> do
             es <- MySQL.decodeRowBinLogEvent =<< MySQL.dumpBinLog conn 1024 tracker False
