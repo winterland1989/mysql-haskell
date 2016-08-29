@@ -11,7 +11,6 @@ Binlog protocol
 
 -}
 
-
 module Database.MySQL.BinLogProtocol.BinLogValue where
 
 import           Control.Applicative
@@ -47,7 +46,8 @@ import           GHC.Generics                             (Generic)
 -- see 'MySQLVaule' 's note.
 --
 -- There's also no infomation about charset, so we use 'ByteString' to present both text
--- and blob types.
+-- and blob types, if you want to get text representation back, you have to query column charset
+-- infomation, and use icu or iconv to decode. IT MAY NOT BE UTF-8.
 --
 -- The @SET@ and @ENUM@ values are presented by their index's value and bitmap respectively,
 -- if you need get the string value back, you have to perform a 'DESC tablename' to get the
@@ -93,7 +93,7 @@ getBinLogField (BINLOG_TYPE_DOUBLE _         ) = BinLogDouble <$> getDoublele
 getBinLogField (BINLOG_TYPE_BIT    _    bytes) = BinLogBit <$> getBits' bytes
 getBinLogField BINLOG_TYPE_TIMESTAMP           = BinLogTimeStamp <$> getWord32le
 
--- ^ a integer in @YYYYMMDD@ format, for example:
+-- A integer in @YYYYMMDD@ format, for example:
 -- 99991231 stand for @9999-12-31@
 getBinLogField BINLOG_TYPE_DATE = do
     i <- getWord24le
@@ -108,7 +108,7 @@ getBinLogField (BINLOG_TYPE_TIMESTAMP2  fsp) = do
     ms <- fromIntegral <$> getMicroSecond fsp
     pure (BinLogTimeStamp2 s ms)
 
--- a integer in @YYYYMMDDhhmmss@, for example:
+-- A integer in @YYYYMMDDhhmmss@, for example:
 -- 99991231235959 stand for @9999-12-31 23:59:59@
 getBinLogField BINLOG_TYPE_DATETIME = do
     i <- getWord64le
@@ -149,7 +149,7 @@ getBinLogField (BINLOG_TYPE_DATETIME2 fsp) = do
     ms <- fromIntegral <$> getMicroSecond fsp
     pure (BinLogDateTime2 yyyy' mm' dd h m s ms)
 
--- ^ a integer in @hhmmss@ format(can be negative), for example:
+-- A integer in @hhmmss@ format(can be negative), for example:
 -- 8385959 stand for @838:59:59@
 getBinLogField BINLOG_TYPE_TIME = do
     i <- getWord24le

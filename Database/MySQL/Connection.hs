@@ -48,7 +48,7 @@ data MySQLConn = MySQLConn {
 
 -- | Everything you need to establish a MySQL connection.
 --
--- You may want some helpers in "System.IO.Streams.TLS" to setup TLS connection.
+-- To setup a TLS connection, use module "Database.MySQL.TLS" or "Database.MySQL.OpenSSL".
 --
 data ConnectInfo = ConnectInfo
     { ciHost     :: HostName
@@ -104,10 +104,10 @@ mkAuth (ConnectInfo _ _ db user pass) greet =
     in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
   where
     scramble :: ByteString -> ByteString -> ByteString
-    scramble salt pass
-        | B.null pass = B.empty
+    scramble salt pass'
+        | B.null pass' = B.empty
         | otherwise   = B.pack (B.zipWith xor sha1pass withSalt)
-        where sha1pass = sha1 pass
+        where sha1pass = sha1 pass'
               withSalt = sha1 (salt `B.append` sha1 sha1pass)
 
     sha1 :: ByteString -> ByteString
@@ -125,18 +125,18 @@ decodeInputStream is = Stream.makeInputStream $ do
     return . Just $ Packet len seqN body
   where
     loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
-    loopRead acc k is = do
-        bs <- Stream.read is
+    loopRead acc k is' = do
+        bs <- Stream.read is'
         case bs of Nothing -> throwIO NetworkException
                    Just bs' -> do let l = fromIntegral (B.length bs')
                                   if l >= k
                                   then do
                                       let (a, rest) = B.splitAt (fromIntegral k) bs'
-                                      unless (B.null rest) (Stream.unRead rest is)
+                                      unless (B.null rest) (Stream.unRead rest is')
                                       return $! L.fromChunks (reverse (a:acc))
                                   else do
                                       let k' = k - l
-                                      k' `seq` loopRead (bs':acc) k' is
+                                      k' `seq` loopRead (bs':acc) k' is'
 
 -- | Close a MySQL connection.
 --

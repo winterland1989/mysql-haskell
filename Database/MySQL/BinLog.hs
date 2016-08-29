@@ -124,13 +124,13 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
 
--- | Row based biblog event type.
+-- | Row based binlog event type.
 --
 -- It's recommended to enable row query event before 'dumpBinLog', so that you can get
 -- 'RowQueryEvent' in row based binlog(it's important for detect a table change for example),
 -- more information please refer <http://dev.mysql.com/doc/refman/5.7/en/replication-options-binary-log.html#sysvar_binlog_rows_query_log_events sysvar_binlog_rows_query_log_events>
 --
--- a 'BinLogTracker' is included so that you can roll up your own HA solutions,
+-- A 'BinLogTracker' is included so that you can roll up your own HA solutions,
 -- for example, writing the tracker to zookeeper when you done with an event.
 --
 -- The first 'Word32' field is a timestamp present when this event is logged.
