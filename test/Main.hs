@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
 import qualified BinaryRow
@@ -5,7 +7,7 @@ import qualified BinaryRowNew
 import qualified BinLog
 import qualified BinLogNew
 import           Control.Concurrent    (forkIO, threadDelay)
-import           Control.Exception     (bracket)
+import           Control.Exception     (bracket, catch)
 import           Control.Monad
 import qualified Data.ByteString       as B
 import           Database.MySQL.Base
@@ -118,6 +120,24 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
 
     close c
 
+    (greet, c) <- connectDetail defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
+    execute_ c "SET PASSWORD = PASSWORD('123456abcdefg???')"
+    close c
+
+    let loginFailMsg = "ERRException (ERR {errCode = 1045, errState = \"28000\", \
+            \errMsg = \"Access denied for user 'testMySQLHaskell'@'localhost' (using password: YES)\"})"
+
+    (greet, c) <- connectDetail
+        defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell", ciPassword = "123456abcdefg???"}
+    execute_ c "SET PASSWORD = PASSWORD('')"
+    close c
+
+    catch
+        (void $ connectDetail
+                    defaultConnectInfo
+                        {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell", ciPassword = "wrongPassWord"})
+        (\ (e :: ERRException) -> assertEqual "wrong password should fail to login" (show e) loginFailMsg)
+
   where
     resetTestTable c = do
             execute_ c  "DELETE FROM test WHERE __id=0"
@@ -162,3 +182,5 @@ main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
                         \NULL,\
                         \NULL\
                         \)"
+
+

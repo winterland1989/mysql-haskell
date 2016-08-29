@@ -52,6 +52,13 @@ module Database.MySQL.Base
     , renderParams
     , command
     , Stream.skipToEof
+      -- * Exceptions
+    , NetworkException(..)
+    , UnconsumedResultSet(..)
+    , ERRException(..)
+    , UnexpectedPacket(..)
+    , DecodePacketException(..)
+    , WrongParamsCount(..)
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command

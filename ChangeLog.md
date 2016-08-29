@@ -1,5 +1,11 @@
 # Revision history for mysql-haskell
 
+## 0.5.0.0 -- 2016-8-22
+
+* Export exception types.
+* Fix a regression cause password authentication failed, add tests.
+* Fix a reading order bug cause 'prepareStmt/prepareStmtDetail' failed.
+
 ## 0.4.0.0 -- 2016-8-22
 
 * Enable TLS support via `tls` package, add benchmarks.

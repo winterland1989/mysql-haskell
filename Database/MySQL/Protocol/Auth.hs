@@ -100,7 +100,10 @@ getGreeting = do
     skip 10 -- 10 * 0x00
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure B.empty
-        else let len = max 13 (authPluginLen - 8) in getByteString (fromIntegral len)
+        else getByteStringNul   -- This is different with the MySQL document here
+                                -- The doc said we should expect a MAX(13, length of auth-plugin-data - 8)
+                                -- length bytes, but doing so stop us from login
+
     authPlugin <- if (cap .&. CLIENT_PLUGIN_AUTH) == 0
         then pure B.empty
         else getByteStringNul
