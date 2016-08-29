@@ -149,15 +149,15 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
     else do
         StmtPrepareOK stid colCnt paramCnt _ <- getFromPacket getStmtPrepareOK p
         _ <- replicateM_ paramCnt (readPacket is)
-        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
-        _ <- replicateM_ colCnt (readPacket is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
+        _ <- replicateM_ colCnt (readPacket is)
+        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
         return stid
 
 -- | Ask MySQL to prepare a query statement.
 --
 -- All details from @COM_STMT_PREPARE@ Response are returned: the 'StmtPrepareOK' packet,
--- params's 'ColumnDef', table's 'ColumnDef'.
+-- params's 'ColumnDef', result's 'ColumnDef'.
 --
 prepareStmtDetail :: MySQLConn -> Query -> IO (StmtPrepareOK, [ColumnDef], [ColumnDef])
 prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
@@ -169,9 +169,9 @@ prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
     else do
         sOK@(StmtPrepareOK _ colCnt paramCnt _) <- getFromPacket getStmtPrepareOK p
         pdefs <- replicateM paramCnt ((decodeFromPacket <=< readPacket) is)
-        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
-        cdefs <- replicateM colCnt ((decodeFromPacket <=< readPacket) is)
         _ <- unless (paramCnt == 0) (void (readPacket is))  -- EOF
+        cdefs <- replicateM colCnt ((decodeFromPacket <=< readPacket) is)
+        _ <- unless (colCnt == 0) (void (readPacket is))  -- EOF
         return (sOK, pdefs, cdefs)
 
 -- | Ask MySQL to closed a query statement.
