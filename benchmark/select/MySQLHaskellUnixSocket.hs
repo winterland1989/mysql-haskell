@@ -6,6 +6,7 @@ module Main where
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Database.MySQL.Base
+import qualified Database.MySQL.UnixSocket as MySQLUS
 import           System.Environment
 import           System.IO.Streams        (fold)
 import qualified Data.ByteString as B
@@ -18,9 +19,12 @@ main = do
 
 go :: Int -> IO ()
 go n = void . flip mapConcurrently [1..n] $ \ _ -> do
-    c <- connect defaultConnectInfo { ciUser = "testMySQLHaskell"
-                                    , ciDatabase = "testMySQLHaskell"
-                                    }
+    c <- MySQLUS.connect MySQLUS.ConnectInfo
+        { MySQLUS.ciUnixSocket = "/tmp/mysql.sock"
+        , MySQLUS.ciUser = "testMySQLHaskell"
+        , MySQLUS.ciPassword = ""
+        , MySQLUS.ciDatabase = "testMySQLHaskell"
+        }
 
     (fs, is) <- query_ c "SELECT * FROM employees"
     (rowCount :: Int) <- fold (\s _ -> s+1) 0 is

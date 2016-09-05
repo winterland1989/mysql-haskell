@@ -41,7 +41,7 @@ connect :: ConnectInfo -> (Session.SSLContext, String) -> IO MySQLConn
 connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (Session.SSLContext, String) -> IO (Greeting, MySQLConn)
-connectDetail ci@(ConnectInfo host port _ _ _) (ctx, subname) =
+connectDetail (ConnectInfo host port db user pass) (ctx, subname) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
@@ -62,7 +62,7 @@ connectDetail ci@(ConnectInfo host port _ _ _) (ctx, subname) =
                     (sslIs, sslOs) <- SSL.sslToStreams ssl
                     sslIs' <- decodeInputStream sslIs
                     sslOs' <- Binary.encodeOutputStream sslOs
-                    let auth = mkAuth ci greet
+                    let auth = mkAuth db user pass greet
                     Stream.write (Just (encodeToPacket 2 auth)) sslOs'
                     q <- readPacket sslIs'
                     if isOK q

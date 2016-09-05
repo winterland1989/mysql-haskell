@@ -39,7 +39,7 @@ connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
-connectDetail ci@(ConnectInfo host port _ _ _) (cparams, subName) =
+connectDetail (ConnectInfo host port db user pass) (cparams, subName) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
@@ -58,7 +58,7 @@ connectDetail ci@(ConnectInfo host port _ _ _) (cparams, subName) =
                     (tlsIs, tlsOs) <- TLS.tlsToStreams ctx
                     tlsIs' <- decodeInputStream tlsIs
                     tlsOs' <- Binary.encodeOutputStream tlsOs
-                    let auth = mkAuth ci greet
+                    let auth = mkAuth db user pass greet
                     Stream.write (Just (encodeToPacket 2 auth)) tlsOs'
                     q <- readPacket tlsIs'
                     if isOK q

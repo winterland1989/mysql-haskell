@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define THREAD_NUM  4
-#define DBHOST      "localhost"
+#define DBHOST      "127.0.0.1"
 #define DBUSER      "testMySQLHaskell"
 #define DBPASS      ""
 #define DBPORT      3306

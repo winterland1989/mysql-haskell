@@ -80,14 +80,14 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail ci@(ConnectInfo host port _ _ _) =
+connectDetail (ConnectInfo host port db user pass) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
             os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
-            let auth = mkAuth ci greet
+            let auth = mkAuth db user pass greet
             Stream.write (Just (encodeToPacket 1 auth)) os'
             q <- readPacket is'
             if isOK q
@@ -97,8 +97,8 @@ connectDetail ci@(ConnectInfo host port _ _ _) =
                 return (greet, conn)
             else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
 
-mkAuth :: ConnectInfo -> Greeting -> Auth
-mkAuth (ConnectInfo _ _ db user pass) greet =
+mkAuth :: ByteString -> ByteString -> ByteString -> Greeting -> Auth
+mkAuth db user pass greet =
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
         scambleBuf = scramble salt pass
     in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db

@@ -32,6 +32,14 @@ time ./dist/build/bench/bench 4          +RTS -N4 -A128M -RTS
 time ./dist/build/bench/bench 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client end ================"
 
+echo "=============== start benchmark haskell client unix-socket ============="
+time ./dist/build/bench-unix-socket/bench-unix-socket 1          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-unix-socket/bench-unix-socket 2          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-unix-socket/bench-unix-socket 3          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-unix-socket/bench-unix-socket 4          +RTS -N4 -A128M -RTS
+time ./dist/build/bench-unix-socket/bench-unix-socket 10         +RTS -N4 -A128M -RTS
+echo "=============== benchmark haskell client unix-socket end ================"
+
 echo "=============== start benchmark haskell client openssl ============="
 time ./dist/build/bench-openssl/bench-openssl 1          +RTS -N4 -A128M -RTS
 time ./dist/build/bench-openssl/bench-openssl 2          +RTS -N4 -A128M -RTS

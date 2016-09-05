@@ -47,6 +47,7 @@ import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
 import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                       (Generic)
+import qualified Data.Vector                        as V
 
 --------------------------------------------------------------------------------
 -- | Data type mapping between MySQL values and haskell values.
@@ -245,6 +246,14 @@ getTextRow fs = forM fs $ \ f -> do
     then skip 1 >> return MySQLNull
     else getTextField f
 {-# INLINE getTextRow #-}
+
+getTextRowVector :: V.Vector ColumnDef -> Get (V.Vector MySQLValue)
+getTextRowVector fs = V.forM fs $ \ f -> do
+    p <- lookAhead getWord8
+    if p == 0xFB
+    then skip 1 >> return MySQLNull
+    else getTextField f
+{-# INLINE getTextRowVector #-}
 
 --------------------------------------------------------------------------------
 -- | Binary protocol decoder
