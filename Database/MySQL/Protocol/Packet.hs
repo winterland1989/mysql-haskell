@@ -17,15 +17,17 @@ module Database.MySQL.Protocol.Packet where
 
 import           Control.Applicative
 import           Control.Exception     (Exception (..), throwIO)
-import           Data.Binary
-import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Binary.Put
+import           Data.Binary           (Binary(..), encode)
 import           Data.Bits
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
+import qualified Data.ByteString.Lazy.Internal  as L
 import           Data.Int.Int24
 import           Data.Int
+import           Data.Word
 import           Data.Typeable
 import           Data.Word.Word24
 
@@ -76,22 +78,23 @@ isEOF p = L.index (pBody p) 0 == 0xFE
 -- if we successful parse a packet, then we don't care if there're bytes left.
 --
 decodeFromPacket :: Binary a => Packet -> IO a
-decodeFromPacket (Packet _ _ body) = case pushEndOfInput $ pushChunks (runGetIncremental get) body of
-    Done _  _ r             -> return r
-    Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-    Partial _               -> throwIO DecodePacketPartial
+decodeFromPacket = getFromPacket get
 {-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
-getFromPacket g (Packet _ _ body) = case pushEndOfInput $ pushChunks (runGetIncremental g) body of
-    Done _  _ r             -> return r
-    Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-    Partial _               -> throwIO DecodePacketPartial
+getFromPacket g (Packet _ _ body) =
+    case body of
+        (L.Chunk bs lbs) -> case pushEndOfInput (pushChunks (parse g bs) lbs) of
+            Done _  _ r             -> return r
+            Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+            _ -> error "getFromPacket: impossible error!"
+        L.Empty -> case pushEndOfInput (parse g B.empty) of
+            Done _  _ r             -> return r
+            Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
+            _ -> error "getFromPacket: impossible error!"
 {-# INLINE getFromPacket #-}
 
-data DecodePacketException
-    = DecodePacketFailed ByteString ByteOffset String
-    | DecodePacketPartial
+data DecodePacketException = DecodePacketFailed ByteString ByteOffset String
   deriving (Typeable, Show)
 instance Exception DecodePacketException
 
@@ -128,6 +131,7 @@ getOK = OK <$ skip 1
            <*> getLenEncInt
            <*> getWord16le
            <*> getWord16le
+{-# INLINE getOK #-}
 
 putOK :: OK -> Put
 putOK (OK row lid stat wcnt) = do
@@ -136,6 +140,7 @@ putOK (OK row lid stat wcnt) = do
     putLenEncInt lid
     putWord16le stat
     putWord16le wcnt
+{-# INLINE putOK #-}
 
 instance Binary OK where
     get = getOK
@@ -155,6 +160,7 @@ getERR = ERR <$  skip 1
              <*  skip 1
              <*> getByteString 5
              <*> getRemainingByteString
+{-# INLINE getERR #-}
 
 putERR :: ERR -> Put
 putERR (ERR code stat msg) = do
@@ -163,6 +169,7 @@ putERR (ERR code stat msg) = do
     putWord8 35 -- '#'
     putByteString stat
     putByteString msg
+{-# INLINE putERR #-}
 
 instance Binary ERR where
     get = getERR
@@ -179,12 +186,14 @@ getEOF :: Get EOF
 getEOF = EOF <$  skip 1
              <*> getWord16le
              <*> getWord16le
+{-# INLINE getEOF #-}
 
 putEOF :: EOF -> Put
 putEOF (EOF wcnt stat) = do
     putWord8 0xFE
     putWord16le wcnt
     putWord16le stat
+{-# INLINE putEOF #-}
 
 instance Binary EOF where
     get = getEOF

@@ -20,7 +20,6 @@ library
     exposed-modules:    Database.MySQL.Base
                     ,   Database.MySQL.TLS
                     ,   Database.MySQL.OpenSSL
-                    ,   Database.MySQL.UnixSocket
                     ,   Database.MySQL.Protocol.Auth
                     ,   Database.MySQL.Protocol.Command
                     ,   Database.MySQL.Protocol.ColumnDef

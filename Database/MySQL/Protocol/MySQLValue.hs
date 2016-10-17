@@ -18,7 +18,7 @@ module Database.MySQL.Protocol.MySQLValue where
 import qualified Blaze.Text                         as Textual
 import           Control.Applicative
 import           Control.Monad
-import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Binary.Put
 import           Data.Bits
 import           Data.ByteString                    (ByteString)
@@ -241,7 +241,7 @@ putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
 -- | Text row decoder
 getTextRow :: [ColumnDef] -> Get [MySQLValue]
 getTextRow fs = forM fs $ \ f -> do
-    p <- lookAhead getWord8
+    p <- peek
     if p == 0xFB
     then skip 1 >> return MySQLNull
     else getTextField f
@@ -249,7 +249,7 @@ getTextRow fs = forM fs $ \ f -> do
 
 getTextRowVector :: V.Vector ColumnDef -> Get (V.Vector MySQLValue)
 getTextRowVector fs = V.forM fs $ \ f -> do
-    p <- lookAhead getWord8
+    p <- peek
     if p == 0xFB
     then skip 1 >> return MySQLNull
     else getTextField f
@@ -469,18 +469,28 @@ getBinaryRow fields flen = do
     go :: [ColumnDef] -> ByteString -> Int -> Get [MySQLValue]
     go []     _       _   = pure []
     go (f:fs) nullmap pos = do
-        r <- if isNull nullmap pos
+        r <- if isNull_ nullmap pos
                 then return MySQLNull
                 else getBinaryField f
         let pos' = pos + 1
         rest <- pos' `seq` go fs nullmap pos'
         return (r `seq` (r : rest))
-
-    isNull nullmap pos =  -- This 'isNull' is special for offset = 2
-        let (i, j) = (pos + 2) `quotRem` 8
-        in (nullmap `B.unsafeIndex` i) `testBit` j
-    {-# INLINE isNull #-}
 {-# INLINE getBinaryRow #-}
+
+getBinaryRowVector :: V.Vector ColumnDef -> Int -> Get (V.Vector MySQLValue)
+getBinaryRowVector fields flen = do
+    skip 1           -- 0x00
+    let maplen = (flen + 7 + 2) `shiftR` 3
+    nullmap <- getByteString maplen
+    (`V.imapM` fields) $ \ pos f ->
+        if isNull_ nullmap pos then return MySQLNull else getBinaryField f
+{-# INLINE getBinaryRowVector #-}
+
+-- This 'isNull_' is special for offset = 2
+isNull_ nullmap pos =
+    let (i, j) = (pos + 2) `quotRem` 8
+    in (nullmap `B.unsafeIndex` i) `testBit` j
+{-# INLINE isNull_ #-}
 
 --------------------------------------------------------------------------------
 -- | Use 'ByteString' to present a bitmap.

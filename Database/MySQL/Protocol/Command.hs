@@ -104,3 +104,4 @@ getStmtPrepareOK = do
     skip 1 -- reserved
     wc <- fromIntegral <$> getWord16le
     return (StmtPrepareOK stmtid cc pc wc)
+{-# INLINE getStmtPrepareOK #-}

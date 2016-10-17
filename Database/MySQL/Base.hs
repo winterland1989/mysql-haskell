@@ -40,11 +40,13 @@ module Database.MySQL.Base
     , query_
     , queryVector_
     , query
+    , queryVector
       -- * prepared query statement
     , prepareStmt
     , prepareStmtDetail
     , executeStmt
     , queryStmt
+    , queryStmtVector
     , closeStmt
     , resetStmt
       -- * helpers
@@ -125,6 +127,11 @@ execute_ conn (Query qry) = command conn (COM_QUERY qry)
 query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 query conn qry params = query_ conn (renderParams qry params)
 
+-- | 'V.Vector' version of 'query'.
+--
+queryVector :: MySQLConn -> Query -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
+queryVector conn qry params = queryVector_ conn (renderParams qry params)
+
 -- | Execute a MySQL query which return a result-set.
 --
 query_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream [MySQLValue])
@@ -146,7 +153,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
                 | otherwise -> Just <$> getFromPacket (getTextRow fields) q
         return (fields, rows)
 
--- | Execute a MySQL query which return a result-set.
+-- | 'V.Vector' version of 'query_'.
 --
 queryVector_ :: MySQLConn -> Query -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
@@ -243,7 +250,29 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
         writeIORef consumed False
         rows <- Stream.makeInputStream $ do
             q <- readPacket is
-            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q -- fast path for decode rows
+            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q
+                | isEOF q  -> writeIORef consumed True >> return Nothing
+                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
+                | otherwise -> throwIO (UnexpectedPacket q)
+        return (fields, rows)
+
+-- | 'V.Vector' version of 'queryStmt'
+--
+queryStmtVector :: MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
+queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_EXECUTE stid params) os
+    p <- readPacket is
+    if isERR p
+    then decodeFromPacket p >>= throwIO . ERRException
+    else do
+        len <- getFromPacket getLenEncInt p
+        fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+        _ <- readPacket is -- eof packet, we don't verify this though
+        writeIORef consumed False
+        rows <- Stream.makeInputStream $ do
+            q <- readPacket is
+            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRowVector fields len) q
                 | isEOF q  -> writeIORef consumed True >> return Nothing
                 | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
                 | otherwise -> throwIO (UnexpectedPacket q)

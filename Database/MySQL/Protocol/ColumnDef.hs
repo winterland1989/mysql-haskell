@@ -57,6 +57,7 @@ getField = ColumnDef
         <*> getWord16le             -- flags
         <*> getWord8                -- decimals
         <* skip 2                   -- const 0x00 0x00
+{-# INLINE getField #-}
 
 putField :: ColumnDef -> Put
 putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
@@ -72,6 +73,7 @@ putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
     putWord16le  flags
     putWord8 dec
     putWord16le 0X0000
+{-# INLINE putField #-}
 
 instance Binary ColumnDef where
     get = getField
@@ -123,9 +125,11 @@ mySQLTypeGeometry       = FieldType 0xff
 
 getFieldType :: Get FieldType
 getFieldType = FieldType <$> getWord8
+{-# INLINE getFieldType #-}
 
 putFieldType :: FieldType -> Put
 putFieldType (FieldType t) = putWord8 t
+{-# INLINE putFieldType #-}
 
 instance Binary FieldType where
     get = getFieldType
