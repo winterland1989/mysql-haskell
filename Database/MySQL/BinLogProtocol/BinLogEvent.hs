@@ -110,14 +110,14 @@ getFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) =
     case pushEndOfInput $ pushChunks (runGetIncremental g) body  of
         Done _  _ r             -> return r
         Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-        Partial _               -> throwIO DecodePacketPartial
+        _                       -> error "getFromBinLogPacket: impossible!"
 
 getFromBinLogPacket' :: (BinLogEventType -> Get a) -> BinLogPacket -> IO a
 getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
     case pushEndOfInput $ pushChunks (runGetIncremental (g typ)) body  of
         Done _  _ r             -> return r
         Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-        Partial _               -> throwIO DecodePacketPartial
+        _                       -> error "getFromBinLogPacket': impossible!"
 
 --------------------------------------------------------------------------------
 
