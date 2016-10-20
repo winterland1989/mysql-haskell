@@ -9,6 +9,7 @@ import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
+import qualified Data.Vector as V
 
 tests :: MySQLConn -> Assertion
 tests c = do
@@ -153,6 +154,12 @@ tests c = do
         ]
 
     Stream.skipToEof is
+
+    (_, is') <- queryVector_ c "SELECT * FROM test"
+    Just v' <- Stream.read is'
+    Stream.skipToEof is'
+
+    assertEqual "decode text protocol(queryVector_)" v (V.toList v')
 
     execute c "UPDATE test SET \
             \__bit        = ?     ,\

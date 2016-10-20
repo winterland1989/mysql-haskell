@@ -13,6 +13,7 @@ import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
 import qualified Data.Text as T
 import qualified Data.ByteString as B
+import qualified Data.Vector as V
 
 tests :: MySQLConn -> Assertion
 tests c = do
@@ -155,8 +156,14 @@ tests c = do
         , MySQLText "韩冬真赞"
         , MySQLText "foo"
         , MySQLText "foo,bar"]
-
     Stream.skipToEof is
+
+    (_, is') <- queryStmtVector c selStmt []
+    Just v' <- Stream.read is'
+    Stream.skipToEof is'
+
+    assertEqual "decode binary protocol(queryStmtVector)" v (V.toList v')
+
 --------------------------------------------------------------------------------
     updStmt <- prepareStmt c
             "UPDATE test SET \
