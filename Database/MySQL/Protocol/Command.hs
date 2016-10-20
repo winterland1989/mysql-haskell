@@ -19,6 +19,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString.Lazy               as L
@@ -97,11 +98,11 @@ data StmtPrepareOK = StmtPrepareOK
 
 getStmtPrepareOK :: Get StmtPrepareOK
 getStmtPrepareOK = do
-    skip 1 -- OK byte
+    skipN 1 -- OK byte
     stmtid <- getWord32le
     cc <- fromIntegral <$> getWord16le
     pc <- fromIntegral <$> getWord16le
-    skip 1 -- reserved
+    skipN 1 -- reserved
     wc <- fromIntegral <$> getWord16le
     return (StmtPrepareOK stmtid cc pc wc)
 {-# INLINE getStmtPrepareOK #-}

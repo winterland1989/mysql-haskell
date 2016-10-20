@@ -20,6 +20,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Binary.Put
 import qualified Data.ByteString                as B
 import           Data.ByteString.Char8          as BC
@@ -90,14 +91,14 @@ getGreeting = do
     sv <- getByteStringNul
     cid <- getWord32le
     salt1 <- getByteString 8
-    skip 1  -- 0x00
+    skipN 1  -- 0x00
     capL <- getWord16le
     charset <- getWord8
     status <- getWord16le
     capH <- getWord16le
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
     authPluginLen <- getWord8
-    skip 10 -- 10 * 0x00
+    skipN 10 -- 10 * 0x00
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure B.empty
         else getByteStringNul   -- This is different with the MySQL document here
@@ -128,7 +129,7 @@ getAuth = do
     a <- getWord32le
     m <- getWord32le
     c <- getWord8
-    skip 23
+    skipN 23
     n <- getByteStringNul
     return $ Auth a m c n B.empty B.empty
 
@@ -155,7 +156,7 @@ data SSLRequest = SSLRequest
     } deriving (Show, Eq)
 
 getSSLRequest :: Get SSLRequest
-getSSLRequest = SSLRequest <$> getWord32le <*> getWord32le <*> getWord8 <* skip 23
+getSSLRequest = SSLRequest <$> getWord32le <*> getWord32le <*> getWord8 <* skipN 23
 
 putSSLRequest :: SSLRequest -> Put
 putSSLRequest (SSLRequest cap m c) = do

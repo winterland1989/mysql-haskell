@@ -126,7 +126,7 @@ data OK = OK
     } deriving (Show, Eq)
 
 getOK :: Get OK
-getOK = OK <$ skip 1
+getOK = OK <$ skipN 1
            <*> getLenEncInt
            <*> getLenEncInt
            <*> getWord16le
@@ -155,9 +155,9 @@ data ERR = ERR
     } deriving (Show, Eq)
 
 getERR :: Get ERR
-getERR = ERR <$  skip 1
+getERR = ERR <$  skipN 1
              <*> getWord16le
-             <*  skip 1
+             <*  skipN 1
              <*> getByteString 5
              <*> getRemainingByteString
 {-# INLINE getERR #-}
@@ -183,7 +183,7 @@ data EOF = EOF
     } deriving (Show, Eq)
 
 getEOF :: Get EOF
-getEOF = EOF <$  skip 1
+getEOF = EOF <$  skipN 1
              <*> getWord16le
              <*> getWord16le
 {-# INLINE getEOF #-}

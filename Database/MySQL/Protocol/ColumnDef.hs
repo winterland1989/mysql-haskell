@@ -19,6 +19,7 @@ module Database.MySQL.Protocol.ColumnDef where
 import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Binary.Put
 import           Data.Bits                      ((.&.))
 import           Data.ByteString                (ByteString)
@@ -44,19 +45,19 @@ data ColumnDef = ColumnDef
 
 getField :: Get ColumnDef
 getField = ColumnDef
-        <$> (skip 4                 -- const "def"
+        <$> (skipN 4                 -- const "def"
          *> getLenEncBytes)         -- db
         <*> getLenEncBytes          -- table
         <*> getLenEncBytes          -- origTable
         <*> getLenEncBytes          -- name
         <*> getLenEncBytes          -- origName
-        <*  skip 1                  -- const 0x0c
+        <*  skipN 1                  -- const 0x0c
         <*> getWord16le             -- charset
         <*> getWord32le             -- length
         <*> getFieldType            -- type
         <*> getWord16le             -- flags
         <*> getWord8                -- decimals
-        <* skip 2                   -- const 0x00 0x00
+        <* skipN 2                   -- const 0x00 0x00
 {-# INLINE getField #-}
 
 putField :: ColumnDef -> Put

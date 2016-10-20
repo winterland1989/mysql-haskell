@@ -243,7 +243,7 @@ getTextRow :: [ColumnDef] -> Get [MySQLValue]
 getTextRow fs = forM fs $ \ f -> do
     p <- peek
     if p == 0xFB
-    then skip 1 >> return MySQLNull
+    then skipN 1 >> return MySQLNull
     else getTextField f
 {-# INLINE getTextRow #-}
 
@@ -251,7 +251,7 @@ getTextRowVector :: V.Vector ColumnDef -> Get (V.Vector MySQLValue)
 getTextRowVector fs = V.forM fs $ \ f -> do
     p <- peek
     if p == 0xFB
-    then skip 1 >> return MySQLNull
+    then skipN 1 >> return MySQLNull
     else getTextField f
 {-# INLINE getTextRowVector #-}
 
@@ -373,8 +373,7 @@ getBinaryField f
 --
 getBits :: Int -> Get Word64
 getBits bytes =
-    if  | bytes == 0
-            || bytes == 1 -> fromIntegral <$> getWord8
+    if  | bytes == 0 || bytes == 1 -> fromIntegral <$> getWord8
         | bytes == 2 -> fromIntegral <$> getWord16be
         | bytes == 3 -> fromIntegral <$> getWord24be
         | bytes == 4 -> fromIntegral <$> getWord32be
@@ -461,7 +460,7 @@ putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
 --
 getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
 getBinaryRow fields flen = do
-    skip 1           -- 0x00
+    skipN 1           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
     go fields nullmap 0
@@ -479,7 +478,7 @@ getBinaryRow fields flen = do
 
 getBinaryRowVector :: V.Vector ColumnDef -> Int -> Get (V.Vector MySQLValue)
 getBinaryRowVector fields flen = do
-    skip 1           -- 0x00
+    skipN 1           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
     nullmap <- getByteString maplen
     (`V.imapM` fields) $ \ pos f ->
