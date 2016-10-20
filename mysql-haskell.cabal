@@ -62,7 +62,7 @@ library
                     ,   vector        >= 0.8
 
     if flag(openssl)
-        build-depends:      HsOpenSSL      >=0.11.2 && <0.12
+        build-depends:      HsOpenSSL      >=0.10.3 && <0.12
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable
