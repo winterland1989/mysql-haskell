@@ -129,6 +129,8 @@ query conn qry params = query_ conn (renderParams qry params)
 
 -- | 'V.Vector' version of 'query'.
 --
+-- @since 0.5.1.0
+--
 queryVector :: MySQLConn -> Query -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryVector conn qry params = queryVector_ conn (renderParams qry params)
 
@@ -154,6 +156,8 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         return (fields, rows)
 
 -- | 'V.Vector' version of 'query_'.
+--
+-- @since 0.5.1.0
 --
 queryVector_ :: MySQLConn -> Query -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
@@ -257,6 +261,8 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
         return (fields, rows)
 
 -- | 'V.Vector' version of 'queryStmt'
+--
+-- @since 0.5.1.0
 --
 queryStmtVector :: MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do

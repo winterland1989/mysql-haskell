@@ -34,7 +34,10 @@ mysql -utestMySQLHaskell -DtestMySQLHaskell -e "CREATE TABLE insert_test(\
                 __set          SET('foo', 'bar', 'qux')\
                 ) CHARACTER SET utf8"
 
-g++ ./libmysql.cpp -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl -I/usr/local/include/mysql -o libmysql
+g++ ./libmysql.cpp -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl\
+ -I/usr/local/opt/mysql/include -L/usr/local/opt/mysql/lib -I/usr/local/opt/openssl/include -L/usr/local/opt/openssl/lib\
+ -o libmysql
+
 echo "=============== start benchmark c++ client ================"
 time ./libmysql 1
 time ./libmysql 2
@@ -55,17 +58,6 @@ time ./dist/build/bench/bench 3          +RTS -N4 -A128M -RTS
 time ./dist/build/bench/bench 4          +RTS -N4 -A128M -RTS
 time ./dist/build/bench/bench 10         +RTS -N4 -A128M -RTS
 echo "=============== benchmark haskell client end ================"
-
-mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
-mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
-
-echo "=============== start benchmark haskell client unix-socket ============="
-time ./dist/build/bench-unix-socket/bench-unix-socket 1          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-unix-socket/bench-unix-socket 2          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-unix-socket/bench-unix-socket 3          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-unix-socket/bench-unix-socket 4          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-unix-socket/bench-unix-socket 10         +RTS -N4 -A128M -RTS
-echo "=============== benchmark haskell client end unix-socket ================"
 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test" 
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"

@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 0.5.1.0 -- 2016-10-20
+
+* Add `queryVector`, `queryVector_` and `queryStmtVector`.
+* Use binary-parsers to speed up binary parsers.
+
 ## 0.5.0.0 -- 2016-8-22
 
 * Export exception types.
