@@ -33,7 +33,7 @@ module Database.MySQL.Base
     , connectDetail
     , close
     , ping
-      -- * direct query
+      -- * Direct query
     , execute
     , executeMany
     , execute_
@@ -41,7 +41,7 @@ module Database.MySQL.Base
     , queryVector_
     , query
     , queryVector
-      -- * prepared query statement
+      -- * Prepared query statement
     , prepareStmt
     , prepareStmtDetail
     , executeStmt
@@ -49,7 +49,7 @@ module Database.MySQL.Base
     , queryStmtVector
     , closeStmt
     , resetStmt
-      -- * helpers
+      -- * Helpers
     , withTransaction
     , Query(..)
     , renderParams

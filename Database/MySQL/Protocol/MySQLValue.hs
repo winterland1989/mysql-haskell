@@ -13,7 +13,25 @@ Core text and binary row decoder/encoder machinery.
 
 -}
 
-module Database.MySQL.Protocol.MySQLValue where
+module Database.MySQL.Protocol.MySQLValue
+  ( -- * MySQLValue decoder and encoder
+    MySQLValue(..)
+  , putParamMySQLType
+  , getTextField
+  , putTextField
+  , getTextRow
+  , getTextRowVector
+  , getBinaryField
+  , putBinaryField
+  , getBinaryRow
+  , getBinaryRowVector
+  -- * Internal utilities
+  , getBits
+  , BitMap(..)
+  , isColumnSet
+  , isColumnNull
+  , makeNullMap
+  ) where
 
 import qualified Blaze.Text                         as Textual
 import           Control.Applicative
@@ -100,7 +118,7 @@ data MySQLValue
     | MySQLNull
   deriving (Show, Eq, Generic)
 
--- | Decide if usigned bit(0x80) and 'FieldType' for 'MySQLValue's.
+-- | Put 'FieldType' and usigned bit(0x80/0x00) for 'MySQLValue's.
 --
 putParamMySQLType :: MySQLValue -> Put
 putParamMySQLType (MySQLDecimal      _)  = putFieldType mySQLTypeDecimal  >> putWord8 0x00
@@ -129,36 +147,36 @@ putParamMySQLType MySQLNull              = putFieldType mySQLTypeNull     >> put
 -- | Text protocol decoder
 getTextField :: ColumnDef -> Get MySQLValue
 getTextField f
-    | t == mySQLTypeNull              = pure MySQLNull
+    | t == mySQLTypeNull            = pure MySQLNull
     | t == mySQLTypeDecimal
-        || t == mySQLTypeNewDecimal   = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == mySQLTypeTiny              = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
-                                                      else feedLenEncBytes t MySQLInt8 intLexer
-    | t == mySQLTypeShort             = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
-                                                      else feedLenEncBytes t MySQLInt16 intLexer
+        || t == mySQLTypeNewDecimal = feedLenEncBytes t MySQLDecimal fracLexer
+    | t == mySQLTypeTiny            = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
+                                                    else feedLenEncBytes t MySQLInt8 intLexer
+    | t == mySQLTypeShort           = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
+                                                    else feedLenEncBytes t MySQLInt16 intLexer
     | t == mySQLTypeLong
-        || t == mySQLTypeInt24        = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
-                                                      else feedLenEncBytes t MySQLInt32 intLexer
-    | t == mySQLTypeLongLong          = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
-                                                      else feedLenEncBytes t MySQLInt64 intLexer
-    | t == mySQLTypeFloat             = feedLenEncBytes t MySQLFloat fracLexer
-    | t == mySQLTypeDouble            = feedLenEncBytes t MySQLDouble fracLexer
-    | t == mySQLTypeYear              = feedLenEncBytes t MySQLYear intLexer
+        || t == mySQLTypeInt24      = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
+                                                    else feedLenEncBytes t MySQLInt32 intLexer
+    | t == mySQLTypeLongLong        = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
+                                                    else feedLenEncBytes t MySQLInt64 intLexer
+    | t == mySQLTypeFloat           = feedLenEncBytes t MySQLFloat fracLexer
+    | t == mySQLTypeDouble          = feedLenEncBytes t MySQLDouble fracLexer
+    | t == mySQLTypeYear            = feedLenEncBytes t MySQLYear intLexer
     | t == mySQLTypeTimestamp
-        || t == mySQLTypeTimestamp2   = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
-                                            LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
+        || t == mySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
+                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
     | t == mySQLTypeDateTime
-        || t == mySQLTypeDateTime2    = feedLenEncBytes t MySQLDateTime $ \ bs ->
-                                            LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
+        || t == mySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime $ \ bs ->
+                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
     | t == mySQLTypeDate
-        || t == mySQLTypeNewDate      = feedLenEncBytes t MySQLDate dateParser
+        || t == mySQLTypeNewDate    = feedLenEncBytes t MySQLDate dateParser
     | t == mySQLTypeTime
-        || t == mySQLTypeTime2        = feedLenEncBytes t id $ \ bs ->
-                                            if bs `B.unsafeIndex` 0 == 45  -- '-'
-                                                 then MySQLTime 1 <$> timeParser (B.unsafeDrop 1 bs)
-                                                 else MySQLTime 0 <$> timeParser bs
+        || t == mySQLTypeTime2      = feedLenEncBytes t id $ \ bs ->
+                                          if bs `B.unsafeIndex` 0 == 45  -- '-'
+                                               then MySQLTime 1 <$> timeParser (B.unsafeDrop 1 bs)
+                                               else MySQLTime 0 <$> timeParser bs
 
-    | t == mySQLTypeGeometry          = MySQLGeometry <$> getLenEncBytes
+    | t == mySQLTypeGeometry        = MySQLGeometry <$> getLenEncBytes
     | t == mySQLTypeVarChar
         || t == mySQLTypeEnum
         || t == mySQLTypeSet
@@ -167,11 +185,11 @@ getTextField f
         || t == mySQLTypeLongBlob
         || t == mySQLTypeBlob
         || t == mySQLTypeVarString
-        || t == mySQLTypeString       = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
+        || t == mySQLTypeString     = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
 
-    | t == mySQLTypeBit               = MySQLBit <$> (getBits =<< getLenEncInt)
+    | t == mySQLTypeBit             = MySQLBit <$> (getBits =<< getLenEncInt)
 
-    | otherwise                         = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
+    | otherwise                     = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
@@ -232,6 +250,12 @@ putTextField (MySQLText       t) = putInQuotes $
 putTextField (MySQLBit        b) = do putBuilder "b\'"
                                       putBuilder . execPut $ putTextBits b
                                       putCharUtf8 '\''
+  where
+    putTextBits :: Word64 -> Put
+    putTextBits word = forM_ [63,62..0] $ \ pos ->
+            if word `testBit` pos then putCharUtf8 '1' else putCharUtf8 '0'
+    {-# INLINE putTextBits #-}
+
 putTextField MySQLNull           = putBuilder "NULL"
 
 putInQuotes :: Put -> Put
@@ -368,7 +392,7 @@ getBinaryField f
         pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
 
 
--- | convert a bit sequence to a Word64
+-- | Get a bit sequence as a Word64
 --
 -- Since 'Word64' has a @Bits@ instance, it's easier to deal with in haskell.
 --
@@ -386,10 +410,6 @@ getBits bytes =
                                 \wrong bit length size: " ++ show bytes
 {-# INLINE getBits #-}
 
-putTextBits :: Word64 -> Put
-putTextBits word = forM_ [63,62..0] $ \ pos ->
-        if word `testBit` pos then putCharUtf8 '1' else putCharUtf8 '0'
-{-# INLINE putTextBits #-}
 
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
@@ -463,13 +483,13 @@ getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
 getBinaryRow fields flen = do
     skipN 1           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
-    nullmap <- getByteString maplen
+    nullmap <- BitMap <$> getByteString maplen
     go fields nullmap 0
   where
-    go :: [ColumnDef] -> ByteString -> Int -> Get [MySQLValue]
+    go :: [ColumnDef] -> BitMap -> Int -> Get [MySQLValue]
     go []     _       _   = pure []
     go (f:fs) nullmap pos = do
-        r <- if isNull_ nullmap pos
+        r <- if isColumnNull nullmap pos
                 then return MySQLNull
                 else getBinaryField f
         let pos' = pos + 1
@@ -481,16 +501,10 @@ getBinaryRowVector :: V.Vector ColumnDef -> Int -> Get (V.Vector MySQLValue)
 getBinaryRowVector fields flen = do
     skipN 1           -- 0x00
     let maplen = (flen + 7 + 2) `shiftR` 3
-    nullmap <- getByteString maplen
+    nullmap <- BitMap <$> getByteString maplen
     (`V.imapM` fields) $ \ pos f ->
-        if isNull_ nullmap pos then return MySQLNull else getBinaryField f
+        if isColumnNull nullmap pos then return MySQLNull else getBinaryField f
 {-# INLINE getBinaryRowVector #-}
-
--- This 'isNull_' is special for offset = 2
-isNull_ nullmap pos =
-    let (i, j) = (pos + 2) `quotRem` 8
-    in (nullmap `B.unsafeIndex` i) `testBit` j
-{-# INLINE isNull_ #-}
 
 --------------------------------------------------------------------------------
 -- | Use 'ByteString' to present a bitmap.
@@ -510,7 +524,7 @@ isNull_ nullmap pos =
 --
 newtype BitMap = BitMap { fromBitMap :: ByteString } deriving (Eq, Show)
 
--- | test if a column is set
+-- | Test if a column is set(binlog protocol).
 --
 -- The number counts from left to right.
 --
@@ -520,7 +534,17 @@ isColumnSet (BitMap bitmap) pos =
     in (bitmap `B.unsafeIndex` i) `testBit` j
 {-# INLINE isColumnSet #-}
 
--- | make a nullmap for params without offset.
+-- | Test if a column is null(binary protocol).
+--
+-- The number counts from left to right.
+--
+isColumnNull :: BitMap -> Int -> Bool
+isColumnNull (BitMap nullmap) pos =
+    let (i, j) = (pos + 2) `quotRem` 8
+    in (nullmap `B.unsafeIndex` i) `testBit` j
+{-# INLINE isColumnNull #-}
+
+-- | Make a nullmap for params(binary protocol) without offset.
 --
 makeNullMap :: [MySQLValue] -> BitMap
 makeNullMap values = BitMap . B.pack $ go values 0x00 0

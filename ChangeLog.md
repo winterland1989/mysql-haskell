@@ -1,8 +1,9 @@
 # Revision history for mysql-haskell
 
-## 0.5.2.0 -- 2016-10-25
+## 0.6.0.0 -- 2016-10-25
 
-* use binary-ieee754 for older binary compatibility.
+* Use binary-ieee754 for older binary compatibility.
+* Clean up `Database.MySQL.Protocol.MySQLValue` 's export.
 
 ## 0.5.1.0 -- 2016-10-20
 
