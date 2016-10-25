@@ -82,16 +82,9 @@ decodeFromPacket = getFromPacket get
 {-# INLINE decodeFromPacket #-}
 
 getFromPacket :: Get a -> Packet -> IO a
-getFromPacket g (Packet _ _ body) =
-    case body of
-        (L.Chunk bs lbs) -> case pushEndOfInput (pushChunks (parse g bs) lbs) of
-            Done _  _ r             -> return r
-            Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-            _ -> error "getFromPacket: impossible error!"
-        L.Empty -> case pushEndOfInput (parse g B.empty) of
-            Done _  _ r             -> return r
-            Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-            _ -> error "getFromPacket: impossible error!"
+getFromPacket g (Packet _ _ body) = case parseDetailLazy g body of
+    Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
+    Right (_,   _,      r     ) -> return r
 {-# INLINE getFromPacket #-}
 
 data DecodePacketException = DecodePacketFailed ByteString ByteOffset String

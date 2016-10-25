@@ -18,7 +18,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Loops                       (untilM)
 import           Data.Binary
-import           Data.Binary.Get
+import           Data.Binary.Parser
 import           Data.Bits
 import           Data.ByteString                           (ByteString)
 import qualified Data.ByteString                           as B
@@ -107,17 +107,15 @@ getBinLogPacket checksum semi = do
 
 getFromBinLogPacket :: Get a -> BinLogPacket -> IO a
 getFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) =
-    case pushEndOfInput $ pushChunks (runGetIncremental g) body  of
-        Done _  _ r             -> return r
-        Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-        _                       -> error "getFromBinLogPacket: impossible!"
+    case parseDetailLazy g body  of
+        Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
+        Right (_,   _,      r     ) -> return r
 
 getFromBinLogPacket' :: (BinLogEventType -> Get a) -> BinLogPacket -> IO a
 getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
-    case pushEndOfInput $ pushChunks (runGetIncremental (g typ)) body  of
-        Done _  _ r             -> return r
-        Fail buf offset errmsg  -> throwIO (DecodePacketFailed buf offset errmsg)
-        _                       -> error "getFromBinLogPacket': impossible!"
+    case parseDetailLazy (g typ) body  of
+        Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
+        Right (_,   _,      r     ) -> return r
 
 --------------------------------------------------------------------------------
 

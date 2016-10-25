@@ -1,5 +1,5 @@
 name:                mysql-haskell
-version:             0.5.1.0
+version:             0.5.2.0
 synopsis:            pure haskell MySQL driver
 description:         pure haskell MySQL driver
 license:             BSD3
@@ -47,7 +47,8 @@ library
                     ,   io-streams    >= 1.2 && < 2.0
                     ,   tcp-streams   >= 0.4 && < 0.6
                     ,   wire-streams  >= 0.1
-                    ,   binary        >= 0.8.4
+                    ,   binary        == 0.8.*
+                    ,   binary-ieee754 == 0.1.*
                     ,   binary-parsers >= 0.2.1
                     ,   bytestring    >= 0.10.2.0
                     ,   text          >= 1.1 && < 1.3
