@@ -4,9 +4,11 @@ mysql-haskell
 [![Hackage](https://img.shields.io/hackage/v/mysql-haskell.svg?style=flat)](http://hackage.haskell.org/package/mysql-haskell)
 [![Build Status](https://travis-ci.org/winterland1989/mysql-haskell.svg)](https://travis-ci.org/winterland1989/mysql-haskell)
 
-`mysql-haskell` is a MySQL driver written entirely in haskell by @winterland1989 at infrastructure department of Didi group, it's going to be used in projects aiming at replacing old java based MySQL middlewares.
+`mysql-haskell` is a MySQL driver written entirely in haskell.
 
-This project is still in experimental stage and lack of produciton tests, use on your own risk, any form of contributions are welcomed!
+<a href="http://www.genshuixue.com/"><img height=42 src='http://cdn.gsxservice.com/asset/img/logo-release2.png '></a>
+<a href="http://chordify.net/"><img height=42 src='https://chordify.net/img/about/slide_250_1.jpg'></a>
+<a href="http://www.didichuxing.com/"><img height=42 src='http://www.didichuxing.com/images/icon02.png'></a>
 
 Is it fast?
 ----------
@@ -106,7 +108,7 @@ Just use the old way:
 ```bash
 git clone https://github.com/winterland1989/mysql-haskell.git
 cd mysql-haskell
-cabal install --only-dependencies
+cabal install --enable-tests --only-dependencies
 cabal build
 ```
 

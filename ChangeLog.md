@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 0.7.0.0 -- 2016-11-09
+
+* Split openssl support to [mysql-haskell-openssl](hackage.haskell.org/package/mysql-haskell-openssl).
+* Expose `Database.MySQL.Connection` module due to this split, it's shouldn't be used by user directly.
+
 ## 0.6.0.0 -- 2016-10-25
 
 * Use binary-ieee754 for older binary compatibility.

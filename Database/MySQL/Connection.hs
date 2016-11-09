@@ -39,6 +39,11 @@ import qualified System.IO.Streams.TCP           as TCP
 
 --------------------------------------------------------------------------------
 
+-- | 'MySQLConn' wrap both 'InputStream' and 'OutputStream' for MySQL 'Packet'.
+--
+-- You shouldn't use one 'MySQLConn' in different thread, if you do that,
+-- consider protecting it with a @MVar@.
+--
 data MySQLConn = MySQLConn {
         mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
     ,   mysqlWrite       :: {-# UNPACK #-} !(OutputStream Packet)

@@ -13,7 +13,7 @@ import qualified Data.ByteString       as B
 import           Database.MySQL.Base
 import           Database.MySQL.BinLog
 import           System.Environment
-import qualified          System.IO.Streams as Stream
+import qualified System.IO.Streams as Stream
 import           Test.Tasty
 import           Test.Tasty.HUnit
 import qualified TextRow
