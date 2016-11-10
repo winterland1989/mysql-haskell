@@ -1,6 +1,6 @@
 {-|
 Module      : Database.MySQL.BinLogProtocol.BinLogValue
-Description : binlog protocol
+Description : Binlog protocol
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com

@@ -35,31 +35,3 @@ library
                         ,   MultiWayIf
                         ,   OverloadedStrings
     ghc-options:       -Wall
-
-test-suite test
-    type: exitcode-stdio-1.0
-    main-is: Main.hs
-    other-modules:      BinaryRow
-                    ,   BinaryRowNew
-                    ,   BinLog
-                    ,   BinLogNew
-                    ,   TextRow
-                    ,   TextRowNew
-                    ,   ExecuteMany
-    hs-source-dirs: test
-    build-depends:  mysql-haskell
-                  , base
-                  , bytestring
-                  , optparse-applicative
-                  , tasty == 0.11.*
-                  , tasty-hunit
-                  , text
-                  , io-streams
-                  , time
-                  , vector
-    default-extensions:     MultiWayIf
-                        ,   OverloadedStrings
-
-    ghc-options:         -threaded
-    default-language:    Haskell2010
-

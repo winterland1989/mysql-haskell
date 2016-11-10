@@ -75,7 +75,6 @@ test-suite test
     build-depends:  mysql-haskell
                   , base
                   , bytestring
-                  , optparse-applicative
                   , tasty == 0.11.*
                   , tasty-hunit
                   , text

@@ -2,7 +2,7 @@
 
 {-|
 Module      : Database.MySQL.BinLogProtocol.BinLogMeta
-Description : binlog protocol column meta
+Description : Binlog protocol column meta
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com

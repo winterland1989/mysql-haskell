@@ -2,7 +2,7 @@
 
 {-|
 Module      : Database.MySQL.Protocol.Packet
-Description : MySQL packet type
+Description : MySQL packet type and various helpers.
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com

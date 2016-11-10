@@ -3,7 +3,7 @@
 
 {-|
 Module      : Database.MySQL.Protocol.Auth
-Description : MySQL field type
+Description : MySQL Auth Packets
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com

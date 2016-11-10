@@ -1,6 +1,6 @@
 {-|
 Module      : Database.MySQL.Connection
-Description : Connection managment
+Description : TLS support for mysql-haskell via @tls@ package.
 Copyright   : (c) Winterland, 2016
 License     : BSD
 Maintainer  : drkoster@qq.com
