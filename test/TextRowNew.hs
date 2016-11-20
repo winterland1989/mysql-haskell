@@ -107,3 +107,40 @@ tests c = do
         ]
 
     Stream.skipToEof is
+
+    let row0 =
+            [ MySQLInt32 0
+            , MySQLDateTime  (LocalTime (fromGregorian 2016 08 08) (TimeOfDay 17 25 59.10))
+            , MySQLTimeStamp (LocalTime (fromGregorian 2016 08 08) (TimeOfDay 17 25 59.12))
+            , MySQLTime 0 (TimeOfDay 199 59 59.1234)
+            ]
+    let row1 =
+            [ MySQLInt32 1
+            , MySQLDateTime  (LocalTime (fromGregorian 2016 08 09) (TimeOfDay 18 25 59.10))
+            , MySQLTimeStamp (LocalTime (fromGregorian 2016 08 09) (TimeOfDay 18 25 59.12))
+            , MySQLTime 0 (TimeOfDay 299 59 59.1234)
+            ]
+    execute c "UPDATE test_new SET \
+            \__id         = ?     ,\
+            \__datetime   = ?     ,\
+            \__timestamp  = ?     ,\
+            \__time       = ?  WHERE __id=0"
+            row0
+    execute c "INSERT INTO test_new VALUES(\
+            \?,\
+            \?,\
+            \?,\
+            \? \
+            \)"
+            row1
+
+    (_, is) <- query c "SELECT * FROM test_new WHERE __id IN (?) ORDER BY __id" [MySQLList [MySQLInt32 0, MySQLInt32 1]]
+    Just v0 <- Stream.read is
+    Just v1 <- Stream.read is
+
+    assertEqual "select list of ids" [v0, v1] [row0, row1]
+
+    Stream.skipToEof is
+    execute_ c "DELETE FROM test_new where __id=1"
+
+    return ()
