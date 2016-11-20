@@ -8,6 +8,7 @@ import qualified Data.ByteString.Lazy.Char8     as LC
 import qualified Data.ByteString.Builder   as BB
 import           Control.Arrow             (first)
 import           Database.MySQL.Protocol.MySQLValue
+import qualified Database.MySQL.Param      as Param
 import           Data.Binary.Put
 
 -- | Query string type borrowed from @mysql-simple@.
@@ -36,13 +37,13 @@ instance Read Query where
 instance IsString Query where
     fromString = Query . BB.toLazyByteString . BB.stringUtf8
 
-renderParams :: Query -> [MySQLValue] -> Query
+renderParams :: Param.Parametric p => Query -> [p] -> Query
 renderParams (Query qry) params =
     let fragments = LC.split '?' qry
     in Query . runPut $ merge fragments params
   where
     merge [x]    []     = putLazyByteString x
-    merge (x:xs) (y:ys) = putLazyByteString x >> putTextField y >> merge xs ys
+    merge (x:xs) (y:ys) = putLazyByteString x >> Param.render y >> merge xs ys
     merge _     _       = throw WrongParamsCount
 
 data WrongParamsCount = WrongParamsCount deriving (Show, Typeable)
