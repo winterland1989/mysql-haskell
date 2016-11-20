@@ -115,6 +115,8 @@ data MySQLValue
     | MySQLBytes         !ByteString
     | MySQLBit           !Word64
     | MySQLText          !Text
+    | MySQLList          [MySQLValue]  -- ^ List of 'MySQLValue's that allow for queries such as:
+                                       -- ^ SELECT col FROM tbl WHERE id IN (?)
     | MySQLNull
   deriving (Show, Eq, Generic)
 
@@ -141,6 +143,7 @@ putParamMySQLType (MySQLBytes        _)  = putFieldType mySQLTypeBlob     >> put
 putParamMySQLType (MySQLGeometry     _)  = putFieldType mySQLTypeGeometry >> putWord8 0x00
 putParamMySQLType (MySQLBit          _)  = putFieldType mySQLTypeBit      >> putWord8 0x00
 putParamMySQLType (MySQLText         _)  = putFieldType mySQLTypeString   >> putWord8 0x00
+putParamMySQLType (MySQLList         _)  = putFieldType mySQLTypeString   >> putWord8 0x00
 putParamMySQLType MySQLNull              = putFieldType mySQLTypeNull     >> putWord8 0x00
 
 --------------------------------------------------------------------------------
@@ -255,6 +258,11 @@ putTextField (MySQLBit        b) = do putBuilder "b\'"
     putTextBits word = forM_ [63,62..0] $ \ pos ->
             if word `testBit` pos then putCharUtf8 '1' else putCharUtf8 '0'
     {-# INLINE putTextBits #-}
+
+putTextField (MySQLList      []) = putBuilder "NULL"
+putTextField (MySQLList  (x:[])) = putTextField x
+putTextField (MySQLList  (x:xs)) = do putTextField x
+                                      mapM_ (\f -> putCharUtf8 ',' >> putTextField f) xs
 
 putTextField MySQLNull           = putBuilder "NULL"
 
@@ -435,16 +443,21 @@ putBinaryField (MySQLTimeStamp (LocalTime date time)) = do putWord8 11    -- alw
 putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
                                                            putBinaryTime' time
-putBinaryField (MySQLDate    d)    = do putWord8 4
+putBinaryField (MySQLDate       d) = do putWord8 4
                                         putBinaryDay d
-putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
+putBinaryField (MySQLTime  sign t) = do putWord8 12    -- always put full
                                         putWord8 sign
                                         putBinaryTime t
-putBinaryField (MySQLGeometry bs)  = putLenEncBytes bs
-putBinaryField (MySQLBytes  bs)    = putLenEncBytes bs
-putBinaryField (MySQLBit    word)  = do putWord8 8     -- always put full
+putBinaryField (MySQLGeometry  bs) = putLenEncBytes bs
+putBinaryField (MySQLBytes     bs) = putLenEncBytes bs
+putBinaryField (MySQLBit     word) = do putWord8 8     -- always put full
                                         putWord64be word
-putBinaryField (MySQLText    t)    = putLenEncBytes (T.encodeUtf8 t)
+putBinaryField (MySQLText       t) = putLenEncBytes (T.encodeUtf8 t)
+putBinaryField (MySQLList      []) = return ()
+putBinaryField (MySQLList  (x:[])) = putBinaryField x
+putBinaryField (MySQLList  (x:xs)) = do putBinaryField x
+                                        mapM_ (\f -> putCharUtf8 ',' >> putBinaryField f) xs
+
 putBinaryField MySQLNull           = return ()
 
 putBinaryDay :: Day -> Put
