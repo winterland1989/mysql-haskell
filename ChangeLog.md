@@ -1,8 +1,12 @@
 # Revision history for mysql-haskell
 
+## 0.7.1.0 -- 2016-11-21
+
+* Add `QueryParam` class and `Param` datatype for multi-valued parameter(s) by [naushadh](https://github.com/naushadh).
+
 ## 0.7.0.0 -- 2016-11-09
 
-* Split openssl support to [mysql-haskell-openssl](hackage.haskell.org/package/mysql-haskell-openssl).
+* Split openssl support to [mysql-haskell-openssl](http://hackage.haskell.org/package/mysql-haskell-openssl).
 * Expose `Database.MySQL.Connection` module due to this split, it shouldn't be used by user directly.
 
 ## 0.6.0.0 -- 2016-10-25

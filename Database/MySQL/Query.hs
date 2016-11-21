@@ -37,25 +37,37 @@ instance IsString Query where
     fromString = Query . BB.toLazyByteString . BB.stringUtf8
 
 -- | A type to wrap a query parameter in to allow for single and multi-valued parameters.
+--
+-- The behavior of 'Param' can be illustrated by following example:
+--
+-- @
+--    render $ One (MySQLText "hello") = hello
+--    render $ Many [MySQLText "hello", MySQLText "world"] = hello, world
+--    render $ Many [] = null
+-- @
+--
+-- So you can now write a query like this: @ SELECT * FROM test WHERE _id IN (?, 888) @
+-- and use 'Many' 'Param' to fill the hole. There's no equivalent for prepared statement sadly.
+--
 data Param = One  MySQLValue
            | Many [MySQLValue]
 
 -- | A type that may be used as a single parameter to a SQL query. Inspired from @mysql-simple@.
-class Parametric a where
+class QueryParam a where
     render :: a -> Put
     -- ^ Prepare a value for substitution into a query string.
 
-instance Parametric Param where
+instance QueryParam Param where
     render (One x)      = putTextField x
     render (Many [])    = putTextField MySQLNull
     render (Many (x:[]))= putTextField x
     render (Many (x:xs))= do putTextField x
                              mapM_ (\f -> putCharUtf8 ',' >> putTextField f) xs
 
-instance Parametric MySQLValue where
+instance QueryParam MySQLValue where
     render = putTextField
 
-renderParams :: Parametric p => Query -> [p] -> Query
+renderParams :: QueryParam p => Query -> [p] -> Query
 renderParams (Query qry) params =
     let fragments = LC.split '?' qry
     in Query . runPut $ merge fragments params

@@ -97,13 +97,14 @@ getGreeting = do
     status <- getWord16le
     capH <- getWord16le
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
-    authPluginLen <- getWord8
+    authPluginLen <- getWord8   -- this will issue an unused warning, see the notes below
     skipN 10 -- 10 * 0x00
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure B.empty
         else getByteStringNul   -- This is different with the MySQL document here
                                 -- The doc said we should expect a MAX(13, length of auth-plugin-data - 8)
                                 -- length bytes, but doing so stop us from login
+                                -- anyway 'getByteStringNul' works perfectly here.
 
     authPlugin <- if (cap .&. CLIENT_PLUGIN_AUTH) == 0
         then pure B.empty

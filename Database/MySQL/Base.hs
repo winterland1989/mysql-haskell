@@ -96,7 +96,7 @@ import qualified Data.Vector                        as V
 -- will be escaped before get filled into the query, please DO NOT enable @NO_BACKSLASH_ESCAPES@,
 -- and you should consider using prepared statement if this's not an one shot query.
 --
-execute :: Parametric p => MySQLConn -> Query -> [p] -> IO OK
+execute :: QueryParam p => MySQLConn -> Query -> [p] -> IO OK
 execute conn qry params = execute_ conn (renderParams qry params)
 
 {-# SPECIALIZE execute :: MySQLConn -> Query -> [MySQLValue] -> IO OK #-}
@@ -110,7 +110,7 @@ execute conn qry params = execute_ conn (renderParams qry params)
 --
 -- @since 0.2.0.0
 --
-executeMany :: Parametric p => MySQLConn -> Query -> [[p]] -> IO [OK]
+executeMany :: QueryParam p => MySQLConn -> Query -> [[p]] -> IO [OK]
 executeMany conn@(MySQLConn is os _ _) qry paramsList = do
     guardUnconsumed conn
     let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
@@ -131,7 +131,7 @@ execute_ conn (Query qry) = command conn (COM_QUERY qry)
 -- the same 'MySQLConn', or an 'UnconsumedResultSet' will be thrown.
 -- if you want to skip the result-set, use 'Stream.skipToEof'.
 --
-query :: Parametric p => MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream [MySQLValue])
+query :: QueryParam p => MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream [MySQLValue])
 query conn qry params = query_ conn (renderParams qry params)
 
 {-# SPECIALIZE query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue]) #-}
@@ -141,7 +141,7 @@ query conn qry params = query_ conn (renderParams qry params)
 --
 -- @since 0.5.1.0
 --
-queryVector :: Parametric p => MySQLConn -> Query -> [p] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
+queryVector :: QueryParam p => MySQLConn -> Query -> [p] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryVector conn qry params = queryVector_ conn (renderParams qry params)
 
 {-# SPECIALIZE queryVector :: MySQLConn -> Query -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue)) #-}
