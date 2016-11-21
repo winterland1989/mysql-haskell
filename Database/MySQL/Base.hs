@@ -51,6 +51,7 @@ module Database.MySQL.Base
     , resetStmt
       -- * Helpers
     , withTransaction
+    , QueryParam(..)
     , Param (..)
     , Query(..)
     , renderParams
