@@ -36,13 +36,32 @@ instance Read Query where
 instance IsString Query where
     fromString = Query . BB.toLazyByteString . BB.stringUtf8
 
-renderParams :: Query -> [MySQLValue] -> Query
+-- | A type to wrap a query parameter in to allow for single and multi-valued parameters.
+data Param = One  MySQLValue
+           | Many [MySQLValue]
+
+-- | A type that may be used as a single parameter to a SQL query. Inspired from @mysql-simple@.
+class Parametric a where
+    render :: a -> Put
+    -- ^ Prepare a value for substitution into a query string.
+
+instance Parametric Param where
+    render (One x)      = putTextField x
+    render (Many [])    = putTextField MySQLNull
+    render (Many (x:[]))= putTextField x
+    render (Many (x:xs))= do putTextField x
+                             mapM_ (\f -> putCharUtf8 ',' >> putTextField f) xs
+
+instance Parametric MySQLValue where
+    render = putTextField
+
+renderParams :: Parametric p => Query -> [p] -> Query
 renderParams (Query qry) params =
     let fragments = LC.split '?' qry
     in Query . runPut $ merge fragments params
   where
     merge [x]    []     = putLazyByteString x
-    merge (x:xs) (y:ys) = putLazyByteString x >> putTextField y >> merge xs ys
+    merge (x:xs) (y:ys) = putLazyByteString x >> render y >> merge xs ys
     merge _     _       = throw WrongParamsCount
 
 data WrongParamsCount = WrongParamsCount deriving (Show, Typeable)

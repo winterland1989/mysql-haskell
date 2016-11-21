@@ -51,6 +51,7 @@ module Database.MySQL.Base
     , resetStmt
       -- * Helpers
     , withTransaction
+    , Param (..)
     , Query(..)
     , renderParams
     , command
@@ -95,8 +96,11 @@ import qualified Data.Vector                        as V
 -- will be escaped before get filled into the query, please DO NOT enable @NO_BACKSLASH_ESCAPES@,
 -- and you should consider using prepared statement if this's not an one shot query.
 --
-execute :: MySQLConn -> Query -> [MySQLValue] -> IO OK
+execute :: Parametric p => MySQLConn -> Query -> [p] -> IO OK
 execute conn qry params = execute_ conn (renderParams qry params)
+
+{-# SPECIALIZE execute :: MySQLConn -> Query -> [MySQLValue] -> IO OK #-}
+{-# SPECIALIZE execute :: MySQLConn -> Query -> [Param]      -> IO OK #-}
 
 -- | Execute a multi-row query which don't return result-set.
 --
@@ -106,12 +110,15 @@ execute conn qry params = execute_ conn (renderParams qry params)
 --
 -- @since 0.2.0.0
 --
-executeMany :: MySQLConn -> Query -> [[MySQLValue]]-> IO [OK]
+executeMany :: Parametric p => MySQLConn -> Query -> [[p]] -> IO [OK]
 executeMany conn@(MySQLConn is os _ _) qry paramsList = do
     guardUnconsumed conn
     let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
     writeCommand (COM_QUERY qry') os
     mapM (\ _ -> waitCommandReply is) paramsList
+
+{-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[MySQLValue]] -> IO [OK] #-}
+{-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[Param]]      -> IO [OK] #-}
 
 -- | Execute a MySQL query which don't return a result-set.
 --
@@ -124,15 +131,21 @@ execute_ conn (Query qry) = command conn (COM_QUERY qry)
 -- the same 'MySQLConn', or an 'UnconsumedResultSet' will be thrown.
 -- if you want to skip the result-set, use 'Stream.skipToEof'.
 --
-query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
+query :: Parametric p => MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream [MySQLValue])
 query conn qry params = query_ conn (renderParams qry params)
+
+{-# SPECIALIZE query :: MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue]) #-}
+{-# SPECIALIZE query :: MySQLConn -> Query -> [Param]      -> IO ([ColumnDef], InputStream [MySQLValue]) #-}
 
 -- | 'V.Vector' version of 'query'.
 --
 -- @since 0.5.1.0
 --
-queryVector :: MySQLConn -> Query -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
+queryVector :: Parametric p => MySQLConn -> Query -> [p] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryVector conn qry params = queryVector_ conn (renderParams qry params)
+
+{-# SPECIALIZE queryVector :: MySQLConn -> Query -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue)) #-}
+{-# SPECIALIZE queryVector :: MySQLConn -> Query -> [Param]      -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue)) #-}
 
 -- | Execute a MySQL query which return a result-set.
 --
