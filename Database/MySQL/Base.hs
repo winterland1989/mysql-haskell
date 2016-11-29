@@ -248,7 +248,8 @@ resetStmt (MySQLConn is os _ consumed) stid = do
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
-executeStmt conn stid params = command conn (COM_STMT_EXECUTE stid params)
+executeStmt conn stid params =
+  command conn (COM_STMT_EXECUTE stid params (makeNullMap params))
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --
@@ -257,7 +258,7 @@ executeStmt conn stid params = command conn (COM_STMT_EXECUTE stid params)
 queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmt conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
-    writeCommand (COM_STMT_EXECUTE stid params) os
+    writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     p <- readPacket is
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
@@ -281,7 +282,7 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
 queryStmtVector :: MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
 queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
-    writeCommand (COM_STMT_EXECUTE stid params) os
+    writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     p <- readPacket is
     if isERR p
     then decodeFromPacket p >>= throwIO . ERRException
