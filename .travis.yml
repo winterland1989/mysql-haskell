@@ -27,6 +27,7 @@ before_install:
         sudo apt-get --yes install mysql-community-server mysql-common
         sudo service mysql stop
         sudo usermod -d /var/lib/mysql/ mysql
+        sudo service mysql start
         sudo mysql -V
         sudo mysql -u root -e "CREATE DATABASE IF NOT EXISTS testMySQLHaskell;"
         sudo mysql -u root -e "CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED BY ''"
