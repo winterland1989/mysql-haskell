@@ -43,7 +43,7 @@ data Command
     | COM_REGISTER_SLAVE !Word32 !ByteString !ByteString !ByteString !Word16 !Word32 !Word32 -- ^ 0x15
             -- server-id, slaves hostname, slaves user, slaves password,  slaves port, replication rank(ignored), master-id(usually 0)
     | COM_STMT_PREPARE   !L.ByteString            -- ^ 0x16 statement
-    | COM_STMT_EXECUTE   !StmtID ![MySQLValue]    -- ^ 0x17 stmtId, params
+    | COM_STMT_EXECUTE   !StmtID ![MySQLValue] !BitMap -- ^ 0x17 stmtId, params
     | COM_STMT_CLOSE     !StmtID                  -- ^ 0x19 stmtId
     | COM_STMT_RESET     !StmtID                  -- ^ 0x1A stmtId
     | COM_UNSUPPORTED
@@ -70,13 +70,13 @@ putCommand (COM_REGISTER_SLAVE sid shost susr spass sport rrank mid) = do
     putWord32le rrank
     putWord32le mid
 putCommand (COM_STMT_PREPARE stmt) = putWord8 0x16 >> putLazyByteString stmt
-putCommand (COM_STMT_EXECUTE stid params) = do
+putCommand (COM_STMT_EXECUTE stid params nullmap) = do
     putWord8 0x17
     putWord32le stid
     putWord8 0x00 -- we only use @CURSOR_TYPE_NO_CURSOR@ here
     putWord32le 1 -- const 1
     unless (null params) $ do
-        putByteString . fromBitMap $ makeNullMap params
+        putByteString (fromBitMap nullmap)
         putWord8 0x01    -- always use new-params-bound-flag
         mapM_ putParamMySQLType params
         forM_ params putBinaryField

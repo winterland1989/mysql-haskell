@@ -530,8 +530,9 @@ newtype BitMap = BitMap { fromBitMap :: ByteString } deriving (Eq, Show)
 --
 isColumnSet :: BitMap -> Int -> Bool
 isColumnSet (BitMap bitmap) pos =
-    let (i, j) = pos `quotRem` 8
-    in (bitmap `B.unsafeIndex` i) `testBit` j
+  let i = pos `unsafeShiftR` 3
+      j = pos .&. 7
+  in (bitmap `B.unsafeIndex` i) `testBit` j
 {-# INLINE isColumnSet #-}
 
 -- | Test if a column is null(binary protocol).
@@ -540,8 +541,11 @@ isColumnSet (BitMap bitmap) pos =
 --
 isColumnNull :: BitMap -> Int -> Bool
 isColumnNull (BitMap nullmap) pos =
-    let (i, j) = (pos + 2) `quotRem` 8
-    in (nullmap `B.unsafeIndex` i) `testBit` j
+  let
+    pos' = pos + 2
+    i    = pos' `unsafeShiftR` 3
+    j    = pos' .&. 7
+  in (nullmap `B.unsafeIndex` i) `testBit` j
 {-# INLINE isColumnNull #-}
 
 -- | Make a nullmap for params(binary protocol) without offset.
