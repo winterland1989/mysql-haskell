@@ -27,6 +27,7 @@ import qualified Data.ByteString.Unsafe          as B
 import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
 import           Data.Typeable
+import           Data.Word
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
@@ -61,12 +62,24 @@ data ConnectInfo = ConnectInfo
     , ciDatabase :: ByteString
     , ciUser     :: ByteString
     , ciPassword :: ByteString
+    , ciCharset  :: Word8
     }
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
+--  Default to use 'utf8_general_ci' when connecting MySQL server
+--  to support older(< 5.5.3) versions, you may want to use 'utf8mb4_unicode_ci'
+--  to support full utf8 charset(emoji, etc.) if your server permit, you can query
+--  this with @SELECT id, collation_name FROM information_schema.collations ORDER BY id;@
+--
 defaultConnectInfo :: ConnectInfo
-defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" ""
+defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8_general_ci
+
+utf8_general_ci :: Word8
+utf8_general_ci = 33
+
+utf8mb4_unicode_ci :: Word8
+utf8mb4_unicode_ci = 224
 
 --------------------------------------------------------------------------------
 
@@ -85,14 +98,14 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail (ConnectInfo host port db user pass) =
+connectDetail (ConnectInfo host port db user pass charset) =
     bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
        (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
             is' <- decodeInputStream is
             os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
-            let auth = mkAuth db user pass greet
+            let auth = mkAuth db user pass charset greet
             Stream.write (Just (encodeToPacket 1 auth)) os'
             q <- readPacket is'
             if isOK q
@@ -102,11 +115,11 @@ connectDetail (ConnectInfo host port db user pass) =
                 return (greet, conn)
             else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
 
-mkAuth :: ByteString -> ByteString -> ByteString -> Greeting -> Auth
-mkAuth db user pass greet =
+mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
+mkAuth db user pass charset greet =
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
         scambleBuf = scramble salt pass
-    in Auth clientCap clientMaxPacketSize clientCharset user scambleBuf db
+    in Auth clientCap clientMaxPacketSize charset user scambleBuf db
   where
     scramble :: ByteString -> ByteString -> ByteString
     scramble salt pass'

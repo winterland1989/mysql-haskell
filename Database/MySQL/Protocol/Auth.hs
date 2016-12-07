@@ -25,6 +25,7 @@ import           Data.Binary.Put
 import qualified Data.ByteString                as B
 import           Data.ByteString.Char8          as BC
 import           Data.Bits
+import           Data.Word
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -186,13 +187,9 @@ clientCap =  CLIENT_LONG_PASSWORD
 clientMaxPacketSize :: Word32
 clientMaxPacketSize = 0x00ffffff :: Word32
 
--- | Always use @utf8_general_ci@ when connecting mysql server,
--- since this will simplify string decoding.
-clientCharset :: Word8
-clientCharset = 0x21 :: Word8
 
 supportTLS :: Word32 -> Bool
 supportTLS x = (x .&. CLIENT_SSL) /= 0
 
-sslRequest :: SSLRequest
-sslRequest = SSLRequest (clientCap .|. CLIENT_SSL) clientMaxPacketSize clientCharset
+sslRequest :: Word8 -> SSLRequest
+sslRequest charset = SSLRequest (clientCap .|. CLIENT_SSL) clientMaxPacketSize charset
