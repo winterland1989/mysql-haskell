@@ -29,6 +29,7 @@ module Database.MySQL.Base
       MySQLConn
     , ConnectInfo(..)
     , defaultConnectInfo
+    , utf8mb4_unicode_ci
     , connect
     , connectDetail
     , close
