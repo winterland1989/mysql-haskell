@@ -67,13 +67,20 @@ data ConnectInfo = ConnectInfo
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
---  Default with 'utf8_general_ci' to support older(< 5.5.3) MySQL versions,
---  but be aware this is a partial utf8 encoding, you may want to use 'utf8mb4_unicode_ci'
+--  Default charset is set to @utf8_general_ci@ to support older(< 5.5.3) MySQL versions,
+--  but be aware this is a partial utf8 encoding, you may want to use 'defaultConnectInfoMB4'
 --  instead to support full utf8 charset(emoji, etc.). You can query your server's support
 --  with @SELECT id, collation_name FROM information_schema.collations ORDER BY id;@
 --
 defaultConnectInfo :: ConnectInfo
 defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8_general_ci
+
+-- | 'defaultConnectInfo' with charset set to @utf8mb4_unicode_ci@
+--
+-- This is recommanded on any MySQL server version >= 5.5.3.
+--
+defaultConnectInfoMB4 :: ConnectInfo
+defaultConnectInfoMB4 = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8mb4_unicode_ci
 
 utf8_general_ci :: Word8
 utf8_general_ci = 33
