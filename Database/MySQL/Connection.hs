@@ -63,7 +63,7 @@ data ConnectInfo = ConnectInfo
     , ciUser     :: ByteString
     , ciPassword :: ByteString
     , ciCharset  :: Word8
-    }
+    } deriving Show
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --

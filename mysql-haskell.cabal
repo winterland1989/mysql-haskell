@@ -45,7 +45,7 @@ library
                     ,   bytestring    >= 0.10.2.0
                     ,   text          >= 1.1 && < 1.3
                     ,   cryptonite    == 0.*
-                    ,   memory
+                    ,   memory        <= 0.14.2
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
                     ,   bytestring-lexing == 0.5.*
