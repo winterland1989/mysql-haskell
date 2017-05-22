@@ -15,6 +15,7 @@ module Database.MySQL.TLS (
       connect
     , connectDetail
     , module Data.TLSSetting
+    , TLS.ClientParams
     ) where
 
 import           Control.Exception              (bracketOnError, throwIO)

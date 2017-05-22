@@ -58,6 +58,8 @@ module Database.MySQL.Base
     , renderParams
     , command
     , Stream.skipToEof
+    , HostName
+    , PortNumber
       -- * Exceptions
     , NetworkException(..)
     , UnconsumedResultSet(..)
@@ -89,6 +91,7 @@ import           Database.MySQL.Query
 import           System.IO.Streams                  (InputStream, OutputStream)
 import qualified System.IO.Streams                  as Stream
 import qualified Data.Vector                        as V
+import           Network.Socket                     (HostName, PortNumber)
 
 --------------------------------------------------------------------------------
 
