@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 0.8.1.0  -- 2016-11-09
+
+* Add `Show` instance to `ConnectInfo`.
+* Add proper version bound for `binary`.
+
 ## 0.8.0.0  -- 2016-11-09
 
 * Add `ciCharset` field to support `utf8mb4` charset.

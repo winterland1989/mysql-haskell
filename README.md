@@ -131,7 +131,7 @@ mysql -u root -e "GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'testMyS
 
 * Set `binlog_format` to `ROW`.
 
-* Set `max_allowed_packet` to larger than 64MB(for test large packet).
+* Set `max_allowed_packet` to larger than 256M(for test large packet).
 
 New features will be automatically tested by inspecting MySQL server's version, travis is keeping an eye on following combinations:
 
