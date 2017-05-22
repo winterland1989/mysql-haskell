@@ -24,7 +24,6 @@ main :: IO ()
 
 main = defaultMain $ testCaseSteps "mysql-haskell test suit" $ \step -> do
 
-
     step "preparing table..."
     (greet, c) <- connectDetail defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
 

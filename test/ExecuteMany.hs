@@ -12,6 +12,7 @@ import           Test.Tasty.HUnit
 
 tests :: MySQLConn -> Assertion
 tests c = do
+
     oks <- withTransaction c $ executeMany c "INSERT INTO test VALUES(\
             \?     ,\
             \?     ,\
@@ -43,7 +44,7 @@ tests c = do
             \?     ,\
             \?     ,\
             \?)"
-            (replicate 50000
+            (replicate 10000
                 [ MySQLInt32 0
                 , MySQLBit 255
                 , MySQLInt8 (-128)
@@ -76,4 +77,4 @@ tests c = do
                 , MySQLText "foo,bar"
                 ]
             )
-    assertEqual "executeMany affected rows" (sum $ map okAffectedRows oks) 50000
+    assertEqual "executeMany affected rows" (sum $ map okAffectedRows oks) 10000
