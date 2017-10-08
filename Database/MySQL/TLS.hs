@@ -29,6 +29,7 @@ import qualified Network.TLS                    as TLS
 import qualified System.IO.Streams              as Stream
 import qualified System.IO.Streams.Binary       as Binary
 import qualified System.IO.Streams.TCP          as TCP
+import qualified Data.Connection                as TCP
 import qualified System.IO.Streams.TLS          as TLS
 
 --------------------------------------------------------------------------------
@@ -40,10 +41,10 @@ connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
 connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
-    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
-       (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
+    bracketOnError (connectWithBufferSize host port bUFSIZE)
+       (TCP.close) $ \ (c) -> do
+            let is = TCP.source c
             is' <- decodeInputStream is
-            os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
             if supportTLS (greetingCaps greet)
@@ -52,19 +53,18 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                             TLS.clientUseServerNameIndication = False
                         ,   TLS.clientServerIdentification = (subName, "")
                         }
-                Stream.write (Just (encodeToPacket 1 $ sslRequest charset)) os'
-                bracketOnError (TLS.contextNew sock cparams') TLS.close $ \ ctx -> do
-                    TLS.handshake ctx
-                    (tlsIs, tlsOs) <- TLS.tlsToStreams ctx
+                let connect' = TLS.connect cparams' Nothing host port
+                write c (encodeToPacket 1 $ sslRequest charset)
+                bracketOnError connect' TCP.close $ \ tc -> do
+                    let tlsIs = TCP.source tc
                     tlsIs' <- decodeInputStream tlsIs
-                    tlsOs' <- Binary.encodeOutputStream tlsOs
                     let auth = mkAuth db user pass charset greet
-                    Stream.write (Just (encodeToPacket 2 auth)) tlsOs'
+                    write tc (encodeToPacket 2 auth)
                     q <- readPacket tlsIs'
                     if isOK q
                     then do
                         consumed <- newIORef True
-                        let conn = MySQLConn tlsIs' tlsOs' (TLS.close ctx) consumed
+                        let conn = MySQLConn tlsIs' (write c) (TCP.close c) consumed
                         return (greet, conn)
-                    else Stream.write Nothing tlsOs' >> decodeFromPacket q >>= throwIO . ERRException
+                    else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
             else error "Database.MySQL.TLS: server doesn't support TLS connection"

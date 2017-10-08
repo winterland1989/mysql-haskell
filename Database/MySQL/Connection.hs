@@ -17,6 +17,7 @@ import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
+import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
 import qualified Data.ByteArray                  as BA
@@ -37,6 +38,7 @@ import           System.IO.Streams               (InputStream, OutputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
+import qualified Data.Connection                 as TCP
 
 --------------------------------------------------------------------------------
 
@@ -47,7 +49,7 @@ import qualified System.IO.Streams.TCP           as TCP
 --
 data MySQLConn = MySQLConn {
         mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
-    ,   mysqlWrite       :: {-# UNPACK #-} !(OutputStream Packet)
+    ,   mysqlWrite       :: (Packet -> IO ())
     ,   mysqlCloseSocket :: IO ()
     ,   isConsumed       :: {-# UNPACK #-} !(IORef Bool)
     }
@@ -105,22 +107,24 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail (ConnectInfo host port db user pass charset) =
-    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
-       (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
-            is' <- decodeInputStream is
-            os' <- Binary.encodeOutputStream os
-            p <- readPacket is'
-            greet <- decodeFromPacket p
-            let auth = mkAuth db user pass charset greet
-            Stream.write (Just (encodeToPacket 1 auth)) os'
-            q <- readPacket is'
-            if isOK q
-            then do
-                consumed <- newIORef True
-                let conn = MySQLConn is' os' (N.close sock) consumed
-                return (greet, conn)
-            else Stream.write Nothing os' >> decodeFromPacket q >>= throwIO . ERRException
+connectDetail (ConnectInfo host port db user pass charset)
+  = bracketOnError open TCP.close go
+  where
+    open  = connectWithBufferSize host port bUFSIZE
+    go c  = do
+      let is = TCP.source c
+      is' <- decodeInputStream is
+      p <- readPacket is'
+      greet <- decodeFromPacket p
+      let auth = mkAuth db user pass charset greet
+      write c $ encodeToPacket 1 auth
+      q <- readPacket is'
+      if isOK q
+      then do
+          consumed <- newIORef True
+          let conn = MySQLConn is' (write c) (TCP.close c) consumed
+          return (greet, conn)
+      else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
 
 mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
 mkAuth db user pass charset greet =
@@ -166,9 +170,7 @@ decodeInputStream is = Stream.makeInputStream $ do
 -- | Close a MySQL connection.
 --
 close :: MySQLConn -> IO ()
-close (MySQLConn _ os closeSocket _) = do
-    Stream.write Nothing os
-    closeSocket
+close (MySQLConn _ _ closeSocket _) = closeSocket
 
 -- | Send a 'COM_PING'.
 --
@@ -211,20 +213,20 @@ readPacket is = Stream.read is >>= maybe
         )
 {-# INLINE readPacket #-}
 
-writeCommand :: Command -> OutputStream Packet -> IO ()
-writeCommand a os = let bs = Binary.runPut (putCommand a) in
-    go (fromIntegral (L.length bs)) 0 bs os
+writeCommand :: Command -> (Packet -> IO ()) -> IO ()
+writeCommand a writePacket = let bs = Binary.runPut (putCommand a) in
+    go (fromIntegral (L.length bs)) 0 bs writePacket
   where
-    go len seqN bs os' = do
+    go len seqN bs writePacket' = do
         if len < 16777215
-        then Stream.write (Just (Packet len seqN bs)) os'
+        then writePacket (Packet len seqN bs)
         else do
             let (bs', rest) = L.splitAt 16777215 bs
                 seqN' = seqN + 1
                 len'  = len - 16777215
 
-            Stream.write (Just (Packet 16777215 seqN bs')) os'
-            seqN' `seq` len' `seq` go len' seqN' rest os'
+            writePacket (Packet 16777215 seqN bs')
+            seqN' `seq` len' `seq` go len' seqN' rest writePacket'
 {-# INLINE writeCommand #-}
 
 guardUnconsumed :: MySQLConn -> IO ()
@@ -251,3 +253,14 @@ instance Exception ERRException
 
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
+
+--------------------------------------------------------------------------------
+-- TCP shims
+
+type TCPConnection = TCP.Connection (N.Socket, N.SockAddr)
+
+connectWithBufferSize :: N.HostName -> N.PortNumber -> Int -> IO TCPConnection
+connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
+
+write :: Binary.Binary a => TCP.Connection x -> a -> IO ()
+write c a = TCP.send c $ Binary.runPut . Binary.put $ a
