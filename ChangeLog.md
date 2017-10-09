@@ -1,5 +1,12 @@
 # Revision history for mysql-haskell
 
+## 0.8.2.0  -- 2016-11-09
+
+Courtesy of naushadh, `mysql-haskell` will be on stackage again.
+
+* Update to use `tcp-streams-1.x`.
+* Fix compatibility with new  `tls/memory` version.
+
 ## 0.8.1.0  -- 2016-11-09
 
 * Add `Show` instance to `ConnectInfo`.
