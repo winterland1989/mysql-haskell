@@ -37,7 +37,7 @@ library
                     ,   monad-loops   == 0.4.*
                     ,   network       >= 2.3 && < 3.0
                     ,   io-streams    >= 1.2 && < 2.0
-                    ,   tcp-streams   >= 0.6 && < 0.7
+                    ,   tcp-streams   >= 1.0 && < 1.1
                     ,   wire-streams  >= 0.1
                     ,   binary        >= 0.8.3
                     ,   binary-ieee754

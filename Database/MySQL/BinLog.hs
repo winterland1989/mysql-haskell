@@ -73,14 +73,14 @@ dumpBinLog :: MySQLConn               -- ^ connection to be listened
                                       -- if master doesn't support, this parameter will be ignored.
            -> IO (FormatDescription, IORef ByteString, InputStream BinLogPacket)
                 -- ^ 'FormatDescription', 'IORef' contains current binlog filename, 'BinLogPacket' stream.
-dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) wantAck = do
+dumpBinLog conn@(MySQLConn is wp _ consumed) sid (BinLogTracker initfn initpos) wantAck = do
     guardUnconsumed conn
     checksum <- isCheckSumEnabled conn
     when checksum $ void $ execute_ conn "SET @master_binlog_checksum = @@global.binlog_checksum"
     semiAck  <- isSemiSyncEnabled conn
     let needAck = semiAck && wantAck
     when needAck . void $ execute_ conn "SET @rpl_semi_sync_slave = 1"
-    writeCommand (COM_BINLOG_DUMP initpos 0x00 sid initfn) os
+    writeCommand (COM_BINLOG_DUMP initpos 0x00 sid initfn) wp
     writeIORef consumed False
 
     rp <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_ROTATE_EVENT
@@ -88,7 +88,7 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
     fref <- newIORef (rFileName re)
 
     p <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_FORMAT_DESCRIPTION_EVENT
-    replyAck needAck p fref os
+    replyAck needAck p fref wp
     fmt <- getFromBinLogPacket getFormatDescription p
 
     es <- Stream.makeInputStream $ do
@@ -98,7 +98,7 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
             Just q' -> do when (blEventType q' == BINLOG_ROTATE_EVENT) $ do
                                 e <- getFromBinLogPacket getRotateEvent q'
                                 writeIORef' fref (rFileName e)
-                          replyAck needAck q' fref os
+                          replyAck needAck q' fref wp
                           return q
     return (fmt, fref, es)
   where
@@ -109,9 +109,9 @@ dumpBinLog conn@(MySQLConn is os _ consumed) sid (BinLogTracker initfn initpos) 
                 if blEventType p' == typ then return p' else skipToPacketT iop typ
             Nothing -> throwIO NetworkException
 
-    replyAck needAck p fref os' = when (needAck && blSemiAck p) $ do
+    replyAck needAck p fref wp' = when (needAck && blSemiAck p) $ do
         fn <- readIORef fref
-        Stream.write (Just (makeSemiAckPacket (blLogPos p) fn)) os'
+        wp' (makeSemiAckPacket (blLogPos p) fn)
 
     makeSemiAckPacket pos fn = putToPacket 0 $ do
         putWord8 0xEF      -- semi-ack
