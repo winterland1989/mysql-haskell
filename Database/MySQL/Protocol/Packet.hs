@@ -24,7 +24,6 @@ import           Data.Bits
 import qualified Data.ByteString       as B
 import           Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy  as L
-import qualified Data.ByteString.Lazy.Internal  as L
 import           Data.Int.Int24
 import           Data.Int
 import           Data.Word

@@ -86,7 +86,7 @@ import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
 
 import           Database.MySQL.Query
-import           System.IO.Streams                  (InputStream, OutputStream)
+import           System.IO.Streams                  (InputStream)
 import qualified System.IO.Streams                  as Stream
 import qualified Data.Vector                        as V
 

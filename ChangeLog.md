@@ -1,6 +1,12 @@
 # Revision history for mysql-haskell
 
-## 0.8.2.0  -- 2016-11-09
+## 0.8.3.0  -- 2017-10-09
+
+* Remove unnecessary exports from `Database.MySQL.Base`.
+* Reuse TCP connection when using TLS.
+* Clean up some compiler warnings.
+
+## 0.8.2.0  -- 2017-10-09
 
 Courtesy of naushadh, `mysql-haskell` will be on stackage again.
 

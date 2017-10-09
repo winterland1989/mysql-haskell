@@ -20,15 +20,15 @@ module Database.MySQL.OpenSSL
 import           Control.Exception              (bracketOnError, throwIO)
 import           Control.Monad
 import           Data.IORef                     (newIORef)
+import           Data.Connection                as Conn
+import qualified Data.Binary                    as Binary
+import qualified Data.Binary.Put                as Binary
 import           Database.MySQL.Connection      hiding (connect, connectDetail)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet
-import qualified Network.Socket                 as N
 import qualified OpenSSL                        as SSL
 import qualified OpenSSL.X509                   as X509
 import qualified OpenSSL.Session                as Session
-import qualified System.IO.Streams              as Stream
-import qualified System.IO.Streams.Binary       as Binary
 import qualified System.IO.Streams.OpenSSL      as SSL
 import qualified System.IO.Streams.TCP          as TCP
 import           Data.OpenSSLSetting
@@ -42,16 +42,20 @@ connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (Session.SSLContext, String) -> IO (Greeting, MySQLConn)
 connectDetail (ConnectInfo host port db user pass charset) (ctx, subname) =
-    bracketOnError (TCP.connectWithBufferSize host port bUFSIZE)
-       (\(_, _, sock) -> N.close sock) $ \ (is, os, sock) -> do
+    bracketOnError (connectWithBufferSize host port bUFSIZE) Conn.close $ \ conn -> do
+            let is = Conn.source conn
             is' <- decodeInputStream is
-            os' <- Binary.encodeOutputStream os
             p <- readPacket is'
             greet <- decodeFromPacket p
             if supportTLS (greetingCaps greet)
             then SSL.withOpenSSL $ do
-                Stream.write (Just (encodeToPacket 1 $ sslRequest charset)) os'
-                bracketOnError (Session.connection ctx sock) SSL.close $ \ ssl -> do
+                write conn (encodeToPacket 1 $ sslRequest charset)
+                let (sock, sockAddr) = Conn.connExtraInfo conn
+                bracketOnError (Session.connection ctx sock)
+                               (\ ssl -> do
+                                    Session.shutdown ssl Session.Unidirectional
+                                    Conn.close conn
+                               ) $ \ ssl -> do
                     Session.connect ssl
                     trusted <- Session.getVerifyResult ssl
                     cert <- Session.getPeerCertificate ssl
@@ -59,16 +63,19 @@ connectDetail (ConnectInfo host port db user pass charset) (ctx, subname) =
                     let cnname = lookup "CN" subnames
                         verified = maybe False (== subname) cnname
                     unless (trusted && verified) (throwIO $ Session.ProtocolError "fail to verify certificate")
-                    (sslIs, sslOs) <- SSL.sslToStreams ssl
-                    sslIs' <- decodeInputStream sslIs
-                    sslOs' <- Binary.encodeOutputStream sslOs
-                    let auth = mkAuth db user pass charset greet
-                    Stream.write (Just (encodeToPacket 2 auth)) sslOs'
-                    q <- readPacket sslIs'
+                    sconn <- SSL.sslToConnection (ssl, sockAddr)
+                    let sis = Conn.source sconn
+                        auth = mkAuth db user pass charset greet
+                    write sconn (encodeToPacket 2 auth)
+                    sis' <- decodeInputStream sis
+                    q <- readPacket sis'
                     if isOK q
                     then do
                         consumed <- newIORef True
-                        let conn = MySQLConn sslIs' sslOs' (SSL.close ssl) consumed
-                        return (greet, conn)
-                    else Stream.write Nothing sslOs' >> decodeFromPacket q >>= throwIO . ERRException
+                        let mconn = MySQLConn sis' (write sconn) (Conn.close sconn) consumed
+                        return (greet, mconn)
+                    else Conn.close sconn >> decodeFromPacket q >>= throwIO . ERRException
             else error "Database.MySQL.OpenSSL: server doesn't support TLS connection"
+  where
+    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
+    write c a = Conn.send c $ Binary.runPut . Binary.put $ a

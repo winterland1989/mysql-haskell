@@ -18,16 +18,15 @@ module Database.MySQL.TLS (
     ) where
 
 import           Control.Exception              (bracketOnError, throwIO)
-import           Control.Monad
+import qualified Data.Binary                    as Binary
+import qualified Data.Binary.Put                as Binary
+import qualified Data.Connection                as Conn
 import           Data.IORef                     (newIORef)
 import           Data.TLSSetting
 import           Database.MySQL.Connection      hiding (connect, connectDetail)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet
-import qualified Network.Socket                 as N
 import qualified Network.TLS                    as TLS
-import qualified System.IO.Streams              as Stream
-import qualified System.IO.Streams.Binary       as Binary
 import qualified System.IO.Streams.TCP          as TCP
 import qualified Data.Connection                as TCP
 import qualified System.IO.Streams.TLS          as TLS
@@ -42,7 +41,7 @@ connect c cp = fmap snd (connectDetail c cp)
 connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
 connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
     bracketOnError (connectWithBufferSize host port bUFSIZE)
-       (TCP.close) $ \ (c) -> do
+       (TCP.close) $ \ c -> do
             let is = TCP.source c
             is' <- decodeInputStream is
             p <- readPacket is'
@@ -53,9 +52,12 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                             TLS.clientUseServerNameIndication = False
                         ,   TLS.clientServerIdentification = (subName, "")
                         }
-                let connect' = TLS.connect cparams' Nothing host port
+                let (sock, sockAddr) = Conn.connExtraInfo c
                 write c (encodeToPacket 1 $ sslRequest charset)
-                bracketOnError connect' TCP.close $ \ tc -> do
+                bracketOnError (TLS.contextNew sock cparams')
+                               ( \ ctx -> TLS.bye ctx >> TCP.close c ) $ \ ctx -> do
+                    TLS.handshake ctx
+                    tc <- TLS.tLsToConnection (ctx, sockAddr)
                     let tlsIs = TCP.source tc
                     tlsIs' <- decodeInputStream tlsIs
                     let auth = mkAuth db user pass charset greet
@@ -68,3 +70,6 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                         return (greet, conn)
                     else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
             else error "Database.MySQL.TLS: server doesn't support TLS connection"
+  where
+    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
+    write c a = TCP.send c $ Binary.runPut . Binary.put $ a

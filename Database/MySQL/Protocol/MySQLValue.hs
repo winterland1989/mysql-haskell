@@ -38,7 +38,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Data.Binary.Put
 import           Data.Binary.Parser
-import           Data.Binary.IEEE754
+import           Data.Binary.IEEE754                ()
 import           Data.Bits
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B

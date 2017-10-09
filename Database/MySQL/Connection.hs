@@ -33,10 +33,8 @@ import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           Network.Socket                  (HostName, PortNumber)
-import qualified Network.Socket                  as N
-import           System.IO.Streams               (InputStream, OutputStream)
+import           System.IO.Streams               (InputStream)
 import qualified System.IO.Streams               as Stream
-import qualified System.IO.Streams.Binary        as Binary
 import qualified System.IO.Streams.TCP           as TCP
 import qualified Data.Connection                 as TCP
 
@@ -125,6 +123,9 @@ connectDetail (ConnectInfo host port db user pass charset)
           let conn = MySQLConn is' (write c) (TCP.close c) consumed
           return (greet, conn)
       else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
+
+    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
+    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
 
 mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
 mkAuth db user pass charset greet =
@@ -254,13 +255,3 @@ instance Exception ERRException
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
 
---------------------------------------------------------------------------------
--- TCP shims
-
-type TCPConnection = TCP.Connection (N.Socket, N.SockAddr)
-
-connectWithBufferSize :: N.HostName -> N.PortNumber -> Int -> IO TCPConnection
-connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
-
-write :: Binary.Binary a => TCP.Connection x -> a -> IO ()
-write c a = TCP.send c $ Binary.runPut . Binary.put $ a

@@ -25,7 +25,6 @@ import           Data.Binary.Put
 import qualified Data.ByteString                as B
 import           Data.ByteString.Char8          as BC
 import           Data.Bits
-import           Data.Word
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------

@@ -44,8 +44,7 @@ import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Connection
 import           GHC.Generics                              (Generic)
-import           System.IO.Streams                         (InputStream,
-                                                            OutputStream)
+import           System.IO.Streams                         (InputStream)
 import qualified System.IO.Streams                         as Stream
 
 type SlaveID = Word32
