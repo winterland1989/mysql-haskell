@@ -120,7 +120,7 @@ connectDetail (ConnectInfo host port db user pass charset)
       if isOK q
       then do
           consumed <- newIORef True
-          let conn = MySQLConn is' (write c) (TCP.close c) consumed
+          let conn = MySQLConn is' (write c) (writeCommand COM_QUIT (write c) >> TCP.close c) consumed
           return (greet, conn)
       else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
 
