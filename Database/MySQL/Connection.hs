@@ -14,7 +14,7 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 module Database.MySQL.Connection where
 
 import           Control.Exception               (Exception, bracketOnError,
-                                                  throwIO)
+                                                  throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
 import qualified Data.Binary                     as Binary
@@ -120,7 +120,10 @@ connectDetail (ConnectInfo host port db user pass charset)
       if isOK q
       then do
           consumed <- newIORef True
-          let conn = MySQLConn is' (write c) (writeCommand COM_QUIT (write c) >> TCP.close c) consumed
+          let doNothing :: SomeException -> IO ()
+              doNothing _ = return ()
+          let waitNotMandatoryOK = catch (void(waitCommandReply is')) doNothing
+          let conn = MySQLConn is' (write c) (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c) consumed
           return (greet, conn)
       else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
 
