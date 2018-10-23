@@ -72,7 +72,7 @@ isEOF :: Packet -> Bool
 isEOF p = L.index (pBody p) 0 == 0xFE
 {-# INLINE isEOF #-}
 
--- | Is there more packets to be read?
+-- | Is there more packet to be read?
 --
 --  https://dev.mysql.com/doc/internals/en/status-flags.html
 isThereMore :: OK -> Bool
