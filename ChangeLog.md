@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 0.8.4.0  -- 2018-10-23
+
+* Add `executeMany_` to execute batch SQLs, [#26](https://github.com/winterland1989/mysql-haskell/issues/26).
+* Optimize connection closing sequence, [#20](https://github.com/winterland1989/mysql-haskell/pull/20), [#25](https://github.com/winterland1989/mysql-haskell/pull/25).
+
 ## 0.8.3.0  -- 2017-10-09
 
 * Remove unnecessary exports from `Database.MySQL.Base`.

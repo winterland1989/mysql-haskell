@@ -37,6 +37,7 @@ module Database.MySQL.Base
       -- * Direct query
     , execute
     , executeMany
+    , executeMany_
     , execute_
     , query_
     , queryVector_
@@ -121,6 +122,19 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList = do
 
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[MySQLValue]] -> IO [OK] #-}
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[Param]]      -> IO [OK] #-}
+
+-- | Execute multiple querys (without param) which don't return result-set.
+--
+-- This's useful when your want to execute multiple SQLs without params, e.g. from a
+-- SQL dump, or a table migration plan.
+--
+-- @since 0.8.4.0
+--
+executeMany_ :: MySQLConn -> Query -> IO [OK]
+executeMany_ conn@(MySQLConn is os _ _) qry = do
+    guardUnconsumed conn
+    writeCommand (COM_QUERY (fromQuery qry)) os
+    waitCommandReplys is
 
 -- | Execute a MySQL query which don't return a result-set.
 --

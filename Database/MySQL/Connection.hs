@@ -106,26 +106,29 @@ connect = fmap snd . connectDetail
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
 connectDetail (ConnectInfo host port db user pass charset)
-  = bracketOnError open TCP.close go
+    = bracketOnError open TCP.close go
   where
     open  = connectWithBufferSize host port bUFSIZE
     go c  = do
-      let is = TCP.source c
-      is' <- decodeInputStream is
-      p <- readPacket is'
-      greet <- decodeFromPacket p
-      let auth = mkAuth db user pass charset greet
-      write c $ encodeToPacket 1 auth
-      q <- readPacket is'
-      if isOK q
-      then do
-          consumed <- newIORef True
-          let doNothing :: SomeException -> IO ()
-              doNothing _ = return ()
-          let waitNotMandatoryOK = catch (void(waitCommandReply is')) doNothing
-          let conn = MySQLConn is' (write c) (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c) consumed
-          return (greet, conn)
-      else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
+        let is = TCP.source c
+        is' <- decodeInputStream is
+        p <- readPacket is'
+        greet <- decodeFromPacket p
+        let auth = mkAuth db user pass charset greet
+        write c $ encodeToPacket 1 auth
+        q <- readPacket is'
+        if isOK q
+        then do
+            consumed <- newIORef True
+            let waitNotMandatoryOK = catch
+                    (void (waitCommandReply is'))           -- server will either reply an OK packet
+                    ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
+                conn = MySQLConn is'
+                    (write c)
+                    (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
+                    consumed
+            return (greet, conn)
+        else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
 
     connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
     write c a = TCP.send c $ Binary.runPut . Binary.put $ a
@@ -200,6 +203,17 @@ waitCommandReply is = do
         | isOK  p -> decodeFromPacket p
         | otherwise -> throwIO (UnexpectedPacket p)
 {-# INLINE waitCommandReply #-}
+
+waitCommandReplys :: InputStream Packet -> IO [OK]
+waitCommandReplys is = do
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do ok <- decodeFromPacket p
+                        if isThereMore ok
+                        then (ok :) <$> waitCommandReplys is
+                        else return [ok]
+        | otherwise -> throwIO (UnexpectedPacket p)
+{-# INLINE waitCommandReplys #-}
 
 readPacket :: InputStream Packet -> IO Packet
 readPacket is = Stream.read is >>= maybe
