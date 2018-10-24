@@ -1,5 +1,5 @@
 name:                mysql-haskell
-version:             0.8.4.0
+version:             0.8.5.0
 synopsis:            pure haskell MySQL driver
 description:         pure haskell MySQL driver
 license:             BSD3
@@ -75,7 +75,7 @@ test-suite test
     build-depends:  mysql-haskell
                   , base
                   , bytestring
-                  , tasty == 0.11.*
+                  , tasty >= 0.11 && < 2.0
                   , tasty-hunit
                   , text
                   , io-streams
