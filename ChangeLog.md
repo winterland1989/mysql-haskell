@@ -1,6 +1,6 @@
 # Revision history for mysql-haskell
 
-## 0.8.5.0 -- 2018-10-23
+## 0.8.4.1 -- 2018-10-23
 
 * Relax `tasty` version bound to build with latest stackage. [#26](https://github.com/winterland1989/mysql-haskell/pull/26)
 
