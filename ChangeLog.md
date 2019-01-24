@@ -1,5 +1,9 @@
 # Revision history for mysql-haskell
 
+## 0.8.4.2 -- 2019-01-22
+
+* Fix [stackage#4312](https://github.com/commercialhaskell/stackage/issues/4312): Relax `network` bounds.
+
 ## 0.8.4.1 -- 2018-10-23
 
 * Relax `tasty` version bound to build with latest stackage. [#26](https://github.com/winterland1989/mysql-haskell/pull/26)
