@@ -38,8 +38,8 @@ library
                     ,   monad-loops   == 0.4.*
                     ,   network       >= 2.3 && < 3.0
                     ,   io-streams    >= 1.2 && < 2.0
-                    ,   tcp-streams   == 0.5.*
-                    ,   wire-streams  >= 0.1
+                    ,   tcp-streams   == 1.0.1.1
+                    ,   wire-streams  == 0.1.1.0
                     ,   binary        == 0.8.*
                     ,   binary-ieee754 == 0.1.*
                     ,   binary-parsers >= 0.2.1

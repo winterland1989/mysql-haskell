@@ -17,6 +17,7 @@ module Database.MySQL.Protocol.Command where
 
 import           Control.Applicative
 import           Control.Monad
+import qualified Control.Monad.Fail as Fail
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Parser
@@ -25,6 +26,11 @@ import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString.Lazy               as L
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
+
+--TODO: orphan instance MonadFail Data.Binary
+instance MonadFail PutM where
+
+
 
 --------------------------------------------------------------------------------
 --  Commands
@@ -83,7 +89,7 @@ putCommand (COM_STMT_EXECUTE stid params nullmap) = do
 
 putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid
 putCommand (COM_STMT_RESET stid) = putWord8 0x1A >> putWord32le stid
-putCommand _                     = fail "unsupported command"
+putCommand _                     = error "unsupported command"
 
 --------------------------------------------------------------------------------
 --  Prepared statment related
