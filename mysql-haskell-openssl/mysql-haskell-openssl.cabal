@@ -22,9 +22,9 @@ library
     exposed-modules: Database.MySQL.OpenSSL
     build-depends:      base          >= 4.7 && < 5
                     ,   binary        >= 0.8.3
-                    ,   tcp-streams   >= 1.0 && < 1.1
+                    ,   tcp-streams   >= 1.0.1.1
                     ,   tcp-streams-openssl  >= 1.0 && < 1.1
-                    ,   wire-streams  >= 0.1
+                    ,   wire-streams  == 0.1.1.0
                     ,   mysql-haskell >= 0.8.3 && < 0.8.4
                     ,   HsOpenSSL      >=0.10.3 && <0.12
 
