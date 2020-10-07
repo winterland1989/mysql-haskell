@@ -83,7 +83,7 @@ putCommand (COM_STMT_EXECUTE stid params nullmap) = do
 
 putCommand (COM_STMT_CLOSE stid) = putWord8 0x19 >> putWord32le stid
 putCommand (COM_STMT_RESET stid) = putWord8 0x1A >> putWord32le stid
-putCommand _                     = fail "unsupported command"
+putCommand _                     = error "unsupported command"
 
 --------------------------------------------------------------------------------
 --  Prepared statment related
