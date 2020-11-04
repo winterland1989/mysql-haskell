@@ -66,7 +66,7 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                     if isOK q
                     then do
                         consumed <- newIORef True
-                        let conn = MySQLConn tlsIs' (write c) (TCP.close c) consumed
+                        let conn = MySQLConn tlsIs' (write tc) (TCP.close tc) consumed
                         return (greet, conn)
                     else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
             else error "Database.MySQL.TLS: server doesn't support TLS connection"
