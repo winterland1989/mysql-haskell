@@ -1,5 +1,9 @@
 # Revision history for mysql-haskell
 
+## 0.8.4.3 -- 2020-11-04
+
+* Fix build with GHC 8.8.
+
 ## 0.8.4.2 -- 2019-01-22
 
 * Fix [stackage#4312](https://github.com/commercialhaskell/stackage/issues/4312): Relax `network` bounds.

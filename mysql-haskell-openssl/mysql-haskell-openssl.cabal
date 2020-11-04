@@ -1,5 +1,5 @@
 name:                mysql-haskell-openssl
-version:             0.8.3.0
+version:             0.8.3.1
 synopsis:            TLS support for mysql-haskell package using openssl
 description:         TLS support for mysql-haskell package using openssl
 license:             BSD3

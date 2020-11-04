@@ -1,5 +1,5 @@
 name:                mysql-haskell
-version:             0.8.4.2
+version:             0.8.4.3
 synopsis:            pure haskell MySQL driver
 description:         pure haskell MySQL driver
 license:             BSD3
