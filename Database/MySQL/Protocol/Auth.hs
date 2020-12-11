@@ -181,6 +181,7 @@ clientCap =  CLIENT_LONG_PASSWORD
                 .|. CLIENT_PROTOCOL_41
                 .|. CLIENT_TRANSACTIONS
                 .|. CLIENT_MULTI_STATEMENTS
+                .|. CLIENT_MULTI_RESULTS
                 .|. CLIENT_SECURE_CONNECTION
 
 clientMaxPacketSize :: Word32
