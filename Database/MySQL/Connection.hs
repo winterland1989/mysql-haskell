@@ -46,23 +46,21 @@ import qualified Data.Connection                 as TCP
 -- You shouldn't use one 'MySQLConn' in different thread, if you do that,
 -- consider protecting it with a @MVar@.
 --
-data MySQLConn = MySQLConn {
-        mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
-    ,   mysqlWrite       :: (Packet -> IO ())
-    ,   mysqlCloseSocket :: IO ()
-    ,   isConsumed       :: {-# UNPACK #-} !(IORef Bool)
+data MySQLConn = MySQLConn
+    { mysqlRead        :: IO (Maybe Packet)
+    , mysqlWrite       :: Packet -> IO ()
+    , isConsumed       :: {-# UNPACK #-} !(IORef Bool)
     }
 
 -- | Everything you need to establish a MySQL connection.
 --
--- To setup a TLS connection, use module "Database.MySQL.TLS" or "Database.MySQL.OpenSSL".
 --
 data ConnectInfo = ConnectInfo
-    { ciHost     :: HostName
+    { ciHost     :: CBytes
     , ciPort     :: PortNumber
-    , ciDatabase :: ByteString
-    , ciUser     :: ByteString
-    , ciPassword :: ByteString
+    , ciDatabase :: T.Text
+    , ciUser     :: T.Text
+    , ciPassword :: T.Text
     , ciCharset  :: Word8
     } deriving Show
 

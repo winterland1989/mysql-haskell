@@ -3,9 +3,9 @@ module Database.MySQL.Query where
 import           Data.String               (IsString (..))
 import           Control.Exception         (throw, Exception)
 import           Data.Typeable
-import qualified Data.ByteString.Lazy      as L
-import qualified Data.ByteString.Lazy.Char8     as LC
-import qualified Data.ByteString.Builder   as BB
+import qualified Z.Data.Builder            as B
+import qualified Z.Data.Vector             as V
+import qualified Z.Data.Text               as T
 import           Control.Arrow             (first)
 import           Database.MySQL.Protocol.MySQLValue
 import           Data.Binary.Put
