@@ -20,29 +20,28 @@ source-repository head
 
 library
     exposed-modules:    Database.MySQL.Protocol.Packet
+                        Database.MySQL.Protocol.Auth
+                        Database.MySQL.Protocol.Command
+                        Database.MySQL.Protocol.ColumnDef
+                        Database.MySQL.Protocol.MySQLValue
+                        Database.MySQL.Protocol.Escape
+                        Database.MySQL.Connection
 
-                    --    Database.MySQL.Base
+                        Database.MySQL.Base
                     --,   Database.MySQL.TLS
-                    --,   Database.MySQL.Protocol.Auth
-                    --,   Database.MySQL.Protocol.Command
-                    --,   Database.MySQL.Protocol.ColumnDef
-                    --,  Database.MySQL.Protocol.Packet
-                    --,   Database.MySQL.Protocol.MySQLValue
-                    --,   Database.MySQL.Protocol.Escape
                     --,   Database.MySQL.BinLog
                     --,   Database.MySQL.BinLogProtocol.BinLogEvent
                     --,   Database.MySQL.BinLogProtocol.BinLogValue
                     --,   Database.MySQL.BinLogProtocol.BinLogMeta
-                    --,   Database.MySQL.Connection
     other-modules:    
                     -- Database.MySQL.Query
     build-depends:      base          >= 4.7 && < 5
                     ,   monad-loops   == 0.4.*
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
-                    ,   Z-Data        >= 0.8.1 && < 0.9
-                    ,   Z-IO          >= 0.8   && < 0.9
-                    ,   Z-Botan       >= 0.2   && < 0.3
+                    ,   Z-Data        >= 0.8.8 && < 0.9
+                    ,   Z-IO          >= 0.8.1 && < 0.9
+                    ,   Z-Botan       >= 0.4   && < 0.5
 
 
     default-language:    Haskell2010
@@ -54,6 +53,7 @@ library
                         ,   OverloadedStrings
                         ,   TypeApplications
     ghc-options:       -Wall
+    c-sources:         cbits/escape.c
 
 test-suite test
     type: exitcode-stdio-1.0

@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-{-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 {-|
 Module      : Database.MySQL.Protocol.ColumnDef
@@ -16,13 +16,11 @@ Column definition(aka. field type).
 
 module Database.MySQL.Protocol.ColumnDef where
 
-import           Control.Applicative
-import           Data.Binary
-import           Data.Binary.Get
-import           Data.Binary.Parser
-import           Data.Binary.Put
-import           Data.Bits                      ((.&.))
-import           Data.ByteString                (ByteString)
+import           Data.Word
+import           Data.Bits
+import qualified Z.Data.Parser                  as P
+import qualified Z.Data.Builder                 as B
+import qualified Z.Data.Vector                  as V
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -30,113 +28,116 @@ import           Database.MySQL.Protocol.Packet
 
 -- | A description of a field (column) of a table.
 data ColumnDef = ColumnDef
-    { -- fieldCatalog :: !ByteString              -- ^ const 'def'
-      columnDB        ::  !ByteString             -- ^ Database for table.
-    , columnTable     ::  !ByteString             -- ^ Table of column, if column was a field.
-    , columnOrigTable ::  !ByteString             -- ^ Original table name, if table was an alias.
-    , columnName      ::  !ByteString             -- ^ Name of column.
-    , columnOrigName  ::  !ByteString             -- ^ Original column name, if an alias.
-    , columnCharSet   ::  !Word16                 -- ^ Character set number.
-    , columnLength    ::  !Word32                 -- ^ Width of column (create length).
-    , columnType      ::  !FieldType
-    , columnFlags     ::  !Word16                 -- ^ Div flags.
-    , columnDecimals  ::  !Word8                  -- ^ Number of decimals in field.
+    { -- fieldCatalog :: !V.Bytes                       -- ^ const 'def'
+      columnDB        ::  {-# UNPACK #-} !V.Bytes       -- ^ Database for table.
+    , columnTable     ::  {-# UNPACK #-} !V.Bytes       -- ^ Table of column, if column was a field.
+    , columnOrigTable ::  {-# UNPACK #-} !V.Bytes       -- ^ Original table name, if table was an alias.
+    , columnName      ::  {-# UNPACK #-} !V.Bytes       -- ^ Name of column.
+    , columnOrigName  ::  {-# UNPACK #-} !V.Bytes       -- ^ Original column name, if an alias.
+    , columnCharSet   ::  {-# UNPACK #-} !Word16        -- ^ Character set number.
+    , columnLength    ::  {-# UNPACK #-} !Word32        -- ^ Width of column (create length).
+    , columnType      ::  {-# UNPACK #-} !FieldType
+    , columnFlags     ::  {-# UNPACK #-} !Word16        -- ^ Div flags.
+    , columnDecimals  ::  {-# UNPACK #-} !Word8         -- ^ Number of decimals in field.
     } deriving (Show, Eq)
 
-getField :: Get ColumnDef
-getField = ColumnDef
-        <$> (skipN 4                 -- const "def"
-         *> getLenEncBytes)         -- db
-        <*> getLenEncBytes          -- table
-        <*> getLenEncBytes          -- origTable
-        <*> getLenEncBytes          -- name
-        <*> getLenEncBytes          -- origName
-        <*  skipN 1                  -- const 0x0c
-        <*> getWord16le             -- charset
-        <*> getWord32le             -- length
-        <*> getFieldType            -- type
-        <*> getWord16le             -- flags
-        <*> getWord8                -- decimals
-        <* skipN 2                   -- const 0x00 0x00
-{-# INLINE getField #-}
+decodeField :: P.Parser ColumnDef
+{-# INLINE decodeField #-}
+decodeField = ColumnDef
+        <$> (P.skip 4               -- const "def"
+         *> decodeLenEncBytes)      -- db
+        <*> decodeLenEncBytes       -- table
+        <*> decodeLenEncBytes       -- origTable
+        <*> decodeLenEncBytes       -- name
+        <*> decodeLenEncBytes       -- origName
+        <*  P.skip 1                -- const 0x0c
+        <*> P.decodePrimLE          -- charset
+        <*> P.decodePrimLE          -- length
+        <*> P.decodePrim            -- type
+        <*> P.decodePrimLE          -- flags
+        <*> P.decodePrim            -- decimals
+        <*  P.skip 2                -- const 0x00 0x00
 
-putField :: ColumnDef -> Put
-putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
-    putLenEncBytes "def"
-    putLenEncBytes db
-    putLenEncBytes tbl
-    putLenEncBytes otbl
-    putLenEncBytes name
-    putLenEncBytes oname
-    putWord16le charset
-    putWord32le len
-    putFieldType typ
-    putWord16le  flags
-    putWord8 dec
-    putWord16le 0X0000
-{-# INLINE putField #-}
+encodeField :: ColumnDef -> B.Builder ()
+{-# INLINE encodeField #-}
+encodeField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
+    encodeLenEncBytes "def"
+    encodeLenEncBytes db
+    encodeLenEncBytes tbl
+    encodeLenEncBytes otbl
+    encodeLenEncBytes name
+    encodeLenEncBytes oname
+    B.encodePrimLE charset
+    B.encodePrimLE len
+    B.encodePrim typ
+    B.encodePrimLE  flags
+    B.encodePrim dec
+    B.encodePrimLE @Word16 0X0000
 
-instance Binary ColumnDef where
-    get = getField
-    {-# INLINE get #-}
-    put = putField
-    {-# INLINE put #-}
+-- | MySQL_TYPE
+type FieldType = Word8
 
--- | @newtype@ around 'Word8' for represent @MySQL_TYPE@, We don't use sum type here for speed reason.
---
-newtype FieldType = FieldType Word8 deriving (Show, Eq)
+pattern MySQLTypeDecimal    :: FieldType
+pattern MySQLTypeTiny       :: FieldType
+pattern MySQLTypeShort      :: FieldType
+pattern MySQLTypeLong       :: FieldType
+pattern MySQLTypeFloat      :: FieldType
+pattern MySQLTypeDouble     :: FieldType
+pattern MySQLTypeNull       :: FieldType
+pattern MySQLTypeTimestamp  :: FieldType
+pattern MySQLTypeLongLong   :: FieldType
+pattern MySQLTypeInt24      :: FieldType
+pattern MySQLTypeDate       :: FieldType
+pattern MySQLTypeTime       :: FieldType
+pattern MySQLTypeDateTime   :: FieldType
+pattern MySQLTypeYear       :: FieldType
+pattern MySQLTypeNewDate    :: FieldType
+pattern MySQLTypeVarChar    :: FieldType
+pattern MySQLTypeBit        :: FieldType
+pattern MySQLTypeTimestamp2 :: FieldType
+pattern MySQLTypeDateTime2  :: FieldType
+pattern MySQLTypeTime2      :: FieldType
+pattern MySQLTypeNewDecimal :: FieldType
+pattern MySQLTypeEnum       :: FieldType
+pattern MySQLTypeSet        :: FieldType
+pattern MySQLTypeTinyBlob   :: FieldType
+pattern MySQLTypeMediumBlob :: FieldType
+pattern MySQLTypeLongBlob   :: FieldType
+pattern MySQLTypeBlob       :: FieldType
+pattern MySQLTypeVarString  :: FieldType
+pattern MySQLTypeString     :: FieldType
+pattern MySQLTypeGeometry   :: FieldType
 
-mySQLTypeDecimal, mySQLTypeTiny, mySQLTypeShort, mySQLTypeLong, mySQLTypeFloat :: FieldType
-mySQLTypeDouble, mySQLTypeNull, mySQLTypeTimestamp, mySQLTypeLongLong, mySQLTypeInt24 :: FieldType
-mySQLTypeDate, mySQLTypeTime, mySQLTypeDateTime, mySQLTypeYear, mySQLTypeNewDate, mySQLTypeVarChar :: FieldType
-mySQLTypeBit, mySQLTypeTimestamp2, mySQLTypeDateTime2, mySQLTypeTime2, mySQLTypeNewDecimal :: FieldType
-mySQLTypeEnum, mySQLTypeSet, mySQLTypeTinyBlob, mySQLTypeMediumBlob, mySQLTypeLongBlob :: FieldType
-mySQLTypeBlob, mySQLTypeVarString, mySQLTypeString, mySQLTypeGeometry :: FieldType
-
-mySQLTypeDecimal        = FieldType 0x00
-mySQLTypeTiny           = FieldType 0x01
-mySQLTypeShort          = FieldType 0x02
-mySQLTypeLong           = FieldType 0x03
-mySQLTypeFloat          = FieldType 0x04
-mySQLTypeDouble         = FieldType 0x05
-mySQLTypeNull           = FieldType 0x06
-mySQLTypeTimestamp      = FieldType 0x07
-mySQLTypeLongLong       = FieldType 0x08
-mySQLTypeInt24          = FieldType 0x09
-mySQLTypeDate           = FieldType 0x0a
-mySQLTypeTime           = FieldType 0x0b
-mySQLTypeDateTime       = FieldType 0x0c
-mySQLTypeYear           = FieldType 0x0d
-mySQLTypeNewDate        = FieldType 0x0e
-mySQLTypeVarChar        = FieldType 0x0f
-mySQLTypeBit            = FieldType 0x10
-mySQLTypeTimestamp2     = FieldType 0x11
-mySQLTypeDateTime2      = FieldType 0x12
-mySQLTypeTime2          = FieldType 0x13
-mySQLTypeNewDecimal     = FieldType 0xf6
-mySQLTypeEnum           = FieldType 0xf7
-mySQLTypeSet            = FieldType 0xf8
-mySQLTypeTinyBlob       = FieldType 0xf9
-mySQLTypeMediumBlob     = FieldType 0xfa
-mySQLTypeLongBlob       = FieldType 0xfb
-mySQLTypeBlob           = FieldType 0xfc
-mySQLTypeVarString      = FieldType 0xfd
-mySQLTypeString         = FieldType 0xfe
-mySQLTypeGeometry       = FieldType 0xff
-
-getFieldType :: Get FieldType
-getFieldType = FieldType <$> getWord8
-{-# INLINE getFieldType #-}
-
-putFieldType :: FieldType -> Put
-putFieldType (FieldType t) = putWord8 t
-{-# INLINE putFieldType #-}
-
-instance Binary FieldType where
-    get = getFieldType
-    {-# INLINE get #-}
-    put = putFieldType
-    {-# INLINE put #-}
+pattern MySQLTypeDecimal        = 0x00
+pattern MySQLTypeTiny           = 0x01
+pattern MySQLTypeShort          = 0x02
+pattern MySQLTypeLong           = 0x03
+pattern MySQLTypeFloat          = 0x04
+pattern MySQLTypeDouble         = 0x05
+pattern MySQLTypeNull           = 0x06
+pattern MySQLTypeTimestamp      = 0x07
+pattern MySQLTypeLongLong       = 0x08
+pattern MySQLTypeInt24          = 0x09
+pattern MySQLTypeDate           = 0x0a
+pattern MySQLTypeTime           = 0x0b
+pattern MySQLTypeDateTime       = 0x0c
+pattern MySQLTypeYear           = 0x0d
+pattern MySQLTypeNewDate        = 0x0e
+pattern MySQLTypeVarChar        = 0x0f
+pattern MySQLTypeBit            = 0x10
+pattern MySQLTypeTimestamp2     = 0x11
+pattern MySQLTypeDateTime2      = 0x12
+pattern MySQLTypeTime2          = 0x13
+pattern MySQLTypeNewDecimal     = 0xf6
+pattern MySQLTypeEnum           = 0xf7
+pattern MySQLTypeSet            = 0xf8
+pattern MySQLTypeTinyBlob       = 0xf9
+pattern MySQLTypeMediumBlob     = 0xfa
+pattern MySQLTypeLongBlob       = 0xfb
+pattern MySQLTypeBlob           = 0xfc
+pattern MySQLTypeVarString      = 0xfd
+pattern MySQLTypeString         = 0xfe
+pattern MySQLTypeGeometry       = 0xff
 
 --------------------------------------------------------------------------------
 --  Field flags

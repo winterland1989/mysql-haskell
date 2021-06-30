@@ -77,7 +77,6 @@ decodeFromPacket :: P.Parser a -> Packet -> IO a
 decodeFromPacket g (Packet _ _ body) = unwrap "EPARSE" $ P.parse' g body
 {-# INLINE decodeFromPacket #-}
 
-
 -- Encode a packet with a sequence number
 encodeToPacket :: Word8 -> B.Builder () -> Packet
 encodeToPacket seqN payload =
@@ -108,38 +107,22 @@ decodeOK = OK <$ P.skip 1
            <*> P.decodePrimLE @Word16
 {-# INLINE decodeOK #-}
 
-encodeOK :: OK -> B.Builder ()
-encodeOK (OK row lid stat wcnt) = do
-    B.word8 0x00
-    encodeLenEncInt row
-    encodeLenEncInt lid
-    B.encodePrimLE @Word16 stat
-    B.encodePrimLE @Word16 wcnt
-{-# INLINE encodeOK #-}
-
 data ERR = ERR
     { errCode  :: {-# UNPACK #-} !Word16
-    , errState :: !V.Bytes
-    , errMsg   :: !V.Bytes
+    , errState :: !T.Text
+    , errMsg   :: !T.Text
     } deriving (Show, Eq, Ord, Generic)
       deriving anyclass T.Print
 
 decodeERR :: P.Parser ERR
-decodeERR = ERR <$  P.skip 1
-             <*> P.decodePrimLE @Word16
-             <*  P.skip 1
-             <*> P.take 5
-             <*> P.takeRemaining
+decodeERR = do
+    _ <- P.skipWord8
+    code <- P.decodePrimLE @Word16
+    _ <- P.skipWord8
+    st <- P.take 5
+    msg <- P.takeRemaining
+    return (ERR code (T.validate st) (T.validate msg))
 {-# INLINE decodeERR #-}
-
-encodeERR :: ERR -> B.Builder ()
-encodeERR (ERR code stat msg) = do
-    B.word8 0xFF
-    B.encodePrimLE @Word16 code
-    B.word8 35 -- '#'
-    B.bytes stat
-    B.bytes msg
-{-# INLINE encodeERR #-}
 
 data EOF = EOF
     { eofWarningCnt :: {-# UNPACK #-} !Word16
@@ -152,13 +135,6 @@ decodeEOF = EOF <$  P.skip 1
              <*> P.decodePrimLE @Word16
              <*> P.decodePrimLE @Word16
 {-# INLINE decodeEOF #-}
-
-encodeEOF :: EOF -> B.Builder ()
-encodeEOF (EOF wcnt stat) = do
-    B.word8 0xFE
-    B.encodePrimLE @Word16 wcnt
-    B.encodePrimLE @Word16 stat
-{-# INLINE encodeEOF #-}
 
 --------------------------------------------------------------------------------
 --  Helpers

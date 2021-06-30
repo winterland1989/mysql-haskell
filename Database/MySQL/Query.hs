@@ -1,14 +1,14 @@
 module Database.MySQL.Query where
 
+import           Control.Arrow             (first)
+import           Database.MySQL.Protocol.MySQLValue
 import           Data.String               (IsString (..))
-import           Control.Exception         (throw, Exception)
 import           Data.Typeable
+import           Z.Data.ASCII
 import qualified Z.Data.Builder            as B
 import qualified Z.Data.Vector             as V
 import qualified Z.Data.Text               as T
-import           Control.Arrow             (first)
-import           Database.MySQL.Protocol.MySQLValue
-import           Data.Binary.Put
+import           Z.IO.Exception
 
 -- | Query string type borrowed from @mysql-simple@.
 --
@@ -21,11 +21,11 @@ import           Data.Binary.Put
 -- construct a query is to enable the @OverloadedStrings@ language
 -- extension and then simply write the query in double quotes.
 --
--- The underlying type is a 'L.ByteString', and literal Haskell strings
+-- The underlying type is a 'V.Bytes', and literal Haskell strings
 -- that contain Unicode characters will be correctly transformed to
 -- UTF-8.
 --
-newtype Query = Query { fromQuery :: L.ByteString } deriving (Eq, Ord, Typeable)
+newtype Query = Query { fromQuery :: V.Bytes } deriving (Eq, Ord, Typeable)
 
 instance Show Query where
     show = show . fromQuery
@@ -34,16 +34,16 @@ instance Read Query where
     readsPrec i = fmap (first Query) . readsPrec i
 
 instance IsString Query where
-    fromString = Query . BB.toLazyByteString . BB.stringUtf8
+    fromString = Query . fromString
 
 -- | A type to wrap a query parameter in to allow for single and multi-valued parameters.
 --
 -- The behavior of 'Param' can be illustrated by following example:
 --
 -- @
---    render $ One (MySQLText "hello") = hello
---    render $ Many [MySQLText "hello", MySQLText "world"] = hello, world
---    render $ Many [] = null
+--    buildParam $ One (MySQLText "hello") = hello
+--    buildParam $ Many [MySQLText "hello", MySQLText "world"] = hello, world
+--    buildParam $ Many [] = null
 -- @
 --
 -- So you can now write a query like this: @ SELECT * FROM test WHERE _id IN (?, 888) @
@@ -54,27 +54,27 @@ data Param = One  MySQLValue
 
 -- | A type that may be used as a single parameter to a SQL query. Inspired from @mysql-simple@.
 class QueryParam a where
-    render :: a -> Put
+    buildParam :: a -> B.Builder ()
     -- ^ Prepare a value for substitution into a query string.
 
 instance QueryParam Param where
-    render (One x)      = putTextField x
-    render (Many [])    = putTextField MySQLNull
-    render (Many (x:[]))= putTextField x
-    render (Many (x:xs))= do putTextField x
-                             mapM_ (\f -> putCharUtf8 ',' >> putTextField f) xs
+    {-# INLINE buildParam #-}
+    buildParam (One x)   = encodeTextField x
+    buildParam (Many []) = "NULL"
+    buildParam (Many xs) = B.intercalateList (B.comma) encodeTextField xs
 
 instance QueryParam MySQLValue where
-    render = putTextField
+    {-# INLINE buildParam #-}
+    buildParam = encodeTextField
 
-renderParams :: QueryParam p => Query -> [p] -> Query
+renderParams :: HasCallStack => QueryParam p => Query -> [p] -> Query
 renderParams (Query qry) params =
-    let fragments = LC.split '?' qry
-    in Query . runPut $ merge fragments params
+    let fragments = V.split QUESTION qry
+    in Query . B.build $ merge fragments params
   where
-    merge [x]    []     = putLazyByteString x
-    merge (x:xs) (y:ys) = putLazyByteString x >> render y >> merge xs ys
-    merge _     _       = throw WrongParamsCount
+    merge [x]    []     = B.bytes x
+    merge (x:xs) (y:ys) = B.bytes x >> buildParam y >> merge xs ys
+    merge _     _       = throw (WrongParamsCount callStack)
 
-data WrongParamsCount = WrongParamsCount deriving (Show, Typeable)
+data WrongParamsCount = WrongParamsCount CallStack deriving Show
 instance Exception WrongParamsCount
