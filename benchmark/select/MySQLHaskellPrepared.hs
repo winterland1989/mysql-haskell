@@ -6,31 +6,34 @@ module Main where
 import           Control.Concurrent.Async
 import           Control.Monad
 import           Database.MySQL.Base
-import           System.Environment
-import           System.IO.Streams        (fold)
+import           Z.Data.CBytes  as CB
+import           Z.Data.PrimRef
+import           Z.IO.BIO
+import           Z.IO
 import  qualified Data.ByteString as B
 
 main :: IO ()
 main = do
     args <- getArgs
-    case args of [threadNum] -> go (read threadNum)
-                 _ -> putStrLn "No thread number provided."
+    case args of (_:threadNum:_) -> go (read (CB.unpack threadNum))
+                 _ -> putStdLn "No thread number provided."
 
 go :: Int -> IO ()
 go n = void . flip mapConcurrently [1..n] $ \ _ -> do
-    c <- connect defaultConnectInfo { ciUser = "testMySQLHaskell"
+    withResource (connect defaultConnectInfo { ciUser = "testMySQLHaskell"
                                     , ciDatabase = "testMySQLHaskell"
-                                    }
+                                    , ciPassword =  "testMySQLHaskell123456!"
+                                    }) $ \ c -> do
 
-
-    stmt <- prepareStmt c "SELECT * FROM employees"
-    (fs, is) <- queryStmt c stmt []
-    (rowCount :: Int) <- fold (\s _ -> s+1) 0 is
-    putStr "field name: "
-    forM_ fs $ \ f -> B.putStr (columnName f) >> B.putStr ", "
-    putStr "\n"
-    putStr "numbers of rows: "
-    print rowCount
+        stmt <- prepareStmt c "SELECT * FROM employees"
+        (fs, is) <- queryStmt c stmt []
+        c <- newCounter 0
+        runBIO $ is . counterNode c
+        (rowCount :: Int) <- readPrimIORef c
+        putStd "field name: "
+        forM_ fs $ \ f -> printStd (columnName f) >> putStdLn ", "
+        putStd "numbers of rows: "
+        printStd rowCount
 
 
 

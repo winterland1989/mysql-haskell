@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ViewPatterns #-}
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment
@@ -21,6 +22,7 @@ import           Data.Word
 import           GHC.Generics
 import qualified Z.Crypto.Hash                  as Crypto
 import           Z.Crypto.SafeMem
+import           Z.Crypto.PubKey
 import qualified Z.Data.Parser                  as P
 import qualified Z.Data.Builder                 as B
 import qualified Z.Data.Text                    as T
@@ -49,13 +51,16 @@ data MySQLConn = MySQLConn
 --
 --
 data ConnectInfo = ConnectInfo
-    { ciConfig   :: Either IPCClientConfig TCPClientConfig
+    { ciConnConfig :: Either IPCClientConfig TCPClientConfig
     , ciRecvBufSiz :: Int
     , ciSendBufSiz :: Int
     , ciDatabase :: T.Text
     , ciUser     :: T.Text
     , ciPassword :: T.Text
     , ciCharset  :: Word8
+    , ciSecureConf :: Maybe PubKey      -- ^ MySQL 8.0.2 and afterward, the default authentication plugin is @caching_sha2_password@,
+                                        -- set this field to the server's public key if you're not using TLS connection and don't want
+                                        -- request public key from server over non-secure wire.
     } deriving Show
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
@@ -69,7 +74,7 @@ defaultConnectInfo :: ConnectInfo
 defaultConnectInfo = ConnectInfo
     (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
     defaultChunkSize defaultChunkSize
-    "" "root" "" utf8_general_ci
+    "" "root" "" utf8_general_ci Nothing
 
 -- | 'defaultConnectInfo' with charset set to @utf8mb4_unicode_ci@
 --
@@ -79,7 +84,7 @@ defaultConnectInfoMB4 :: ConnectInfo
 defaultConnectInfoMB4 = ConnectInfo
     (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
     defaultChunkSize defaultChunkSize
-    "" "root" "" utf8mb4_unicode_ci
+    "" "root" "" utf8mb4_unicode_ci Nothing
 
 utf8_general_ci :: Word8
 utf8_general_ci = 33
@@ -104,16 +109,14 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: HasCallStack => ConnectInfo -> Resource (Greeting, MySQLConn)
-connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user pass charset) = do
+connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user (T.getUTF8Bytes -> pass) charset mpubkey) = do
     uvs <- either initIPCClient initTCPClient conf
     initResource (do
         (bi, bo) <- newBufferedIO' uvs recvBufSiz sendBufSiz
-        p <- readPacket bi
-        greet <- decodeFromPacket decodeGreeting p
-        let auth = mkAuth (T.getUTF8Bytes db) (T.getUTF8Bytes user) (T.getUTF8Bytes pass) charset greet
-        writeBuilder bo $ encodePacket (encodeToPacket 1 (encodeAuth auth))
+        greet <- decodeFromPacket decodeGreeting =<< readPacket bi
+        writeBuilder bo $ encodePacket (encodeToPacket 1 (encodeHandshakeResponse41 (mkAuth41 greet)))
         flushBuffer bo
-        _ <- readPacket bi -- OK
+        handleAuthRes greet bi bo
         consumed <- newIORef True
         return (greet, MySQLConn bi bo consumed))
         (\ (_, MySQLConn bi bo _) -> writeCommand COM_QUIT bo >> waitNotMandatoryOK bi)
@@ -122,28 +125,60 @@ connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user pass charset) = do
         (void (waitCommandReply bi))           -- server will either reply an OK packet
         ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
 
-mkAuth :: V.Bytes -> V.Bytes -> V.Bytes -> Word8 -> Greeting -> Auth
-mkAuth db user pass charset greet =
-    let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
-        plugin = greetingAuthPlugin greet
-        scambleBuf = scramble plugin salt pass
-    in Auth clientCap clientMaxPacketSize charset user scambleBuf db plugin
-  where
-    scramble :: V.Bytes -> V.Bytes -> V.Bytes -> V.Bytes
-    scramble plugin salt pass'
-        | V.null pass' = V.empty
-        | otherwise   = case plugin of
-            "caching_sha2_password" -> V.zipWith' xor sha2pass salt2
-            "mysql_native_password" -> V.zipWith' xor sha1pass salt1
-            _ -> ""
-        where sha1pass = sha1 pass'
-              salt1 = sha1 (salt `V.append` sha1 sha1pass)
-              sha2pass = sha2 pass'
-              salt2 = sha1 (salt `V.append` sha2 sha2pass)
+    -- | Make a HandshakeResponse41 packet
+    mkAuth41 greet =
+        let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
+            plugin = greetingAuthPlugin greet
+            scambleBuf = scramble plugin salt
+        in HandshakeResponse41 clientCap clientMaxPacketSize charset user scambleBuf db plugin
 
+    handleAuthRes greet bi bo = do
+        authRes <- readPacket bi
+
+        when (isAuthSwitchRequest authRes) $ do
+            -- TODO, update greet packet?
+            (AuthSwitchRequest plugin salt) <- decodeFromPacket decodeAuthSwitchRequest authRes
+            let scambleBuf = scramble plugin salt
+            writeBuilder bo $ encodePacket (Packet (V.length scambleBuf) 3 scambleBuf)
+            flushBuffer bo
+            handleAuthRes greet bi bo
+
+        when (isAuthResponse authRes) $ do
+            case decodeAuthResponse authRes of
+                PerformFullAuthentication -> do
+                    -- Request pubkey from server, see https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/#public-key-request
+                    pubkey <- maybe
+                        (do let pubkeyRequest = Packet 1 3 (V.singleton 2)
+                                decodePubKey = do
+                                    P.skipWord8 -- 0x01
+                                    P.takeRemaining
+                            writeBuilder bo $ encodePacket pubkeyRequest
+                            flushBuffer bo
+                            loadPubKey =<< decodeFromPacket decodePubKey =<< readPacket bi) return mpubkey
+                    rng <- getRNG
+                    let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
+                    encryptedPass <- if V.null pass
+                        then return V.empty
+                        else pkEncrypt pubkey (EME_OAEP SHA160 "") rng (V.zipWith' xor (pass `V.snoc` 0) salt)
+                    writeBuilder bo $ encodePacket (Packet 256 5 encryptedPass)
+                    flushBuffer bo
+                _ -> return ()
+            handleAuthRes greet bi bo
+
+        -- Now by pass OK packet
+
+    scramble :: T.Text -> V.Bytes -> V.Bytes
+    scramble plugin salt
+        | V.null pass = V.empty
+        | otherwise   = case plugin of
+            "mysql_native_password" -> let salt1 = sha1 (salt `V.append` sha1 sha1pass) in V.zipWith' xor sha1pass salt1
+            "caching_sha2_password" -> let salt2 = sha2 (salt `V.append` sha2 sha2pass) in V.zipWith' xor sha2pass salt2
+            _ -> throw (UnsupportedAuthPlugin plugin callStack)
+
+    sha1pass = sha1 pass
+    sha2pass = sha2 pass
     sha1 = unCEBytes . Crypto.hash Crypto.SHA160
     sha2 = unCEBytes . Crypto.hash Crypto.SHA256
-
 
 -- | Send a 'COM_PING'.
 --
@@ -237,4 +272,7 @@ instance Exception ERRException
 
 data UnexpectedPacket = UnexpectedPacket Packet CallStack deriving (Show)
 instance Exception UnexpectedPacket
+
+data UnsupportedAuthPlugin = UnsupportedAuthPlugin T.Text CallStack deriving (Show)
+instance Exception UnsupportedAuthPlugin
 

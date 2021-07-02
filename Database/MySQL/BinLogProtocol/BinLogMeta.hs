@@ -29,9 +29,14 @@ You will not directly meet following 'FieldType' namely:
 module Database.MySQL.BinLogProtocol.BinLogMeta where
 
 import           Control.Applicative
-import           Data.Binary.Get
 import           Data.Bits
 import           Data.Word
+import qualified Z.Data.Parser          as P
+import qualified Z.Data.Builder         as B
+import qualified Z.Data.Text.Base       as T
+import qualified Z.Data.Text            as T
+import qualified Z.Data.Vector          as V
+import qualified Z.Data.Vector.Extra    as V
 import           Database.MySQL.Protocol.ColumnDef
 
 -- | An intermedia date type for decoding row-based event's values.
@@ -62,59 +67,59 @@ data BinLogMeta
     | BINLOG_TYPE_GEOMETRY    !Word8         -- ^ length size
   deriving (Show, Eq)
 
-getBinLogMeta :: FieldType -> Get BinLogMeta
-getBinLogMeta t
-    | t == mySQLTypeTiny       = pure BINLOG_TYPE_TINY
-    | t == mySQLTypeShort      = pure BINLOG_TYPE_SHORT
-    | t == mySQLTypeInt24      = pure BINLOG_TYPE_INT24
-    | t == mySQLTypeLong       = pure BINLOG_TYPE_LONG
-    | t == mySQLTypeLongLong   = pure BINLOG_TYPE_LONGLONG
-    | t == mySQLTypeFloat      = BINLOG_TYPE_FLOAT <$> getWord8
-    | t == mySQLTypeDouble     = BINLOG_TYPE_DOUBLE <$> getWord8
+decodeBinLogMeta :: FieldType -> P.Parser BinLogMeta
+decodeBinLogMeta t
+    | t == MySQLTypeTiny       = pure BINLOG_TYPE_TINY
+    | t == MySQLTypeShort      = pure BINLOG_TYPE_SHORT
+    | t == MySQLTypeInt24      = pure BINLOG_TYPE_INT24
+    | t == MySQLTypeLong       = pure BINLOG_TYPE_LONG
+    | t == MySQLTypeLongLong   = pure BINLOG_TYPE_LONGLONG
+    | t == MySQLTypeFloat      = BINLOG_TYPE_FLOAT <$> P.anyWord8
+    | t == MySQLTypeDouble     = BINLOG_TYPE_DOUBLE <$> P.anyWord8
 
-    | t == mySQLTypeBit        = do
-        byte0 <- getWord8
-        byte1 <- getWord8
+    | t == MySQLTypeBit        = do
+        byte0 <- P.anyWord8
+        byte1 <- P.anyWord8
         let nbits = (fromIntegral byte1 `shiftL` 3) .|.  fromIntegral byte0
             nbytes = fromIntegral $ (nbits + 7) `shiftR` 3
         pure (BINLOG_TYPE_BIT nbits nbytes)
 
-    | t == mySQLTypeTimestamp  = pure BINLOG_TYPE_TIMESTAMP
-    | t == mySQLTypeDateTime   = pure BINLOG_TYPE_DATETIME
-    | t == mySQLTypeDate       = pure BINLOG_TYPE_DATE
-    | t == mySQLTypeTime       = pure BINLOG_TYPE_TIME
-    | t == mySQLTypeTimestamp2 = BINLOG_TYPE_TIMESTAMP2 <$> getWord8
-    | t == mySQLTypeDateTime2  = BINLOG_TYPE_DATETIME2 <$> getWord8
-    | t == mySQLTypeTime2      = BINLOG_TYPE_TIME2 <$> getWord8
-    | t == mySQLTypeYear       = pure BINLOG_TYPE_YEAR
-    | t == mySQLTypeNewDecimal = BINLOG_TYPE_NEWDECIMAL <$> getWord8 <*> getWord8
-    | t == mySQLTypeVarChar    = BINLOG_TYPE_STRING <$> getWord16le
-    | t == mySQLTypeVarString  = BINLOG_TYPE_STRING <$> getWord16le
+    | t == MySQLTypeTimestamp  = pure BINLOG_TYPE_TIMESTAMP
+    | t == MySQLTypeDateTime   = pure BINLOG_TYPE_DATETIME
+    | t == MySQLTypeDate       = pure BINLOG_TYPE_DATE
+    | t == MySQLTypeTime       = pure BINLOG_TYPE_TIME
+    | t == MySQLTypeTimestamp2 = BINLOG_TYPE_TIMESTAMP2 <$> P.anyWord8
+    | t == MySQLTypeDateTime2  = BINLOG_TYPE_DATETIME2 <$> P.anyWord8
+    | t == MySQLTypeTime2      = BINLOG_TYPE_TIME2 <$> P.anyWord8
+    | t == MySQLTypeYear       = pure BINLOG_TYPE_YEAR
+    | t == MySQLTypeNewDecimal = BINLOG_TYPE_NEWDECIMAL <$> P.anyWord8 <*> P.anyWord8
+    | t == MySQLTypeVarChar    = BINLOG_TYPE_STRING <$> P.decodePrimLE
+    | t == MySQLTypeVarString  = BINLOG_TYPE_STRING <$> P.decodePrimLE
 
-    | t == mySQLTypeString     = do
-        byte0 <- getWord8
-        byte1 <- getWord8
+    | t == MySQLTypeString     = do
+        byte0 <- P.anyWord8
+        byte1 <- P.anyWord8
         -- http://bugs.mysql.com/37426
         if  byte0 > 0
         then if (byte0 .&. 0x30) /= 0x30
-             then if FieldType (byte0 .|. 0x30) == mySQLTypeString
+             then if (byte0 .|. 0x30) == MySQLTypeString
                   then let len = fromIntegral $ (byte0 .&. 0x30) `xor` 0x30
                            len' = len `shiftL` 4 .|. fromIntegral byte1
                        in pure $! BINLOG_TYPE_STRING len'
                   else let len = fromIntegral byte0 `shiftL` 8 :: Word16
                            len' = len .|. fromIntegral byte1
                        in pure $! BINLOG_TYPE_STRING len'
-             else let t' = FieldType byte0
-                  in if | t' == mySQLTypeSet    -> let nbits = fromIntegral byte1 `shiftL` 3
+             else let t' = byte0
+                  in if | t' == MySQLTypeSet    -> let nbits = fromIntegral byte1 `shiftL` 3
                                                        nbytes = fromIntegral $ (nbits + 7) `shiftR` 8
                                                    in pure (BINLOG_TYPE_SET nbits nbytes)
-                        | t' == mySQLTypeEnum   -> pure (BINLOG_TYPE_ENUM byte1)
-                        | t' == mySQLTypeString -> pure (BINLOG_TYPE_STRING (fromIntegral byte1))
-                        | otherwise             -> fail $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
-                                                           \ impossible type inside binlog string: " ++ show t'
+                        | t' == MySQLTypeEnum   -> pure (BINLOG_TYPE_ENUM byte1)
+                        | t' == MySQLTypeString -> pure (BINLOG_TYPE_STRING (fromIntegral byte1))
+                        | otherwise             -> P.fail' $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
+                                                           \ impossible type inside binlog string: " <> T.toText t'
         else pure (BINLOG_TYPE_STRING (fromIntegral byte1))
 
-    | t == mySQLTypeBlob       = BINLOG_TYPE_BLOB <$> getWord8
-    | t == mySQLTypeGeometry   = BINLOG_TYPE_GEOMETRY <$> getWord8
-    | otherwise                = fail $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
-                                        \ impossible type in binlog: " ++ show t
+    | t == MySQLTypeBlob       = BINLOG_TYPE_BLOB <$> P.anyWord8
+    | t == MySQLTypeGeometry   = BINLOG_TYPE_GEOMETRY <$> P.anyWord8
+    | otherwise                = P.fail' $ "Database.MySQL.BinLogProtocol.BinLogMeta:\
+                                        \ impossible type in binlog: " <> T.toText t

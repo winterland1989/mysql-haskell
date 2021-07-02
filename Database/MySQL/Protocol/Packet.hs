@@ -17,6 +17,8 @@ module Database.MySQL.Protocol.Packet where
 
 import           Data.Bits
 import           Data.Word
+import           Data.Int.Int24
+import           Data.Word.Word24
 import           GHC.Generics
 import           Z.IO.Exception
 import qualified Z.Data.Parser          as P
@@ -73,7 +75,7 @@ isThereMore p  = okStatus p .&. 0x08 /= 0
 -- here we choose stability over correctness by omit incomplete consumed case:
 -- if we successful parse a packet, then we don't care if there're bytes left.
 --
-decodeFromPacket :: P.Parser a -> Packet -> IO a
+decodeFromPacket :: HasCallStack => P.Parser a -> Packet -> IO a
 decodeFromPacket g (Packet _ _ body) = unwrap "EPARSE" $ P.parse' g body
 {-# INLINE decodeFromPacket #-}
 
@@ -140,7 +142,7 @@ decodeEOF = EOF <$  P.skip 1
 --  Helpers
 
 decodeBytesNul :: P.Parser V.Bytes
-decodeBytesNul = P.takeTill (== 0)
+decodeBytesNul = P.takeTill (== 0) <* P.skipWord8
 {-# INLINE decodeBytesNul #-}
 
 encodeLenEncBytes :: V.Bytes -> B.Builder ()
@@ -206,6 +208,13 @@ decodeWord24BE = do
     b <- fromIntegral <$> P.anyWord8
     return $! b .|. (a `unsafeShiftL` 8)
 {-# INLINE decodeWord24BE #-}
+
+decodeInt24BE :: P.Parser Int24
+decodeInt24BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word16
+    b <- fromIntegral <$> P.anyWord8
+    return $! fromIntegral $ (b .|. (a `unsafeShiftL` 8) :: Word24)
+{-# INLINE decodeInt24BE #-}
 
 decodeWord40BE, decodeWord48BE, decodeWord56BE :: P.Parser Word64
 decodeWord40BE = do

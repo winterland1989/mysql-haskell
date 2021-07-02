@@ -21,6 +21,7 @@ import           Data.Bits
 import qualified Z.Data.Parser                  as P
 import qualified Z.Data.Builder                 as B
 import qualified Z.Data.Vector                  as V
+import qualified Z.Data.Text.Base               as T
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -29,11 +30,11 @@ import           Database.MySQL.Protocol.Packet
 -- | A description of a field (column) of a table.
 data ColumnDef = ColumnDef
     { -- fieldCatalog :: !V.Bytes                       -- ^ const 'def'
-      columnDB        ::  {-# UNPACK #-} !V.Bytes       -- ^ Database for table.
-    , columnTable     ::  {-# UNPACK #-} !V.Bytes       -- ^ Table of column, if column was a field.
-    , columnOrigTable ::  {-# UNPACK #-} !V.Bytes       -- ^ Original table name, if table was an alias.
-    , columnName      ::  {-# UNPACK #-} !V.Bytes       -- ^ Name of column.
-    , columnOrigName  ::  {-# UNPACK #-} !V.Bytes       -- ^ Original column name, if an alias.
+      columnDB        ::  {-# UNPACK #-} !T.Text        -- ^ Database for table.
+    , columnTable     ::  {-# UNPACK #-} !T.Text        -- ^ Table of column, if column was a field.
+    , columnOrigTable ::  {-# UNPACK #-} !T.Text        -- ^ Original table name, if table was an alias.
+    , columnName      ::  {-# UNPACK #-} !T.Text        -- ^ Name of column.
+    , columnOrigName  ::  {-# UNPACK #-} !T.Text        -- ^ Original column name, if an alias.
     , columnCharSet   ::  {-# UNPACK #-} !Word16        -- ^ Character set number.
     , columnLength    ::  {-# UNPACK #-} !Word32        -- ^ Width of column (create length).
     , columnType      ::  {-# UNPACK #-} !FieldType
@@ -43,30 +44,31 @@ data ColumnDef = ColumnDef
 
 decodeField :: P.Parser ColumnDef
 {-# INLINE decodeField #-}
-decodeField = ColumnDef
-        <$> (P.skip 4               -- const "def"
-         *> decodeLenEncBytes)      -- db
-        <*> decodeLenEncBytes       -- table
-        <*> decodeLenEncBytes       -- origTable
-        <*> decodeLenEncBytes       -- name
-        <*> decodeLenEncBytes       -- origName
-        <*  P.skip 1                -- const 0x0c
-        <*> P.decodePrimLE          -- charset
-        <*> P.decodePrimLE          -- length
-        <*> P.decodePrim            -- type
-        <*> P.decodePrimLE          -- flags
-        <*> P.decodePrim            -- decimals
-        <*  P.skip 2                -- const 0x00 0x00
+decodeField = do
+    P.skip 4               -- const "def"
+    db <- decodeLenEncBytes
+    table <- decodeLenEncBytes
+    origTable <- decodeLenEncBytes
+    name <- decodeLenEncBytes
+    origName <- decodeLenEncBytes
+    P.skipWord8             -- const 0x0c
+    charset <- P.decodePrimLE
+    len <- P.decodePrimLE
+    typ <- P.decodePrim
+    flags <- P.decodePrimLE
+    decimals <- P.decodePrim
+    P.skip 2                -- const 0x00 0x00
+    return (ColumnDef (T.Text db) (T.Text table) (T.Text origTable) (T.Text name) (T.Text origName) charset len typ flags decimals)
 
 encodeField :: ColumnDef -> B.Builder ()
 {-# INLINE encodeField #-}
 encodeField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do
     encodeLenEncBytes "def"
-    encodeLenEncBytes db
-    encodeLenEncBytes tbl
-    encodeLenEncBytes otbl
-    encodeLenEncBytes name
-    encodeLenEncBytes oname
+    encodeLenEncBytes (T.getUTF8Bytes db)
+    encodeLenEncBytes (T.getUTF8Bytes tbl)
+    encodeLenEncBytes (T.getUTF8Bytes otbl)
+    encodeLenEncBytes (T.getUTF8Bytes name)
+    encodeLenEncBytes (T.getUTF8Bytes oname)
     B.encodePrimLE charset
     B.encodePrimLE len
     B.encodePrim typ

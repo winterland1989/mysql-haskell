@@ -29,16 +29,17 @@ library
 
                         Database.MySQL.Base
                     --,   Database.MySQL.TLS
-                    --,   Database.MySQL.BinLog
-                    --,   Database.MySQL.BinLogProtocol.BinLogEvent
-                    --,   Database.MySQL.BinLogProtocol.BinLogValue
-                    --,   Database.MySQL.BinLogProtocol.BinLogMeta
+                    --  Database.MySQL.BinLog
+                        Database.MySQL.BinLogProtocol.BinLogEvent
+                        Database.MySQL.BinLogProtocol.BinLogValue
+                        Database.MySQL.BinLogProtocol.BinLogMeta
     other-modules:    
                     -- Database.MySQL.Query
     build-depends:      base          >= 4.7 && < 5
                     ,   monad-loops   == 0.4.*
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
+                    ,   word24        >= 2.0   && < 3.0
                     ,   Z-Data        >= 0.8.8 && < 0.9
                     ,   Z-IO          >= 0.8.1 && < 0.9
                     ,   Z-Botan       >= 0.4   && < 0.5

@@ -14,25 +14,23 @@ Binlog event type
 
 module Database.MySQL.BinLogProtocol.BinLogEvent where
 
-import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Loops                       (untilM)
-import           Data.Binary
-import           Data.Binary.Parser
 import           Data.Bits
-import           Data.ByteString                           (ByteString)
-import qualified Data.ByteString                           as B
-import qualified Data.ByteString.Lazy                      as L
-import qualified Data.ByteString.Unsafe                    as B
+import           Data.Word
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Protocol.Packet
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.ColumnDef
-
-import           Control.Exception                         (throwIO)
 import           Database.MySQL.Query
 import           GHC.Generics                              (Generic)
+import qualified Z.Data.Parser          as P
+import qualified Z.Data.Builder         as B
+import qualified Z.Data.Text            as T
+import qualified Z.Data.Vector          as V
+import qualified Z.Data.Vector.Extra    as V
+import           Z.IO.Exception
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -77,72 +75,66 @@ data BinLogEventType
   deriving (Show, Eq, Enum)
 
 data BinLogPacket = BinLogPacket
-    { blTimestamp :: !Word32
-    , blEventType :: !BinLogEventType
-    , blServerId  :: !Word32
-    , blEventSize :: !Word32
-    , blLogPos    :: !Word64   -- ^ for future GTID compatibility
-    , blFlags     :: !Word16
-    , blBody      :: !L.ByteString
+    { blTimestamp :: {-# UNPACK #-} !Word32
+    , blEventType :: {-# UNPACK #-} !BinLogEventType
+    , blServerId  :: {-# UNPACK #-} !Word32
+    , blEventSize :: {-# UNPACK #-} !Word32
+    , blLogPos    :: {-# UNPACK #-} !Word64   -- ^ for future GTID compatibility
+    , blFlags     :: {-# UNPACK #-} !Word16
+    , blBody      :: {-# UNPACK #-} !V.Bytes
     , blSemiAck   :: !Bool
     } deriving (Show, Eq)
 
-putSemiAckResp :: Word32 -> ByteString -> Put
-putSemiAckResp pos fn = put pos >> put fn
+encodeSemiAckResp :: Word32 -> V.Bytes -> B.Builder ()
+encodeSemiAckResp pos fn = B.encodePrim pos >> B.bytes fn
 
-getBinLogPacket :: Bool -> Bool -> Get BinLogPacket
-getBinLogPacket checksum semi = do
-    _  <- getWord8     -- OK byte
+decodeBinLogPacket :: Bool -> Bool -> P.Parser BinLogPacket
+decodeBinLogPacket checksum semi = do
+    _  <- P.anyWord8     -- OK byte
     ack <- if semi
-        then getWord8 >> (== 0x01) <$> getWord8
+        then P.anyWord8 >> (== 0x01) <$> P.anyWord8
         else return False
-    ts <- getWord32le
-    typ <- toEnum . fromIntegral <$> getWord8
-    sid <- getWord32le
-    size <- getWord32le
-    pos <- getWord32le
-    flgs <- getWord16le
-    body <- getLazyByteString (fromIntegral size - if checksum then 23 else 19)
+    ts <- P.decodePrimLE @Word32
+    typ <- toEnum . fromIntegral <$> P.anyWord8
+    sid <- P.decodePrimLE @Word32
+    size <- P.decodePrimLE @Word32
+    pos <- P.decodePrimLE @Word32
+    flgs <- P.decodePrimLE @Word16
+    body <- P.take (fromIntegral size - if checksum then 23 else 19)
     return (BinLogPacket ts typ sid size (fromIntegral pos) flgs body ack)
 
-getFromBinLogPacket :: Get a -> BinLogPacket -> IO a
-getFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) =
-    case parseDetailLazy g body  of
-        Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
-        Right (_,   _,      r     ) -> return r
+decodeFromBinLogPacket :: HasCallStack => P.Parser a -> BinLogPacket -> IO a
+decodeFromBinLogPacket g (BinLogPacket _ _ _ _ _ _ body _ ) = unwrap "EPARSE" $ P.parse' g body
 
-getFromBinLogPacket' :: (BinLogEventType -> Get a) -> BinLogPacket -> IO a
-getFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) =
-    case parseDetailLazy (g typ) body  of
-        Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
-        Right (_,   _,      r     ) -> return r
+decodeFromBinLogPacket' :: HasCallStack => (BinLogEventType -> P.Parser a) -> BinLogPacket -> IO a
+decodeFromBinLogPacket' g (BinLogPacket _ typ _ _ _ _ body _ ) = unwrap "EPARSE" $ P.parse' (g typ) body
 
 --------------------------------------------------------------------------------
 
 data FormatDescription = FormatDescription
     { fdVersion              :: !Word16
-    , fdMySQLVersion         :: !ByteString
+    , fdMySQLVersion         :: !V.Bytes
     , fdCreateTime           :: !Word32
     -- , eventHeaderLen :: !Word8  -- const 19
-    , fdEventHeaderLenVector :: !ByteString  -- ^ a array indexed by Binlog Event Type - 1
+    , fdEventHeaderLenVector :: !V.Bytes  -- ^ a array indexed by Binlog Event Type - 1
                                              -- to extract the length of the event specific header.
     } deriving (Show, Eq, Generic)
 
-getFormatDescription :: Get FormatDescription
-getFormatDescription = FormatDescription <$> getWord16le
-                                         <*> getByteString 50
-                                         <*> getWord32le
-                                         <*  getWord8
-                                         <*> (L.toStrict <$> getRemainingLazyByteString)
+decodeFormatDescription :: P.Parser FormatDescription
+decodeFormatDescription = FormatDescription <$> P.decodePrimLE @Word16
+                                         <*> P.take 50
+                                         <*> P.decodePrimLE @Word32
+                                         <*  P.anyWord8
+                                         <*> P.takeRemaining
 
 eventHeaderLen :: FormatDescription -> BinLogEventType -> Word8
-eventHeaderLen fd typ = B.unsafeIndex (fdEventHeaderLenVector fd) (fromEnum typ - 1)
+eventHeaderLen fd typ = V.unsafeIndex (fdEventHeaderLenVector fd) (fromEnum typ - 1)
 
 data RotateEvent = RotateEvent
-    { rPos :: !Word64, rFileName :: !ByteString } deriving (Show, Eq)
+    { rPos :: !Word64, rFileName :: !V.Bytes } deriving (Show, Eq)
 
-getRotateEvent :: Get RotateEvent
-getRotateEvent = RotateEvent <$> getWord64le <*> getRemainingByteString
+decodeRotateEvent :: P.Parser RotateEvent
+decodeRotateEvent = RotateEvent <$> P.decodePrimLE <*> P.takeRemaining
 
 -- | This's query parser for statement based binlog's query event, it's actually
 -- not used in row based binlog.
@@ -151,65 +143,64 @@ data QueryEvent = QueryEvent
     { qSlaveProxyId :: !Word32
     , qExecTime     :: !Word32
     , qErrCode      :: !Word16
-    , qStatusVars   :: !ByteString
-    , qSchemaName   :: !ByteString
+    , qStatusVars   :: !V.Bytes
+    , qSchemaName   :: !V.Bytes
     , qQuery        :: !Query
     } deriving (Show, Eq, Generic)
 
-getQueryEvent :: Get QueryEvent
-getQueryEvent = do
-    pid <- getWord32le
-    tim <- getWord32le
-    slen <- getWord8
-    ecode <- getWord16le
-    vlen <- getWord16le
-    svar <- getByteString (fromIntegral vlen)
-    schema <- getByteString (fromIntegral slen)
-    _ <- getWord8
-    qry <- getRemainingLazyByteString
+decodeQueryEvent :: P.Parser QueryEvent
+decodeQueryEvent = do
+    pid <- P.decodePrimLE @Word32
+    tim <- P.decodePrimLE @Word32
+    slen <- P.anyWord8
+    ecode <- P.decodePrimLE @Word16
+    vlen <- P.decodePrimLE @Word16
+    svar <- P.take (fromIntegral vlen)
+    schema <- P.take (fromIntegral slen)
+    _ <- P.anyWord8
+    qry <- P.takeRemaining
     return (QueryEvent pid tim ecode svar schema (Query qry))
 
 -- | This's the query event in row based binlog.
 --
 data QueryEvent' = QueryEvent' { qQuery' :: !Query } deriving (Show, Eq)
 
-getQueryEvent' :: Get QueryEvent'
-getQueryEvent' = do
-    _ <- getWord8
-    QueryEvent' . Query <$> getRemainingLazyByteString
+decodeQueryEvent' :: P.Parser QueryEvent'
+decodeQueryEvent' = do
+    _ <- P.anyWord8
+    QueryEvent' . Query <$> P.takeRemaining
 
 data TableMapEvent = TableMapEvent
     { tmTableId    :: !Word64
     , tmFlags      :: !Word16
-    , tmSchemaName :: !ByteString
-    , tmTableName  :: !ByteString
+    , tmSchemaName :: !V.Bytes
+    , tmTableName  :: !V.Bytes
     , tmColumnCnt  :: !Int
-    , tmColumnType :: ![FieldType]
-    , tmColumnMeta :: ![BinLogMeta]
-    , tmNullMap    :: !ByteString
+    , tmColumnType :: !(V.PrimVector FieldType)
+    , tmColumnMeta :: !(V.Vector BinLogMeta)
+    , tmNullMap    :: !V.Bytes
     } deriving (Show, Eq, Generic)
 
-getTableMapEvent :: FormatDescription -> Get TableMapEvent
-getTableMapEvent fd = do
+decodeTableMapEvent :: FormatDescription -> P.Parser TableMapEvent
+decodeTableMapEvent fd = do
     let hlen = eventHeaderLen fd BINLOG_TABLE_MAP_EVENT
-    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
-    flgs <- getWord16le
-    slen <- getWord8
-    schema <- getByteString (fromIntegral slen)
-    _ <- getWord8 -- 0x00
-    tlen <- getWord8
-    table <- getByteString (fromIntegral tlen)
-    _ <- getWord8 -- 0x00
-    cc <- getLenEncInt
-    colTypBS <- getByteString cc
-    let typs = map FieldType (B.unpack colTypBS)
-    colMetaBS <- getLenEncBytes
+    tid <- if hlen == 6 then fromIntegral <$> P.decodePrimLE @Word32 else decodeWord48LE
+    flgs <- P.decodePrimLE @Word16
+    slen <- P.anyWord8
+    schema <- P.take (fromIntegral slen)
+    _ <- P.anyWord8 -- 0x00
+    tlen <- P.anyWord8
+    table <- P.take (fromIntegral tlen)
+    _ <- P.anyWord8 -- 0x00
+    cc <- decodeLenEncInt
+    typs <- P.take cc
+    colMetaBS <- decodeLenEncBytes
 
-    metas <- case runGetOrFail (forM typs getBinLogMeta) (L.fromStrict colMetaBS) of
-        Left (_, _, errmsg) -> fail errmsg
-        Right (_, _, r)     -> return r
+    metas <- case P.parse' (V.traverseVec decodeBinLogMeta typs) colMetaBS of
+        Left errmsg  -> P.fail' (T.concat errmsg)
+        Right r      -> return r
 
-    nullmap <- getByteString ((cc + 7) `div` 8)
+    nullmap <- P.take ((cc + 7) `div` 8)
     return (TableMapEvent tid flgs schema table cc typs metas nullmap)
 
 data DeleteRowsEvent = DeleteRowsEvent
@@ -221,18 +212,18 @@ data DeleteRowsEvent = DeleteRowsEvent
     , deleteRowData    :: ![[BinLogValue]]
     } deriving (Show, Eq, Generic)
 
-getDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get DeleteRowsEvent
-getDeleteRowEvent fd tme typ = do
+decodeDeleteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> P.Parser DeleteRowsEvent
+decodeDeleteRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
-    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
-    flgs <- getWord16le
+    tid <- if hlen == 6 then fromIntegral <$> P.decodePrimLE @Word32 else decodeWord48LE
+    flgs <- P.decodePrimLE @Word16
     when (typ == BINLOG_DELETE_ROWS_EVENTv2) $ do
-        extraLen <- getWord16le
-        void $ getByteString (fromIntegral extraLen - 2)
-    colCnt <- getLenEncInt
+        extraLen <- P.decodePrimLE @Word16
+        void $ P.take (fromIntegral extraLen - 2)
+    colCnt <- decodeLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
-    pmap <- getPresentMap plen poffset
-    DeleteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
+    pmap <- decodePresentMap plen poffset
+    DeleteRowsEvent tid flgs colCnt pmap <$> untilM (decodeBinLogRow (tmColumnMeta tme) pmap) P.atEnd
 
 data WriteRowsEvent = WriteRowsEvent
     { writeTableId    :: !Word64
@@ -243,18 +234,18 @@ data WriteRowsEvent = WriteRowsEvent
     , writeRowData    :: ![[BinLogValue]]
     } deriving (Show, Eq, Generic)
 
-getWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get WriteRowsEvent
-getWriteRowEvent fd tme typ = do
+decodeWriteRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> P.Parser WriteRowsEvent
+decodeWriteRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
-    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
-    flgs <- getWord16le
+    tid <- if hlen == 6 then fromIntegral <$> P.decodePrimLE @Word32 else decodeWord48LE
+    flgs <- P.decodePrimLE @Word16
     when (typ == BINLOG_WRITE_ROWS_EVENTv2) $ do
-        extraLen <- getWord16le
-        void $ getByteString (fromIntegral extraLen - 2)
-    colCnt <- getLenEncInt
+        extraLen <- P.decodePrimLE @Word16
+        void $ P.take (fromIntegral extraLen - 2)
+    colCnt <- decodeLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
-    pmap <- getPresentMap plen poffset
-    WriteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
+    pmap <- decodePresentMap plen poffset
+    WriteRowsEvent tid flgs colCnt pmap <$> untilM (decodeBinLogRow (tmColumnMeta tme) pmap) P.atEnd
 
 data UpdateRowsEvent = UpdateRowsEvent
     { updateTableId    :: !Word64
@@ -265,27 +256,27 @@ data UpdateRowsEvent = UpdateRowsEvent
     , updateRowData    :: ![ ([BinLogValue], [BinLogValue]) ]
     } deriving (Show, Eq, Generic)
 
-getUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> Get UpdateRowsEvent
-getUpdateRowEvent fd tme typ = do
+decodeUpdateRowEvent :: FormatDescription -> TableMapEvent -> BinLogEventType -> P.Parser UpdateRowsEvent
+decodeUpdateRowEvent fd tme typ = do
     let hlen = eventHeaderLen fd typ
-    tid <- if hlen == 6 then fromIntegral <$> getWord32le else getWord48le
-    flgs <- getWord16le
+    tid <- if hlen == 6 then fromIntegral <$> P.decodePrimLE @Word32 else decodeWord48LE
+    flgs <- P.decodePrimLE @Word16
     when (typ == BINLOG_UPDATE_ROWS_EVENTv2) $ do
-        extraLen <- getWord16le
-        void $ getByteString (fromIntegral extraLen - 2)
-    colCnt <- getLenEncInt
+        extraLen <- P.decodePrimLE @Word16
+        void $ P.take (fromIntegral extraLen - 2)
+    colCnt <- decodeLenEncInt
     let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
-    pmap <- getPresentMap plen poffset
-    pmap' <- getPresentMap plen poffset
+    pmap <- decodePresentMap plen poffset
+    pmap' <- decodePresentMap plen poffset
     UpdateRowsEvent tid flgs colCnt (pmap, pmap') <$>
-        untilM ((,) <$> getBinLogRow (tmColumnMeta tme) pmap <*> getBinLogRow (tmColumnMeta tme) pmap')
-               isEmpty
+        untilM ((,) <$> decodeBinLogRow (tmColumnMeta tme) pmap <*> decodeBinLogRow (tmColumnMeta tme) pmap')
+               P.atEnd
 
-getPresentMap :: Int -> Int -> Get BitMap
-getPresentMap plen poffset = do
-    pmap <- getByteString plen
-    let pmap' = if B.null pmap
-                then B.empty
-                else B.init pmap `B.snoc` (B.last pmap .&. 0xFF `shiftR` (7 - poffset))
+decodePresentMap :: Int -> Int -> P.Parser BitMap
+decodePresentMap plen poffset = do
+    pmap <- P.take plen
+    let pmap' = if V.null pmap
+                then V.empty
+                else V.init pmap `V.snoc` (V.last pmap .&. 0xFF `shiftR` (7 - poffset))
     pure (BitMap pmap')
 

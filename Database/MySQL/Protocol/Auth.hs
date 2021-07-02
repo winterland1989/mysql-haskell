@@ -24,8 +24,9 @@ import           GHC.Generics
 import           Z.IO.Exception
 import qualified Z.Data.Parser          as P
 import qualified Z.Data.Builder         as B
-import qualified Z.Data.Text            as T
+import qualified Z.Data.Text.Base       as T
 import qualified Z.Data.Vector          as V
+import qualified Z.Data.Vector.Extra    as V
 
 --------------------------------------------------------------------------------
 -- Authentications
@@ -55,66 +56,91 @@ import qualified Z.Data.Vector          as V
 
 data Greeting = Greeting
     { greetingProtocol :: {-# UNPACK #-} !Word8
-    , greetingVersion  :: {-# UNPACK #-} !V.Bytes
+    , greetingVersion  :: {-# UNPACK #-} !T.Text
     , greetingConnId   :: {-# UNPACK #-} !Word32
     , greetingSalt1    :: {-# UNPACK #-} !V.Bytes
     , greetingCaps     :: {-# UNPACK #-} !Word32
     , greetingCharset  :: {-# UNPACK #-} !Word8
     , greetingStatus   :: {-# UNPACK #-} !Word16
     , greetingSalt2    :: {-# UNPACK #-} !V.Bytes
-    , greetingAuthPlugin :: {-# UNPACK #-} !V.Bytes
+    , greetingAuthPlugin :: {-# UNPACK #-} !T.Text
     } deriving (Show, Eq)
 
 decodeGreeting :: P.Parser Greeting
 decodeGreeting = do
     pv <- P.anyWord8
-    sv <- decodeBytesNul
-    cid <- P.decodePrimLE
+    sv <- T.Text <$> decodeBytesNul
+    cid <- P.decodePrimLE @Word32
     salt1 <- P.take 8
-    P.skip 1  -- 0x00
+    P.skipWord8  -- 0x00
     capL <- P.decodePrimLE @Word16
     charset <- P.anyWord8
     status <- P.decodePrimLE
     capH <- P.decodePrimLE @Word16
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
     authPluginLen <- P.anyWord8   -- this will issue an unused warning, see the notes below
-    P.skip 10 -- 10 * 0x00
+    P.skip 10 -- 10 * 0x00A
+
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure V.empty
-        else decodeBytesNul   -- This is different with the MySQL document here
+        else P.take (max 13 (fromIntegral authPluginLen - 8))
                               -- The doc said we should expect a MAX(13, length of auth-plugin-data - 8)
-                              -- length bytes, but doing so stop us from login
-                              -- anyway 'decodeBytesNul' works perfectly here.
+                              -- length bytes, but we have to remove the trailing NULL byte, see below V.init
 
     authPlugin <- if (cap .&. CLIENT_PLUGIN_AUTH) == 0
         then pure V.empty
         else decodeBytesNul
 
-    return (Greeting pv sv cid salt1 cap charset status salt2 authPlugin)
+    return (Greeting pv sv cid salt1 cap charset status (V.init salt2) (T.Text authPlugin))
 
-data Auth = Auth
-    { authCaps      :: {-# UNPACK #-} !Word32
-    , authMaxPacket :: {-# UNPACK #-} !Word32
-    , authCharset   :: {-# UNPACK #-} !Word8
-    , authName      :: {-# UNPACK #-} !V.Bytes
-    , authPassword  :: {-# UNPACK #-} !V.Bytes  -- ^ the auth response
-    , authSchema    :: {-# UNPACK #-} !V.Bytes
-    , authPlugin    :: {-# UNPACK #-} !V.Bytes
+data HandshakeResponse41 = HandshakeResponse41
+    { clientCaps      :: {-# UNPACK #-} !Word32
+    , clientMaxPacket :: {-# UNPACK #-} !Word32
+    , clientCharset   :: {-# UNPACK #-} !Word8
+    , clientName      :: {-# UNPACK #-} !T.Text
+    , clientPassword  :: {-# UNPACK #-} !V.Bytes  -- ^ the auth response
+    , clientSchema    :: {-# UNPACK #-} !T.Text
+    , clientPlugin    :: {-# UNPACK #-} !T.Text
     } deriving (Show, Eq)
 
-encodeAuth :: Auth -> B.Builder ()
-encodeAuth (Auth cap m c n p s plugin) = do
+encodeHandshakeResponse41 :: HandshakeResponse41 -> B.Builder ()
+encodeHandshakeResponse41 (HandshakeResponse41 cap m c n p s plugin) = do
     B.encodePrimLE cap
     B.encodePrimLE m
     B.word8 c
     replicateM_ 23 (B.word8 0x00)
-    B.bytes n >> B.word8 0x00
+    B.text n >> B.word8 0x00
     B.word8 $ fromIntegral (V.length p)
     B.bytes p
-    B.bytes s
+    B.text s
     B.word8 0x00
-    B.bytes plugin
+    B.text plugin
     B.word8 0x00
+
+data AuthResponse = FastAuthSuccess | PerformFullAuthentication deriving (Show, Eq)
+
+isAuthResponse :: Packet -> Bool
+isAuthResponse p = pLen p == 2 && V.unsafeIndex (pBody p) 0 == 0x01
+
+decodeAuthResponse :: Packet -> AuthResponse
+decodeAuthResponse p = if V.unsafeIndex (pBody p) 1 == 0x03 then FastAuthSuccess else PerformFullAuthentication
+
+data AuthSwitchRequest = AuthSwitchRequest
+    { authPluginName :: {-# UNPACK #-} !T.Text
+    , authPluginData :: {-# UNPACK #-} !V.Bytes
+    } deriving (Show, Eq)
+
+isAuthSwitchRequest :: Packet -> Bool
+isAuthSwitchRequest p = V.unsafeIndex (pBody p) 0 == 0xFE
+
+decodeAuthSwitchRequest :: P.Parser AuthSwitchRequest
+decodeAuthSwitchRequest = do
+    P.skipWord8     -- 0xFE
+    n <- decodeBytesNul
+    d <- P.takeRemaining
+    return (AuthSwitchRequest (T.Text n) (V.take 20 d))
+
+newtype AuthSwitchResponse = AuthSwitchResponse V.Bytes
 
 data SSLRequest = SSLRequest
     { sslReqCaps      :: !Word32
@@ -145,6 +171,7 @@ clientCap =  CLIENT_LONG_PASSWORD
                 .|. CLIENT_MULTI_STATEMENTS
                 .|. CLIENT_MULTI_RESULTS
                 .|. CLIENT_SECURE_CONNECTION
+                .|. CLIENT_PLUGIN_AUTH
 
 clientMaxPacketSize :: Word32
 clientMaxPacketSize = 0x00ffffff :: Word32

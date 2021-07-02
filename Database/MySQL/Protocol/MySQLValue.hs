@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -31,7 +32,6 @@ module Database.MySQL.Protocol.MySQLValue
   , makeNullMap
   ) where
 
-import           Control.Applicative
 import           Control.Monad
 import           Data.Bits
 import           Data.Fixed                        (Pico)
@@ -44,7 +44,6 @@ import           Data.Time.Format                  (defaultTimeLocale,
 import           Data.Time.LocalTime               (LocalTime (..),
                                                     TimeOfDay (..))
 import           Data.Word
-import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
 import           Database.MySQL.Protocol.Packet
@@ -52,6 +51,7 @@ import           GHC.Generics                      (Generic)
 import qualified Z.Data.Builder                    as B
 import qualified Z.Data.Parser                     as P
 import qualified Z.Data.Text                       as T
+import qualified Z.Data.Text.Base                  as T
 import qualified Z.Data.Vector                     as V
 import qualified Z.Data.Vector.Extra               as V
 
@@ -81,22 +81,22 @@ import qualified Z.Data.Vector.Extra               as V
 -- precision.
 --
 data MySQLValue
-    = MySQLDecimal       {-# UNAPCK #-} !Scientific   -- ^ DECIMAL, NEWDECIMAL
-    | MySQLInt8U         {-# UNAPCK #-} !Word8        -- ^ Unsigned TINY
-    | MySQLInt8          {-# UNAPCK #-} !Int8         -- ^ TINY
-    | MySQLInt16U        {-# UNAPCK #-} !Word16       -- ^ Unsigned SHORT
-    | MySQLInt16         {-# UNAPCK #-} !Int16        -- ^ SHORT
-    | MySQLInt32U        {-# UNAPCK #-} !Word32       -- ^ Unsigned LONG, INT24
-    | MySQLInt32         {-# UNAPCK #-} !Int32        -- ^ LONG, INT24
-    | MySQLInt64U        {-# UNAPCK #-} !Word64       -- ^ Unsigned LONGLONG
-    | MySQLInt64         {-# UNAPCK #-} !Int64        -- ^ LONGLONG
-    | MySQLFloat         {-# UNAPCK #-} !Float        -- ^ IEEE 754 single precision format
-    | MySQLDouble        {-# UNAPCK #-} !Double       -- ^ IEEE 754 double precision format
-    | MySQLYear          {-# UNAPCK #-} !Word16       -- ^ YEAR
-    | MySQLDateTime      {-# UNAPCK #-} !LocalTime    -- ^ DATETIME
-    | MySQLTimeStamp     {-# UNAPCK #-} !LocalTime    -- ^ TIMESTAMP
-    | MySQLDate          {-# UNAPCK #-} !Day          -- ^ DATE
-    | MySQLTime          {-# UNAPCK #-} !Word8      -- ^ sign(0 = non-negative, 1 = negative), the sign is OPPOSITE to binlog one !!!
+    = MySQLDecimal       {-# UNPACK #-} !Scientific   -- ^ DECIMAL, NEWDECIMAL
+    | MySQLInt8U         {-# UNPACK #-} !Word8        -- ^ Unsigned TINY
+    | MySQLInt8          {-# UNPACK #-} !Int8         -- ^ TINY
+    | MySQLInt16U        {-# UNPACK #-} !Word16       -- ^ Unsigned SHORT
+    | MySQLInt16         {-# UNPACK #-} !Int16        -- ^ SHORT
+    | MySQLInt32U        {-# UNPACK #-} !Word32       -- ^ Unsigned LONG, INT24
+    | MySQLInt32         {-# UNPACK #-} !Int32        -- ^ LONG, INT24
+    | MySQLInt64U        {-# UNPACK #-} !Word64       -- ^ Unsigned LONGLONG
+    | MySQLInt64         {-# UNPACK #-} !Int64        -- ^ LONGLONG
+    | MySQLFloat         {-# UNPACK #-} !Float        -- ^ IEEE 754 single precision format
+    | MySQLDouble        {-# UNPACK #-} !Double       -- ^ IEEE 754 double precision format
+    | MySQLYear          {-# UNPACK #-} !Word16       -- ^ YEAR
+    | MySQLDateTime      {-# UNPACK #-} !LocalTime    -- ^ DATETIME
+    | MySQLTimeStamp     {-# UNPACK #-} !LocalTime    -- ^ TIMESTAMP
+    | MySQLDate          {-# UNPACK #-} !Day          -- ^ DATE
+    | MySQLTime          {-# UNPACK #-} !Word8      -- ^ sign(0 = non-negative, 1 = negative), the sign is OPPOSITE to binlog one !!!
                                         !TimeOfDay  -- ^ hh mm ss microsecond
     | MySQLGeometry      {-# UNPACK #-} !V.Bytes       -- ^ todo: parsing to something meanful
     | MySQLBytes         {-# UNPACK #-} !V.Bytes
@@ -133,6 +133,7 @@ encodeParamMySQLType MySQLNull              = B.encodePrim (MySQLTypeNull     , 
 --------------------------------------------------------------------------------
 -- | Text protocol decoder
 decodeTextField :: ColumnDef -> P.Parser MySQLValue
+{-# INLINABLE decodeTextField #-}
 decodeTextField f
     | t == MySQLTypeNull            = pure MySQLNull
     | t == MySQLTypeDecimal
@@ -171,11 +172,11 @@ decodeTextField f
         || t == MySQLTypeLongBlob
         || t == MySQLTypeBlob
         || t == MySQLTypeVarString
-        || t == MySQLTypeString     = (if isText then MySQLText . T.validate else MySQLBytes) <$> decodeLenEncBytes
+        || t == MySQLTypeString     = (if isText then MySQLText . T.Text else MySQLBytes) <$> decodeLenEncBytes
 
     | t == MySQLTypeBit             = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
 
-    | otherwise                     = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
+    | otherwise                     = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " <> T.toText t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
@@ -187,7 +188,7 @@ feedLenEncBytes typ con p = do
     bs <- decodeLenEncBytes
     case P.parse' p bs of
         Right v -> return (con v)
-        Left e -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, " ++ show e
+        Left e -> P.fail' $ T.concat ["Database.MySQL.Protocol.MySQLValue: parsing ", T.toText typ, " failed, ", T.toText e]
 
 --------------------------------------------------------------------------------
 -- | Text protocol encoder
@@ -332,8 +333,7 @@ decodeBinaryField f
                 then pure (MySQLText (T.validate bs))
                 else pure (MySQLBytes bs)
     | t == MySQLTypeBit               = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
-    | otherwise                       = fail $ "Database.MySQL.Protocol.MySQLValue:\
-                                               \ missing binary decoder for " ++ show t
+    | otherwise                       = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for " <> T.toText t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
@@ -365,8 +365,8 @@ decodeBits bytes =
         | bytes == 6 -> fromIntegral <$> decodeWord48BE
         | bytes == 7 -> fromIntegral <$> decodeWord56BE
         | bytes == 8 -> fromIntegral <$> P.decodePrimBE @Word64
-        | otherwise  -> fail $  "Database.MySQL.Protocol.MySQLValue: \
-                                \wrong bit length size: " ++ show bytes
+        | otherwise  -> P.fail' $  "Database.MySQL.Protocol.MySQLValue: \
+                                \wrong bit length size: " <> T.toText bytes
 {-# INLINE decodeBits #-}
 
 
