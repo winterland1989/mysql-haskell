@@ -1,5 +1,5 @@
 name:                mysql-haskell
-version:             0.8.4.3
+version:             0.9
 synopsis:            pure haskell MySQL driver
 description:         pure haskell MySQL driver
 license:             BSD3
@@ -19,47 +19,43 @@ source-repository head
   location: git://github.com/winterland1989/mysql-haskell.git
 
 library
-    exposed-modules:    Database.MySQL.Base
-                    ,   Database.MySQL.TLS
-                    ,   Database.MySQL.Protocol.Auth
-                    ,   Database.MySQL.Protocol.Command
-                    ,   Database.MySQL.Protocol.ColumnDef
-                    ,   Database.MySQL.Protocol.Packet
-                    ,   Database.MySQL.Protocol.MySQLValue
-                    ,   Database.MySQL.Protocol.Escape
-                    ,   Database.MySQL.BinLog
-                    ,   Database.MySQL.BinLogProtocol.BinLogEvent
-                    ,   Database.MySQL.BinLogProtocol.BinLogValue
-                    ,   Database.MySQL.BinLogProtocol.BinLogMeta
-                    ,   Database.MySQL.Connection
-    other-modules:      Database.MySQL.Query
+    exposed-modules:    Database.MySQL.Protocol.Packet
+                        Database.MySQL.Protocol.Auth
+                        Database.MySQL.Protocol.Command
+                        Database.MySQL.Protocol.ColumnDef
+                        Database.MySQL.Protocol.MySQLValue
+                        Database.MySQL.Protocol.Escape
+                        Database.MySQL.Connection
+
+                        Database.MySQL.Base
+                    --,   Database.MySQL.TLS
+                        Database.MySQL.BinLog
+                        Database.MySQL.BinLogProtocol.BinLogEvent
+                        Database.MySQL.BinLogProtocol.BinLogValue
+                        Database.MySQL.BinLogProtocol.BinLogMeta
+    other-modules:    
+                    -- Database.MySQL.Query
     build-depends:      base          >= 4.7 && < 5
                     ,   monad-loops   == 0.4.*
-                    ,   network       >= 2.3 && < 4.0
-                    ,   io-streams    >= 1.2 && < 2.0
-                    ,   tcp-streams   >= 1.0 && < 1.1
-                    ,   wire-streams  >= 0.1
-                    ,   binary        >= 0.8.3
-                    ,   binary-ieee754
-                    ,   binary-parsers >= 0.2.1
-                    ,   bytestring    >= 0.10.2.0
-                    ,   text          >= 1.1 && < 1.3
-                    ,   cryptonite    == 0.*
-                    ,   memory        >= 0.14.4 && < 0.16
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
-                    ,   bytestring-lexing == 0.5.*
-                    ,   blaze-textual     == 0.2.*
-                    ,   word24            >= 1.0 && <= 3.0
-                    ,   tls           >= 1.3.5 && < 1.6
-                    ,   vector        >= 0.8
+                    ,   word24        >= 2.0   && < 3.0
+                    ,   Z-Data        >= 1.0 && < 1.1
+                    ,   Z-IO          >= 1.0 && < 1.1
+                    ,   Z-Botan       >= 0.4   && < 0.5
+                    ,   deepseq
+
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable
                         ,   DeriveGeneric
+                        ,   DeriveAnyClass
+                        ,   DerivingStrategies
                         ,   MultiWayIf
                         ,   OverloadedStrings
+                        ,   TypeApplications
     ghc-options:       -Wall
+    c-sources:         cbits/escape.c
 
 test-suite test
     type: exitcode-stdio-1.0

@@ -15,61 +15,55 @@ MySQL packet decoder&encoder, and varities utility.
 
 module Database.MySQL.Protocol.Packet where
 
-import           Control.Applicative
-import           Control.Exception     (Exception (..), throwIO)
-import           Data.Binary.Parser
-import           Data.Binary.Put
-import           Data.Binary           (Binary(..), encode)
+import           Control.Monad
 import           Data.Bits
-import qualified Data.ByteString       as B
-import           Data.ByteString.Char8 as BC
-import qualified Data.ByteString.Lazy  as L
-import           Data.Int.Int24
-import           Data.Int
 import           Data.Word
-import           Data.Typeable
+import           Data.Int.Int24
 import           Data.Word.Word24
+import           GHC.Generics
+import           Z.IO.Exception
+import qualified Z.Data.Parser          as P
+import qualified Z.Data.Builder         as B
+import qualified Z.Data.Text            as T
+import qualified Z.Data.Text.Base       as T
+import qualified Z.Data.Vector          as V
+import qualified Z.Data.Vector.Extra    as V
 
 --------------------------------------------------------------------------------
 -- | MySQL packet type
 --
 data Packet = Packet
-    { pLen  :: !Int64
-    , pSeqN :: !Word8
-    , pBody :: !L.ByteString
-    } deriving (Show, Eq)
+    { pLen  :: {-# UNPACK #-} !Int
+    , pSeqN :: {-# UNPACK #-} !Word8
+    , pBody :: !V.Bytes
+    } deriving (Show, Eq, Ord, Generic)
+      deriving anyclass T.Print
 
-putPacket :: Packet -> Put
-putPacket (Packet len seqN body)  = do
-    putWord24le (fromIntegral len)
-    putWord8 seqN
-    putLazyByteString body
-{-# INLINE putPacket #-}
+encodePacket :: Packet -> B.Builder ()
+encodePacket (Packet len seqN body)  = do
+    encodeWord24LE (fromIntegral len)
+    B.word8 seqN
+    B.bytes body
+{-# INLINE encodePacket #-}
 
-getPacket :: Get Packet
-getPacket = do
-    len <- fromIntegral <$> getWord24le
-    seqN <- getWord8
-    body <- getLazyByteString (fromIntegral len)
+decodePacket :: P.Parser Packet
+decodePacket = do
+    len <- fromIntegral <$> decodeWord24LE
+    seqN <- P.anyWord8
+    body <- P.take (fromIntegral len)
     return (Packet len seqN body)
-{-# INLINE getPacket #-}
-
-instance Binary Packet where
-    put = putPacket
-    {-# INLINE put #-}
-    get = getPacket
-    {-# INLINE get #-}
+{-# INLINE decodePacket #-}
 
 isERR :: Packet -> Bool
-isERR p = L.index (pBody p) 0 == 0xFF
+isERR p = V.unsafeIndex (pBody p) 0 == 0xFF
 {-# INLINE isERR #-}
 
 isOK :: Packet -> Bool
-isOK p  = L.index (pBody p) 0 == 0x00
+isOK p  = V.unsafeIndex (pBody p) 0 == 0x00
 {-# INLINE isOK #-}
 
 isEOF :: Packet -> Bool
-isEOF p = L.index (pBody p) 0 == 0xFE
+isEOF p = V.unsafeIndex (pBody p) 0 == 0xFE
 {-# INLINE isEOF #-}
 
 -- | Is there more packet to be read?
@@ -79,222 +73,168 @@ isThereMore :: OK -> Bool
 isThereMore p  = okStatus p .&. 0x08 /= 0
 {-# INLINE isThereMore #-}
 
--- | Decoding packet inside IO, throw 'DecodePacketException' on fail parsing,
+-- | Decoding packet inside IO, throw 'OtherError' on fail parsing,
 -- here we choose stability over correctness by omit incomplete consumed case:
 -- if we successful parse a packet, then we don't care if there're bytes left.
 --
-decodeFromPacket :: Binary a => Packet -> IO a
-decodeFromPacket = getFromPacket get
+decodeFromPacket :: HasCallStack => P.Parser a -> Packet -> IO a
+decodeFromPacket g (Packet _ _ body) = unwrap "EPARSE" $ P.parse' g body
 {-# INLINE decodeFromPacket #-}
 
-getFromPacket :: Get a -> Packet -> IO a
-getFromPacket g (Packet _ _ body) = case parseDetailLazy g body of
-    Left  (buf, offset, errmsg) -> throwIO (DecodePacketFailed buf offset errmsg)
-    Right (_,   _,      r     ) -> return r
-{-# INLINE getFromPacket #-}
-
-data DecodePacketException = DecodePacketFailed ByteString ByteOffset String
-  deriving (Typeable, Show)
-instance Exception DecodePacketException
-
-encodeToPacket :: Binary a => Word8 -> a -> Packet
+-- Encode a packet with a sequence number
+encodeToPacket :: Word8 -> B.Builder () -> Packet
 encodeToPacket seqN payload =
-    let s = encode payload
-        l = L.length s
+    let s = B.build payload
+        l = V.length s
     in Packet (fromIntegral l) seqN s
 {-# INLINE encodeToPacket #-}
-
-putToPacket :: Word8 -> Put -> Packet
-putToPacket seqN payload =
-    let s = runPut payload
-        l = L.length s
-    in Packet (fromIntegral l) seqN s
-{-# INLINE putToPacket #-}
 
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
 
--- | You may get interested in 'OK' packet because it provides information about
+-- | You may decode interested in 'OK' packet because it provides information about
 -- successful operations.
 --
 data OK = OK
-    { okAffectedRows :: !Int      -- ^ affected row number
-    , okLastInsertID :: !Int      -- ^ last insert's ID
-    , okStatus       :: !Word16
-    , okWarningCnt   :: !Word16
-    } deriving (Show, Eq)
+    { okAffectedRows :: {-# UNPACK #-} !Int      -- ^ affected row number
+    , okLastInsertID :: {-# UNPACK #-} !Int      -- ^ last insert's ID
+    , okStatus       :: {-# UNPACK #-} !Word16
+    , okWarningCnt   :: {-# UNPACK #-} !Word16
+    } deriving (Show, Eq, Ord, Generic)
+      deriving anyclass T.Print
 
-getOK :: Get OK
-getOK = OK <$ skipN 1
-           <*> getLenEncInt
-           <*> getLenEncInt
-           <*> getWord16le
-           <*> getWord16le
-{-# INLINE getOK #-}
-
-putOK :: OK -> Put
-putOK (OK row lid stat wcnt) = do
-    putWord8 0x00
-    putLenEncInt row
-    putLenEncInt lid
-    putWord16le stat
-    putWord16le wcnt
-{-# INLINE putOK #-}
-
-instance Binary OK where
-    get = getOK
-    {-# INLINE get #-}
-    put = putOK
-    {-# INLINE put #-}
+decodeOK :: P.Parser OK
+decodeOK = OK <$ P.skip 1
+           <*> decodeLenEncInt
+           <*> decodeLenEncInt
+           <*> P.decodePrimLE @Word16
+           <*> P.decodePrimLE @Word16
+{-# INLINE decodeOK #-}
 
 data ERR = ERR
-    { errCode  :: !Word16
-    , errState :: !ByteString
-    , errMsg   :: !ByteString
-    } deriving (Show, Eq)
+    { errCode  :: {-# UNPACK #-} !Word16
+    , errState :: !T.Text
+    , errMsg   :: !T.Text
+    } deriving (Show, Eq, Ord, Generic)
+      deriving anyclass T.Print
 
-getERR :: Get ERR
-getERR = ERR <$  skipN 1
-             <*> getWord16le
-             <*  skipN 1
-             <*> getByteString 5
-             <*> getRemainingByteString
-{-# INLINE getERR #-}
-
-putERR :: ERR -> Put
-putERR (ERR code stat msg) = do
-    putWord8 0xFF
-    putWord16le code
-    putWord8 35 -- '#'
-    putByteString stat
-    putByteString msg
-{-# INLINE putERR #-}
-
-instance Binary ERR where
-    get = getERR
-    {-# INLINE get #-}
-    put = putERR
-    {-# INLINE put #-}
+decodeERR :: P.Parser ERR
+decodeERR = do
+    _ <- P.skipWord8
+    code <- P.decodePrimLE @Word16
+    _ <- P.skipWord8
+    st <- P.take 5
+    msg <- P.takeRemaining
+    return (ERR code (T.validate st) (T.validate msg))
+{-# INLINE decodeERR #-}
 
 data EOF = EOF
-    { eofWarningCnt :: !Word16
-    , eofStatus     :: !Word16
-    } deriving (Show, Eq)
+    { eofWarningCnt :: {-# UNPACK #-} !Word16
+    , eofStatus     :: {-# UNPACK #-} !Word16
+    } deriving (Show, Eq, Ord, Generic)
+      deriving anyclass T.Print
 
-getEOF :: Get EOF
-getEOF = EOF <$  skipN 1
-             <*> getWord16le
-             <*> getWord16le
-{-# INLINE getEOF #-}
-
-putEOF :: EOF -> Put
-putEOF (EOF wcnt stat) = do
-    putWord8 0xFE
-    putWord16le wcnt
-    putWord16le stat
-{-# INLINE putEOF #-}
-
-instance Binary EOF where
-    get = getEOF
-    {-# INLINE get #-}
-    put = putEOF
-    {-# INLINE put #-}
+decodeEOF :: P.Parser EOF
+decodeEOF = EOF <$  P.skip 1
+             <*> P.decodePrimLE @Word16
+             <*> P.decodePrimLE @Word16
+{-# INLINE decodeEOF #-}
 
 --------------------------------------------------------------------------------
 --  Helpers
 
-getByteStringNul :: Get ByteString
-getByteStringNul = L.toStrict <$> getLazyByteStringNul
-{-# INLINE getByteStringNul #-}
+decodeBytesNul :: P.Parser V.Bytes
+decodeBytesNul = P.takeTill (== 0) <* P.skipWord8
+{-# INLINE decodeBytesNul #-}
 
-getRemainingByteString :: Get ByteString
-getRemainingByteString = L.toStrict <$> getRemainingLazyByteString
-{-# INLINE getRemainingByteString #-}
+encodeLenEncBytes :: V.Bytes -> B.Builder ()
+encodeLenEncBytes c = do
+    encodeLenEncInt (V.length c)
+    B.bytes c
+{-# INLINE encodeLenEncBytes #-}
 
-putLenEncBytes :: ByteString -> Put
-putLenEncBytes c = do
-    putLenEncInt (B.length c)
-    putByteString c
-{-# INLINE putLenEncBytes #-}
+decodeLenEncBytes :: P.Parser V.Bytes
+decodeLenEncBytes = decodeLenEncInt >>= P.take
+{-# INLINE decodeLenEncBytes #-}
 
-getLenEncBytes :: Get ByteString
-getLenEncBytes = getLenEncInt >>= getByteString
-{-# INLINE getLenEncBytes #-}
+decodeLenEncText :: P.Parser T.Text
+decodeLenEncText = T.validate <$!> decodeLenEncBytes
+{-# INLINE decodeLenEncText #-}
 
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
-getLenEncInt:: Get Int
-getLenEncInt = getWord8 >>= word2Len
+decodeLenEncInt:: P.Parser Int
+decodeLenEncInt = P.anyWord8 >>= word2Len
   where
     word2Len l
-         | l <  0xFB  = pure (fromIntegral l)
-         | l == 0xFC  = fromIntegral <$> getWord16le
-         | l == 0xFD  = fromIntegral <$> getWord24le
-         | l == 0xFE  = fromIntegral <$> getWord64le
-         | otherwise = fail $ "invalid length val " ++ show l
-{-# INLINE getLenEncInt #-}
+         | l <  0xFB  = pure $! fromIntegral l
+         | l == 0xFC  = fromIntegral <$!> P.decodeWord16LE
+         | l == 0xFD  = fromIntegral <$!> decodeWord24LE
+         | l == 0xFE  = fromIntegral <$!> P.decodeWord64LE
+         | otherwise  = P.fail' $ "invalid length val: " <> T.toText l
+{-# INLINE decodeLenEncInt #-}
 
-putLenEncInt:: Int -> Put
-putLenEncInt x
-         | x <  251      = putWord8 (fromIntegral x)
-         | x < 65536     = putWord8 0xFC >> putWord16le (fromIntegral x)
-         | x < 16777216  = putWord8 0xFD >> putWord24le (fromIntegral x)
-         | otherwise     = putWord8 0xFE >> putWord64le (fromIntegral x)
-{-# INLINE putLenEncInt #-}
+encodeLenEncInt:: Int -> B.Builder ()
+encodeLenEncInt x
+         | x <  251      = B.word8 (fromIntegral x)
+         | x < 65536     = B.word8 0xFC >> B.encodePrimLE @Word16 (fromIntegral x)
+         | x < 16777216  = B.word8 0xFD >> encodeWord24LE (fromIntegral x)
+         | otherwise     = B.word8 0xFE >> B.encodePrimLE @Word64 (fromIntegral x)
+{-# INLINE encodeLenEncInt #-}
 
-putWord24le :: Word32 -> Put
-putWord24le v = do
-    putWord16le $ fromIntegral v
-    putWord8 $ fromIntegral (v `shiftR` 16)
-{-# INLINE putWord24le #-}
+encodeWord24LE :: Word32 -> B.Builder ()
+encodeWord24LE v = do
+    B.encodePrimLE @Word16 $ fromIntegral v
+    B.word8 $ fromIntegral (v `shiftR` 16)
+{-# INLINE encodeWord24LE #-}
 
-getWord24le :: Get Word32
-getWord24le = do
-    a <- fromIntegral <$> getWord16le
-    b <- fromIntegral <$> getWord8
-    return $! a .|. (b `shiftL` 16)
-{-# INLINE getWord24le #-}
+decodeWord24LE :: P.Parser Word32
+decodeWord24LE = do
+    a <- fromIntegral <$> P.decodeWord16LE
+    b <- fromIntegral <$> P.anyWord8
+    return $! a .|. (b `unsafeShiftL` 16)
+{-# INLINE decodeWord24LE #-}
 
-putWord48le :: Word64 -> Put
-putWord48le v = do
-    putWord32le $ fromIntegral v
-    putWord16le $ fromIntegral (v `shiftR` 32)
-{-# INLINE putWord48le #-}
+encodeWord48LE :: Word64 -> B.Builder ()
+encodeWord48LE v = do
+    B.encodePrimLE @Word32 $ fromIntegral v
+    B.encodePrimLE @Word16 $ fromIntegral (v `shiftR` 32)
+{-# INLINE encodeWord48LE #-}
 
-getWord48le :: Get Word64
-getWord48le = do
-    a <- fromIntegral <$> getWord32le
-    b <- fromIntegral <$> getWord16le
-    return $! a .|. (b `shiftL` 32)
-{-# INLINE getWord48le #-}
+decodeWord48LE :: P.Parser Word64
+decodeWord48LE = do
+    a <- fromIntegral <$> P.decodePrimLE @Word32
+    b <- fromIntegral <$> P.decodePrimLE @Word16
+    return $! a .|. (b `unsafeShiftL` 32)
+{-# INLINE decodeWord48LE #-}
 
-getWord24be :: Get Word24
-getWord24be = do
-    a <- fromIntegral <$> getWord16be
-    b <- fromIntegral <$> getWord8
-    return $! b .|. (a `shiftL` 8)
-{-# INLINE getWord24be #-}
+decodeWord24BE :: P.Parser Word32
+decodeWord24BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word16
+    b <- fromIntegral <$> P.anyWord8
+    return $! b .|. (a `unsafeShiftL` 8)
+{-# INLINE decodeWord24BE #-}
 
-getInt24be :: Get Int24
-getInt24be = do
-    a <- fromIntegral <$> getWord16be
-    b <- fromIntegral <$> getWord8
-    return $! fromIntegral $ (b .|. (a `shiftL` 8) :: Word24)
-{-# INLINE getInt24be #-}
+decodeInt24BE :: P.Parser Int24
+decodeInt24BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word16
+    b <- fromIntegral <$> P.anyWord8
+    return $! fromIntegral $ (b .|. (a `unsafeShiftL` 8) :: Word24)
+{-# INLINE decodeInt24BE #-}
 
-getWord40be, getWord48be, getWord56be :: Get Word64
-getWord40be = do
-    a <- fromIntegral <$> getWord32be
-    b <- fromIntegral <$> getWord8
-    return $! (a `shiftL` 8) .|. b
-getWord48be = do
-    a <- fromIntegral <$> getWord32be
-    b <- fromIntegral <$> getWord16be
-    return $! (a `shiftL` 16) .|. b
-getWord56be = do
-    a <- fromIntegral <$> getWord32be
-    b <- fromIntegral <$> getWord24be
-    return $! (a `shiftL` 24) .|. b
-{-# INLINE getWord40be #-}
-{-# INLINE getWord48be #-}
-{-# INLINE getWord56be #-}
+decodeWord40BE, decodeWord48BE, decodeWord56BE :: P.Parser Word64
+decodeWord40BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word32
+    b <- fromIntegral <$> P.anyWord8
+    return $! (a `unsafeShiftL` 8) .|. b
+decodeWord48BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word32
+    b <- fromIntegral <$> P.decodePrimBE @Word16
+    return $! (a `unsafeShiftL` 16) .|. b
+decodeWord56BE = do
+    a <- fromIntegral <$> P.decodePrimBE @Word32
+    b <- fromIntegral <$> decodeWord24BE
+    return $! (a `unsafeShiftL` 24) .|. b
+{-# INLINE decodeWord40BE #-}
+{-# INLINE decodeWord48BE #-}
+{-# INLINE decodeWord56BE #-}

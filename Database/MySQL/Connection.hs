@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ViewPatterns #-}
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment
@@ -13,31 +15,24 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 
 module Database.MySQL.Connection where
 
-import           Control.Applicative
-import           Control.Exception               (Exception, bracketOnError,
-                                                  throwIO, catch, SomeException)
 import           Control.Monad
-import qualified Crypto.Hash                     as Crypto
-import qualified Data.Binary                     as Binary
-import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-import qualified Data.ByteArray                  as BA
-import           Data.ByteString                 (ByteString)
-import qualified Data.ByteString                 as B
-import qualified Data.ByteString.Lazy            as L
-import qualified Data.ByteString.Unsafe          as B
-import           Data.IORef                      (IORef, newIORef, readIORef,
-                                                  writeIORef)
-import           Data.Typeable
+import           Data.IORef
 import           Data.Word
+import           GHC.Generics
+import qualified Z.Crypto.Hash                  as Crypto
+import           Z.Crypto.SafeMem
+import           Z.Crypto.PubKey
+import qualified Z.Data.Parser                  as P
+import qualified Z.Data.Builder                 as B
+import qualified Z.Data.Text                    as T
+import qualified Z.Data.Vector                  as V
+import qualified Z.Data.Vector.Extra            as V
+import           Z.IO.Network
+import           Z.IO
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
-import           Network.Socket                  (HostName, PortNumber)
-import           System.IO.Streams               (InputStream)
-import qualified System.IO.Streams               as Stream
-import qualified System.IO.Streams.TCP           as TCP
-import qualified Data.Connection                 as TCP
 
 --------------------------------------------------------------------------------
 
@@ -46,24 +41,26 @@ import qualified Data.Connection                 as TCP
 -- You shouldn't use one 'MySQLConn' in different thread, if you do that,
 -- consider protecting it with a @MVar@.
 --
-data MySQLConn = MySQLConn {
-        mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
-    ,   mysqlWrite       :: (Packet -> IO ())
-    ,   mysqlCloseSocket :: IO ()
-    ,   isConsumed       :: {-# UNPACK #-} !(IORef Bool)
+data MySQLConn = MySQLConn
+    { mysqlRead        :: !BufferedInput
+    , mysqlWrite       :: !BufferedOutput
+    , isConsumed       :: {-# UNPACK #-} !(IORef Bool)
     }
 
 -- | Everything you need to establish a MySQL connection.
 --
--- To setup a TLS connection, use module "Database.MySQL.TLS" or "Database.MySQL.OpenSSL".
 --
 data ConnectInfo = ConnectInfo
-    { ciHost     :: HostName
-    , ciPort     :: PortNumber
-    , ciDatabase :: ByteString
-    , ciUser     :: ByteString
-    , ciPassword :: ByteString
+    { ciConnConfig :: Either IPCClientConfig TCPClientConfig
+    , ciRecvBufSiz :: Int
+    , ciSendBufSiz :: Int
+    , ciDatabase :: T.Text
+    , ciUser     :: T.Text
+    , ciPassword :: T.Text
     , ciCharset  :: Word8
+    , ciSecureConf :: Maybe PubKey      -- ^ MySQL 8.0.2 and afterward, the default authentication plugin is @caching_sha2_password@,
+                                        -- set this field to the server's public key if you're not using TLS connection and don't want
+                                        -- request public key from server over non-secure wire.
     } deriving Show
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
@@ -74,14 +71,20 @@ data ConnectInfo = ConnectInfo
 --  with @SELECT id, collation_name FROM information_schema.collations ORDER BY id;@
 --
 defaultConnectInfo :: ConnectInfo
-defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8_general_ci
+defaultConnectInfo = ConnectInfo
+    (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
+    V.defaultChunkSize V.defaultChunkSize
+    "" "root" "" utf8_general_ci Nothing
 
 -- | 'defaultConnectInfo' with charset set to @utf8mb4_unicode_ci@
 --
 -- This is recommanded on any MySQL server version >= 5.5.3.
 --
 defaultConnectInfoMB4 :: ConnectInfo
-defaultConnectInfoMB4 = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8mb4_unicode_ci
+defaultConnectInfoMB4 = ConnectInfo
+    (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
+    V.defaultChunkSize V.defaultChunkSize
+    "" "root" "" utf8mb4_unicode_ci Nothing
 
 utf8_general_ci :: Word8
 utf8_general_ci = 33
@@ -91,94 +94,80 @@ utf8mb4_unicode_ci = 224
 
 --------------------------------------------------------------------------------
 
--- | Socket buffer size.
---
--- maybe exposed to 'ConnectInfo' laster?
---
-bUFSIZE :: Int
-bUFSIZE = 16384
-
 -- | Establish a MySQL connection.
 --
-connect :: ConnectInfo -> IO MySQLConn
+connect :: ConnectInfo -> Resource MySQLConn
 connect = fmap snd . connectDetail
 
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
-connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail (ConnectInfo host port db user pass charset)
-    = bracketOnError open TCP.close go
+connectDetail :: HasCallStack => ConnectInfo -> Resource (Greeting, MySQLConn)
+connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user (T.getUTF8Bytes -> pass) charset mpubkey) = do
+    uvs <- either initIPCClient initTCPClient conf
+    initResource (do
+        (bi, bo) <- newBufferedIO' uvs recvBufSiz sendBufSiz
+        greet <- decodeFromPacket decodeGreeting =<< readPacket bi
+        writePacket bo (encodeToPacket 1 (encodeHandshakeResponse41 (mkAuth41 greet)))
+        handleAuthRes greet bi bo
+        consumed <- newIORef True
+        return (greet, MySQLConn bi bo consumed))
+        (\ (_, MySQLConn bi bo _) -> writeCommand COM_QUIT bo >> waitNotMandatoryOK bi)
   where
-    open  = connectWithBufferSize host port bUFSIZE
-    go c  = do
-        let is = TCP.source c
-        is' <- decodeInputStream is
-        p <- readPacket is'
-        greet <- decodeFromPacket p
-        let auth = mkAuth db user pass charset greet
-        write c $ encodeToPacket 1 auth
-        q <- readPacket is'
-        if isOK q
-        then do
-            consumed <- newIORef True
-            let waitNotMandatoryOK = catch
-                    (void (waitCommandReply is'))           -- server will either reply an OK packet
-                    ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
-                conn = MySQLConn is'
-                    (write c)
-                    (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
-                    consumed
-            return (greet, conn)
-        else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
+    waitNotMandatoryOK bi = catch
+        (void (waitCommandReply bi))           -- server will either reply an OK packet
+        ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
 
-    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
-    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
+    -- | Make a HandshakeResponse41 packet
+    mkAuth41 greet =
+        let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
+            plugin = greetingAuthPlugin greet
+            scambleBuf = scramble plugin salt
+        in HandshakeResponse41 clientCap clientMaxPacketSize charset user scambleBuf db plugin
 
-mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
-mkAuth db user pass charset greet =
-    let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
-        scambleBuf = scramble salt pass
-    in Auth clientCap clientMaxPacketSize charset user scambleBuf db
-  where
-    scramble :: ByteString -> ByteString -> ByteString
-    scramble salt pass'
-        | B.null pass' = B.empty
-        | otherwise   = B.pack (B.zipWith xor sha1pass withSalt)
-        where sha1pass = sha1 pass'
-              withSalt = sha1 (salt `B.append` sha1 sha1pass)
+    handleAuthRes greet bi bo = do
+        authRes <- readPacket bi
 
-    sha1 :: ByteString -> ByteString
-    sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
+        when (isAuthSwitchRequest authRes) $ do
+            -- TODO, update greet packet?
+            (AuthSwitchRequest plugin salt) <- decodeFromPacket decodeAuthSwitchRequest authRes
+            let scambleBuf = scramble plugin salt
+            writePacket bo (Packet (V.length scambleBuf) 3 scambleBuf)
+            handleAuthRes greet bi bo
 
--- | A specialized 'decodeInputStream' here for speed
-decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
-decodeInputStream is = Stream.makeInputStream $ do
-    bs <- Stream.readExactly 4 is
-    let len =  fromIntegral (bs `B.unsafeIndex` 0)
-           .|. fromIntegral (bs `B.unsafeIndex` 1) `shiftL` 8
-           .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
-        seqN = bs `B.unsafeIndex` 3
-    body <- loopRead [] len is
-    return . Just $ Packet len seqN body
-  where
-    loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
-    loopRead acc k is' = do
-        bs <- Stream.read is'
-        case bs of Nothing -> throwIO NetworkException
-                   Just bs' -> do let l = fromIntegral (B.length bs')
-                                  if l >= k
-                                  then do
-                                      let (a, rest) = B.splitAt (fromIntegral k) bs'
-                                      unless (B.null rest) (Stream.unRead rest is')
-                                      return $! L.fromChunks (reverse (a:acc))
-                                  else do
-                                      let k' = k - l
-                                      k' `seq` loopRead (bs':acc) k' is'
+        when (isAuthResponse authRes) $ do
+            case decodeAuthResponse authRes of
+                PerformFullAuthentication -> do
+                    -- Request pubkey from server, see https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/#public-key-request
+                    pubkey <- maybe
+                        (do let pubkeyRequest = Packet 1 3 (V.singleton 2)
+                                decodePubKey = do
+                                    P.skipWord8 -- 0x01
+                                    P.takeRemaining
+                            writePacket bo pubkeyRequest
+                            loadPubKey =<< decodeFromPacket decodePubKey =<< readPacket bi) return mpubkey
+                    rng <- getRNG
+                    let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
+                    encryptedPass <- if V.null pass
+                        then return V.empty
+                        else pkEncrypt pubkey (EME_OAEP SHA160 "") rng (V.zipWith' xor (pass `V.snoc` 0) salt)
+                    writePacket bo (Packet 256 5 encryptedPass)
+                _ -> return ()
+            handleAuthRes greet bi bo
 
--- | Close a MySQL connection.
---
-close :: MySQLConn -> IO ()
-close (MySQLConn _ _ closeSocket _) = closeSocket
+        -- Now by pass OK packet
+
+    scramble :: T.Text -> V.Bytes -> V.Bytes
+    scramble plugin salt
+        | V.null pass = V.empty
+        | otherwise   = case plugin of
+            "mysql_native_password" -> let salt1 = sha1 (salt `V.append` sha1 sha1pass) in V.zipWith' xor sha1pass salt1
+            "caching_sha2_password" -> let salt2 = sha2 (salt `V.append` sha2 sha2pass) in V.zipWith' xor sha2pass salt2
+            _ -> throw (UnsupportedAuthPlugin plugin callStack)
+
+    sha1pass = sha1 pass
+    sha2pass = sha2 pass
+    sha1 = unCEBytes . Crypto.hash Crypto.SHA160
+    sha2 = unCEBytes . Crypto.hash Crypto.SHA256
 
 -- | Send a 'COM_PING'.
 --
@@ -191,67 +180,87 @@ ping = flip command COM_PING
 -- | Send a 'Command' which don't return a resultSet.
 --
 command :: MySQLConn -> Command -> IO OK
-command conn@(MySQLConn is os _ _) cmd = do
+command conn@(MySQLConn is os _) cmd = do
     guardUnconsumed conn
     writeCommand cmd os
     waitCommandReply is
 {-# INLINE command #-}
 
-waitCommandReply :: InputStream Packet -> IO OK
+waitCommandReply :: HasCallStack => BufferedInput -> IO OK
 waitCommandReply is = do
     p <- readPacket is
-    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
-        | isOK  p -> decodeFromPacket p
-        | otherwise -> throwIO (UnexpectedPacket p)
+    if isOK p
+    then decodeFromPacket decodeOK p
+    else throwIO (UnexpectedPacket p callStack)
 {-# INLINE waitCommandReply #-}
 
-waitCommandReplys :: InputStream Packet -> IO [OK]
+waitCommandReplys :: HasCallStack => BufferedInput -> IO [OK]
 waitCommandReplys is = do
     p <- readPacket is
-    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
-        | isOK  p -> do ok <- decodeFromPacket p
-                        if isThereMore ok
-                        then (ok :) <$> waitCommandReplys is
-                        else return [ok]
-        | otherwise -> throwIO (UnexpectedPacket p)
+    if isOK p
+    then do ok <- decodeFromPacket decodeOK p
+            if isThereMore ok
+            then (ok :) <$> waitCommandReplys is
+            else return [ok]
+    else throwIO (UnexpectedPacket p callStack)
 {-# INLINE waitCommandReplys #-}
 
-readPacket :: InputStream Packet -> IO Packet
-readPacket is = Stream.read is >>= maybe
-    (throwIO NetworkException)
-    (\ p@(Packet len _ bs) -> if len < 16777215 then return p else go len [bs])
+-- | Read a 'Packet' from input.
+--
+-- This function will raise 'ERRException' if 'ERR' packet is met.
+readPacket :: HasCallStack => BufferedInput -> IO Packet
+readPacket bi = do
+    p@(Packet l _ body) <- packet
+    if l < 16777215
+    then pure p
+    else loopRead l [body]
   where
-    go len acc = Stream.read is >>= maybe
-        (throwIO NetworkException)
-        (\ (Packet len' seqN bs) -> do
-            let len'' = len + len'
-                acc' = bs:acc
-            if len' < 16777215
-            then return (Packet len'' seqN (L.concat . reverse $ acc'))
-            else len'' `seq` go len'' acc'
-        )
+    loopRead !l acc = do
+        (Packet l' seqN body) <- packet
+        if l' < 16777215
+        then pure (Packet (l + l') seqN (V.concat . reverse $ body:acc))
+        else loopRead (l + l') (body:acc)
+    packet = do
+        bs <- readExactly 4 bi
+        let !len =  fromIntegral (bs `V.unsafeIndex` 0)
+               .|. fromIntegral (bs `V.unsafeIndex` 1) `unsafeShiftL` 8
+               .|. fromIntegral (bs `V.unsafeIndex` 2) `unsafeShiftL` 16
+            !seqN = bs `V.unsafeIndex` 3
+        body <- readExactly len bi
+        let p = Packet len seqN body
+        if (isERR p)
+        then do
+            err <- decodeFromPacket decodeERR p
+            throwIO (ERRException err callStack)
+        else pure p
 {-# INLINE readPacket #-}
 
-writeCommand :: Command -> (Packet -> IO ()) -> IO ()
-writeCommand a writePacket = let bs = Binary.runPut (putCommand a) in
-    go (fromIntegral (L.length bs)) 0 bs writePacket
+writePacket :: HasCallStack => BufferedOutput -> Packet -> IO ()
+writePacket bo p = do
+    writeBuilder bo (encodePacket p)
+    flushBuffer bo
+
+writeCommand :: Command -> BufferedOutput -> IO ()
+writeCommand a bo = do
+    let bs = B.buildWith V.smallChunkSize (encodeCommand a)
+    go (V.length bs) 0 bs
+    flushBuffer bo
   where
-    go len seqN bs writePacket' = do
+    go !len !seqN !bs = do
         if len < 16777215
-        then writePacket (Packet len seqN bs)
+        then writeBuilder bo $ encodePacket (Packet len seqN bs)
         else do
-            let (bs', rest) = L.splitAt 16777215 bs
+            let (bs', rest) = V.splitAt 16777215 bs
                 seqN' = seqN + 1
                 len'  = len - 16777215
-
-            writePacket (Packet 16777215 seqN bs')
-            seqN' `seq` len' `seq` go len' seqN' rest writePacket'
+            writeBuilder bo $ encodePacket  (Packet 16777215 seqN bs')
+            go len' seqN' rest
 {-# INLINE writeCommand #-}
 
-guardUnconsumed :: MySQLConn -> IO ()
-guardUnconsumed (MySQLConn _ _ _ consumed) = do
+guardUnconsumed :: HasCallStack => MySQLConn -> IO ()
+guardUnconsumed (MySQLConn _ _ consumed) = do
     c <- readIORef consumed
-    unless c (throwIO UnconsumedResultSet)
+    unless c (throwIO (UnconsumedResultSet callStack))
 {-# INLINE guardUnconsumed #-}
 
 writeIORef' :: IORef a -> a -> IO ()
@@ -261,15 +270,15 @@ writeIORef' ref x = x `seq` writeIORef ref x
 --------------------------------------------------------------------------------
 -- Exceptions
 
-data NetworkException = NetworkException deriving (Typeable, Show)
-instance Exception NetworkException
-
-data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
+data UnconsumedResultSet = UnconsumedResultSet CallStack deriving (Show)
 instance Exception UnconsumedResultSet
 
-data ERRException = ERRException ERR deriving (Typeable, Show)
+data ERRException = ERRException ERR CallStack deriving (Show)
 instance Exception ERRException
 
-data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
+data UnexpectedPacket = UnexpectedPacket Packet CallStack deriving (Show)
 instance Exception UnexpectedPacket
+
+data UnsupportedAuthPlugin = UnsupportedAuthPlugin T.Text CallStack deriving (Show)
+instance Exception UnsupportedAuthPlugin
 

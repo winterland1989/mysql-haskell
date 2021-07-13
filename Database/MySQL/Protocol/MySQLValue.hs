@@ -1,4 +1,7 @@
-{-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -16,57 +19,46 @@ Core text and binary row decoder/encoder machinery.
 module Database.MySQL.Protocol.MySQLValue
   ( -- * MySQLValue decoder and encoder
     MySQLValue(..)
-  , putParamMySQLType
-  , getTextField
-  , putTextField
-  , getTextRow
-  , getTextRowVector
-  , getBinaryField
-  , putBinaryField
-  , getBinaryRow
-  , getBinaryRowVector
+  , encodeParamMySQLType
+  , decodeTextField
+  , encodeTextField
+  , decodeTextRow
+  , decodeBinaryField
+  , encodeBinaryField
+  , decodeBinaryRow
   -- * Internal utilities
-  , getBits
+  , decodeBits
   , BitMap(..)
   , isColumnSet
   , isColumnNull
   , makeNullMap
   ) where
 
-import qualified Blaze.Text                         as Textual
-import           Control.Applicative
 import           Control.Monad
-import           Data.Binary.Put
-import           Data.Binary.Parser
-import           Data.Binary.IEEE754
+import           Control.DeepSeq
 import           Data.Bits
-import           Data.ByteString                    (ByteString)
-import qualified Data.ByteString                    as B
-import qualified Data.ByteString.Builder            as BB
-import           Data.ByteString.Builder.Scientific (FPFormat (..),
-                                                     formatScientificBuilder)
-import qualified Data.ByteString.Char8              as BC
-import qualified Data.ByteString.Lazy               as L
-import qualified Data.ByteString.Lex.Fractional     as LexFrac
-import qualified Data.ByteString.Lex.Integral       as LexInt
-import qualified Data.ByteString.Unsafe             as B
-import           Data.Fixed                         (Pico)
+import           Data.Fixed                        (Pico)
 import           Data.Int
-import           Data.Scientific                    (Scientific)
-import           Data.Text                          (Text)
-import qualified Data.Text.Encoding                 as T
-import           Data.Time.Calendar                 (Day, fromGregorian,
-                                                     toGregorian)
-import           Data.Time.Format                   (defaultTimeLocale,
-                                                     formatTime)
-import           Data.Time.LocalTime                (LocalTime (..),
-                                                     TimeOfDay (..))
+import           Data.Scientific                   (Scientific)
+import           Data.Time.Calendar                (Day, fromGregorian,
+                                                    toGregorian)
+import           Data.Time.Format                  (defaultTimeLocale,
+                                                    formatTime)
+import           Data.Time.LocalTime               (LocalTime (..),
+                                                    TimeOfDay (..))
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
 import           Database.MySQL.Protocol.Packet
-import           GHC.Generics                       (Generic)
-import qualified Data.Vector                        as V
+import           GHC.Generics                      (Generic)
+import qualified Z.Data.Builder                    as B
+import qualified Z.Data.Parser                     as P
+import qualified Z.Data.Parser.Time                as P
+import qualified Z.Data.Text                       as T
+import qualified Z.Data.Text.Base                  as T
+import qualified Z.Data.Vector                     as V
+import qualified Z.Data.Vector.Extra               as V
+import           Z.IO
 
 --------------------------------------------------------------------------------
 -- | Data type mapping between MySQL values and haskell values.
@@ -76,11 +68,11 @@ import qualified Data.Vector                        as V
 -- MySQL's @DATETIME@ and @TIMESTAMP@ are different on timezone handling:
 --
 --  * DATETIME and DATE is just a represent of a calendar date, it has no timezone information involved,
---  you always get the same value as you put no matter what timezone you're using with MySQL.
+--  you always decode the same value as you put no matter what timezone you're using with MySQL.
 --
 --  * MySQL converts TIMESTAMP values from the current time zone to UTC for storage,
 --  and back from UTC to the current time zone for retrieval. If you put a TIMESTAMP with timezone A,
---  then read it with timezone B, you may get different result because of this conversion, so always
+--  then read it with timezone B, you may decode different result because of this conversion, so always
 --  be careful about setting up the right timezone with MySQL, you can do it with a simple @SET time_zone = timezone;@
 --  for more info on timezone support, please read <http://dev.mysql.com/doc/refman/5.7/en/time-zone-support.html>
 --
@@ -88,423 +80,395 @@ import qualified Data.Vector                        as V
 --
 -- MySQL's @TIME@ type can present time of day, but also elapsed time or a time interval between two events.
 -- @TIME@ values may range from @-838:59:59@ to @838:59:59@, so 'MySQLTime' values consist of a sign and a
--- 'TimeOfDay' whose hour part may exceeded 24. you can use @timeOfDayToTime@ to get the absolute time interval.
+-- 'TimeOfDay' whose hour part may exceeded 24. you can use @timeOfDayToTime@ to decode the absolute time interval.
 --
 -- Under MySQL >= 5.7, @DATETIME@, @TIMESTAMP@ and @TIME@ may contain fractional part, which matches haskell's
 -- precision.
 --
 data MySQLValue
-    = MySQLDecimal       !Scientific   -- ^ DECIMAL, NEWDECIMAL
-    | MySQLInt8U         !Word8        -- ^ Unsigned TINY
-    | MySQLInt8          !Int8         -- ^ TINY
-    | MySQLInt16U        !Word16       -- ^ Unsigned SHORT
-    | MySQLInt16         !Int16        -- ^ SHORT
-    | MySQLInt32U        !Word32       -- ^ Unsigned LONG, INT24
-    | MySQLInt32         !Int32        -- ^ LONG, INT24
-    | MySQLInt64U        !Word64       -- ^ Unsigned LONGLONG
-    | MySQLInt64         !Int64        -- ^ LONGLONG
-    | MySQLFloat         !Float        -- ^ IEEE 754 single precision format
-    | MySQLDouble        !Double       -- ^ IEEE 754 double precision format
-    | MySQLYear          !Word16       -- ^ YEAR
-    | MySQLDateTime      !LocalTime    -- ^ DATETIME
-    | MySQLTimeStamp     !LocalTime    -- ^ TIMESTAMP
-    | MySQLDate          !Day              -- ^ DATE
-    | MySQLTime          !Word8 !TimeOfDay -- ^ sign(0 = non-negative, 1 = negative) hh mm ss microsecond
-                                           -- The sign is OPPOSITE to binlog one !!!
-    | MySQLGeometry      !ByteString       -- ^ todo: parsing to something meanful
-    | MySQLBytes         !ByteString
-    | MySQLBit           !Word64
-    | MySQLText          !Text
+    = MySQLDecimal       {-# UNPACK #-} !Scientific   -- ^ DECIMAL, NEWDECIMAL
+    | MySQLInt8U         {-# UNPACK #-} !Word8        -- ^ Unsigned TINY
+    | MySQLInt8          {-# UNPACK #-} !Int8         -- ^ TINY
+    | MySQLInt16U        {-# UNPACK #-} !Word16       -- ^ Unsigned SHORT
+    | MySQLInt16         {-# UNPACK #-} !Int16        -- ^ SHORT
+    | MySQLInt32U        {-# UNPACK #-} !Word32       -- ^ Unsigned LONG, INT24
+    | MySQLInt32         {-# UNPACK #-} !Int32        -- ^ LONG, INT24
+    | MySQLInt64U        {-# UNPACK #-} !Word64       -- ^ Unsigned LONGLONG
+    | MySQLInt64         {-# UNPACK #-} !Int64        -- ^ LONGLONG
+    | MySQLFloat         {-# UNPACK #-} !Float        -- ^ IEEE 754 single precision format
+    | MySQLDouble        {-# UNPACK #-} !Double       -- ^ IEEE 754 double precision format
+    | MySQLYear          {-# UNPACK #-} !Word16       -- ^ YEAR
+    | MySQLDateTime      {-# UNPACK #-} !LocalTime    -- ^ DATETIME
+    | MySQLTimeStamp     {-# UNPACK #-} !LocalTime    -- ^ TIMESTAMP
+    | MySQLDate                         !Day          -- ^ DATE
+    | MySQLTime          {-# UNPACK #-} !Word8      -- ^ sign(0 = non-negative, 1 = negative), the sign is OPPOSITE to binlog one !!!
+                         {-# UNPACK #-} !TimeOfDay  -- ^ hh mm ss microsecond
+    | MySQLGeometry      {-# UNPACK #-} !V.Bytes       -- ^ todo: parsing to something meanful
+    | MySQLBytes         {-# UNPACK #-} !V.Bytes
+    | MySQLBit           {-# UNPACK #-} !Word64
+    | MySQLText          {-# UNPACK #-} !T.Text
     | MySQLNull
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, NFData)
 
 -- | Put 'FieldType' and usigned bit(0x80/0x00) for 'MySQLValue's.
 --
-putParamMySQLType :: MySQLValue -> Put
-putParamMySQLType (MySQLDecimal      _)  = putFieldType mySQLTypeDecimal  >> putWord8 0x00
-putParamMySQLType (MySQLInt8U        _)  = putFieldType mySQLTypeTiny     >> putWord8 0x80
-putParamMySQLType (MySQLInt8         _)  = putFieldType mySQLTypeTiny     >> putWord8 0x00
-putParamMySQLType (MySQLInt16U       _)  = putFieldType mySQLTypeShort    >> putWord8 0x80
-putParamMySQLType (MySQLInt16        _)  = putFieldType mySQLTypeShort    >> putWord8 0x00
-putParamMySQLType (MySQLInt32U       _)  = putFieldType mySQLTypeLong     >> putWord8 0x80
-putParamMySQLType (MySQLInt32        _)  = putFieldType mySQLTypeLong     >> putWord8 0x00
-putParamMySQLType (MySQLInt64U       _)  = putFieldType mySQLTypeLongLong >> putWord8 0x80
-putParamMySQLType (MySQLInt64        _)  = putFieldType mySQLTypeLongLong >> putWord8 0x00
-putParamMySQLType (MySQLFloat        _)  = putFieldType mySQLTypeFloat    >> putWord8 0x00
-putParamMySQLType (MySQLDouble       _)  = putFieldType mySQLTypeDouble   >> putWord8 0x00
-putParamMySQLType (MySQLYear         _)  = putFieldType mySQLTypeYear     >> putWord8 0x80
-putParamMySQLType (MySQLDateTime     _)  = putFieldType mySQLTypeDateTime >> putWord8 0x00
-putParamMySQLType (MySQLTimeStamp    _)  = putFieldType mySQLTypeTimestamp>> putWord8 0x00
-putParamMySQLType (MySQLDate         _)  = putFieldType mySQLTypeDate     >> putWord8 0x00
-putParamMySQLType (MySQLTime       _ _)  = putFieldType mySQLTypeTime     >> putWord8 0x00
-putParamMySQLType (MySQLBytes        _)  = putFieldType mySQLTypeBlob     >> putWord8 0x00
-putParamMySQLType (MySQLGeometry     _)  = putFieldType mySQLTypeGeometry >> putWord8 0x00
-putParamMySQLType (MySQLBit          _)  = putFieldType mySQLTypeBit      >> putWord8 0x00
-putParamMySQLType (MySQLText         _)  = putFieldType mySQLTypeString   >> putWord8 0x00
-putParamMySQLType MySQLNull              = putFieldType mySQLTypeNull     >> putWord8 0x00
+encodeParamMySQLType :: MySQLValue -> B.Builder ()
+encodeParamMySQLType (MySQLDecimal      _)  = B.encodePrim (MySQLTypeDecimal  , 0x00::Word8)
+encodeParamMySQLType (MySQLInt8U        _)  = B.encodePrim (MySQLTypeTiny     , 0x80::Word8)
+encodeParamMySQLType (MySQLInt8         _)  = B.encodePrim (MySQLTypeTiny     , 0x00::Word8)
+encodeParamMySQLType (MySQLInt16U       _)  = B.encodePrim (MySQLTypeShort    , 0x80::Word8)
+encodeParamMySQLType (MySQLInt16        _)  = B.encodePrim (MySQLTypeShort    , 0x00::Word8)
+encodeParamMySQLType (MySQLInt32U       _)  = B.encodePrim (MySQLTypeLong     , 0x80::Word8)
+encodeParamMySQLType (MySQLInt32        _)  = B.encodePrim (MySQLTypeLong     , 0x00::Word8)
+encodeParamMySQLType (MySQLInt64U       _)  = B.encodePrim (MySQLTypeLongLong , 0x80::Word8)
+encodeParamMySQLType (MySQLInt64        _)  = B.encodePrim (MySQLTypeLongLong , 0x00::Word8)
+encodeParamMySQLType (MySQLFloat        _)  = B.encodePrim (MySQLTypeFloat    , 0x00::Word8)
+encodeParamMySQLType (MySQLDouble       _)  = B.encodePrim (MySQLTypeDouble   , 0x00::Word8)
+encodeParamMySQLType (MySQLYear         _)  = B.encodePrim (MySQLTypeYear     , 0x80::Word8)
+encodeParamMySQLType (MySQLDateTime     _)  = B.encodePrim (MySQLTypeDateTime , 0x00::Word8)
+encodeParamMySQLType (MySQLTimeStamp    _)  = B.encodePrim (MySQLTypeTimestamp, 0x00::Word8)
+encodeParamMySQLType (MySQLDate         _)  = B.encodePrim (MySQLTypeDate     , 0x00::Word8)
+encodeParamMySQLType (MySQLTime       _ _)  = B.encodePrim (MySQLTypeTime     , 0x00::Word8)
+encodeParamMySQLType (MySQLBytes        _)  = B.encodePrim (MySQLTypeBlob     , 0x00::Word8)
+encodeParamMySQLType (MySQLGeometry     _)  = B.encodePrim (MySQLTypeGeometry , 0x00::Word8)
+encodeParamMySQLType (MySQLBit          _)  = B.encodePrim (MySQLTypeBit      , 0x00::Word8)
+encodeParamMySQLType (MySQLText         _)  = B.encodePrim (MySQLTypeString   , 0x00::Word8)
+encodeParamMySQLType MySQLNull              = B.encodePrim (MySQLTypeNull     , 0x00::Word8)
 
 --------------------------------------------------------------------------------
 -- | Text protocol decoder
-getTextField :: ColumnDef -> Get MySQLValue
-getTextField f
-    | t == mySQLTypeNull            = pure MySQLNull
-    | t == mySQLTypeDecimal
-        || t == mySQLTypeNewDecimal = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == mySQLTypeTiny            = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
-                                                    else feedLenEncBytes t MySQLInt8 intLexer
-    | t == mySQLTypeShort           = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
-                                                    else feedLenEncBytes t MySQLInt16 intLexer
-    | t == mySQLTypeLong
-        || t == mySQLTypeInt24      = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
-                                                    else feedLenEncBytes t MySQLInt32 intLexer
-    | t == mySQLTypeLongLong        = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
-                                                    else feedLenEncBytes t MySQLInt64 intLexer
-    | t == mySQLTypeFloat           = feedLenEncBytes t MySQLFloat fracLexer
-    | t == mySQLTypeDouble          = feedLenEncBytes t MySQLDouble fracLexer
-    | t == mySQLTypeYear            = feedLenEncBytes t MySQLYear intLexer
-    | t == mySQLTypeTimestamp
-        || t == mySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
-                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
-    | t == mySQLTypeDateTime
-        || t == mySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime $ \ bs ->
-                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
-    | t == mySQLTypeDate
-        || t == mySQLTypeNewDate    = feedLenEncBytes t MySQLDate dateParser
-    | t == mySQLTypeTime
-        || t == mySQLTypeTime2      = feedLenEncBytes t id $ \ bs ->
-                                          if bs `B.unsafeIndex` 0 == 45  -- '-'
-                                               then MySQLTime 1 <$> timeParser (B.unsafeDrop 1 bs)
-                                               else MySQLTime 0 <$> timeParser bs
+decodeTextField :: ColumnDef -> P.Parser MySQLValue
+{-# INLINE decodeTextField #-}
+decodeTextField f
+    | t == MySQLTypeNull            = pure MySQLNull
+    | t == MySQLTypeDecimal
+        || t == MySQLTypeNewDecimal = feedLenEncBytes t MySQLDecimal P.scientific'
+    | t == MySQLTypeTiny            = if isUnsigned then feedLenEncBytes t MySQLInt8U P.uint
+                                                    else feedLenEncBytes t MySQLInt8 P.int
+    | t == MySQLTypeShort           = if isUnsigned then feedLenEncBytes t MySQLInt16U P.uint
+                                                    else feedLenEncBytes t MySQLInt16 P.int
+    | t == MySQLTypeLong
+        || t == MySQLTypeInt24      = if isUnsigned then feedLenEncBytes t MySQLInt32U P.uint
+                                                    else feedLenEncBytes t MySQLInt32 P.int
+    | t == MySQLTypeLongLong        = if isUnsigned then feedLenEncBytes t MySQLInt64U P.uint
+                                                    else feedLenEncBytes t MySQLInt64 P.int
+    | t == MySQLTypeFloat           = feedLenEncBytes t MySQLFloat P.float'
+    | t == MySQLTypeDouble          = feedLenEncBytes t MySQLDouble P.double'
+    | t == MySQLTypeYear            = feedLenEncBytes t MySQLYear P.int
+    | t == MySQLTypeTimestamp
+        || t == MySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp P.localTime
+    | t == MySQLTypeDateTime
+        || t == MySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime P.localTime
+    | t == MySQLTypeDate
+        || t == MySQLTypeNewDate    = feedLenEncBytes t MySQLDate P.day
+    | t == MySQLTypeTime
+        || t == MySQLTypeTime2      = feedLenEncBytes t id $ do
+                                          sign <- P.peek
+                                          if sign == 45  -- '-'
+                                          then P.skipWord8 >> (MySQLTime 1 <$> P.timeOfDay)
+                                          else MySQLTime 0 <$> P.timeOfDay
 
-    | t == mySQLTypeGeometry        = MySQLGeometry <$> getLenEncBytes
-    | t == mySQLTypeVarChar
-        || t == mySQLTypeEnum
-        || t == mySQLTypeSet
-        || t == mySQLTypeTinyBlob
-        || t == mySQLTypeMediumBlob
-        || t == mySQLTypeLongBlob
-        || t == mySQLTypeBlob
-        || t == mySQLTypeVarString
-        || t == mySQLTypeString     = (if isText then MySQLText . T.decodeUtf8 else MySQLBytes) <$> getLenEncBytes
+    | t == MySQLTypeGeometry        = MySQLGeometry <$> decodeLenEncBytes
+    | t == MySQLTypeVarChar
+        || t == MySQLTypeEnum
+        || t == MySQLTypeSet
+        || t == MySQLTypeTinyBlob
+        || t == MySQLTypeMediumBlob
+        || t == MySQLTypeLongBlob
+        || t == MySQLTypeBlob
+        || t == MySQLTypeVarString
+        || t == MySQLTypeString     =  do bs <- decodeLenEncBytes
+                                          if isText
+                                          then pure (MySQLText (T.validate bs))
+                                          else pure (MySQLBytes bs)
 
-    | t == mySQLTypeBit             = MySQLBit <$> (getBits =<< getLenEncInt)
+    | t == MySQLTypeBit             = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
 
-    | otherwise                     = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
+    | otherwise                     = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " <> T.toText t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
     isText = columnCharSet f /= 63
-    intLexer bs = fst <$> LexInt.readSigned LexInt.readDecimal bs
-    fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
-    dateParser bs = do
-        (yyyy, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
-        (dd, _) <- LexInt.readDecimal (B.unsafeTail rest')
-        return (fromGregorian yyyy mm dd)
 
-    timeParser bs = do
-        (hh, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
-        (ss, _) <- LexFrac.readDecimal (B.unsafeTail rest')
-        return (TimeOfDay hh mm ss)
-
-
-feedLenEncBytes :: FieldType -> (t -> b) -> (ByteString -> Maybe t) -> Get b
-feedLenEncBytes typ con parser = do
-    bs <- getLenEncBytes
-    case parser bs of
-        Just v -> return (con v)
-        Nothing -> fail $ "Database.MySQL.Protocol.MySQLValue: parsing " ++ show typ ++ " failed, \
-                          \input: " ++ BC.unpack bs
+feedLenEncBytes :: FieldType -> (t -> b) -> P.Parser t -> P.Parser b
 {-# INLINE feedLenEncBytes #-}
+feedLenEncBytes typ con p = do
+    bs <- decodeLenEncBytes
+    case P.parse' p bs of
+        Right v -> return (con v)
+        Left e -> P.fail' $ T.concat ["Database.MySQL.Protocol.MySQLValue: parsing ", T.toText typ, " failed, ", T.toText e]
 
 --------------------------------------------------------------------------------
 -- | Text protocol encoder
-putTextField :: MySQLValue -> Put
-putTextField (MySQLDecimal    n) = putBuilder (formatScientificBuilder Fixed Nothing n)
-putTextField (MySQLInt8U      n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt8       n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt16U     n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt16      n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt32U     n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt32      n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt64U     n) = putBuilder (Textual.integral n)
-putTextField (MySQLInt64      n) = putBuilder (Textual.integral n)
-putTextField (MySQLFloat      x) = putBuilder (Textual.float x)
-putTextField (MySQLDouble     x) = putBuilder (Textual.double x)
-putTextField (MySQLYear       n) = putBuilder (Textual.integral n)
-putTextField (MySQLDateTime  dt) = putInQuotes $
-                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
-putTextField (MySQLTimeStamp dt) = putInQuotes $
-                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
-putTextField (MySQLDate       d) = putInQuotes $
-                                      putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
-putTextField (MySQLTime  sign t) = putInQuotes $ do
-                                      when (sign == 1) (putCharUtf8 '-')
-                                      putByteString (BC.pack (formatTime defaultTimeLocale "%T%Q" t))
+encodeTextField :: MySQLValue -> B.Builder ()
+encodeTextField (MySQLDecimal    n) = B.scientific n
+encodeTextField (MySQLInt8U      n) = B.int n
+encodeTextField (MySQLInt8       n) = B.int n
+encodeTextField (MySQLInt16U     n) = B.int n
+encodeTextField (MySQLInt16      n) = B.int n
+encodeTextField (MySQLInt32U     n) = B.int n
+encodeTextField (MySQLInt32      n) = B.int n
+encodeTextField (MySQLInt64U     n) = B.int n
+encodeTextField (MySQLInt64      n) = B.int n
+encodeTextField (MySQLFloat      x) = B.float x
+encodeTextField (MySQLDouble     x) = B.double x
+encodeTextField (MySQLYear       n) = B.int n
+encodeTextField (MySQLDateTime  dt) = B.squotes $ B.localTime dt
+encodeTextField (MySQLTimeStamp dt) = B.squotes $ B.localTime dt
+encodeTextField (MySQLDate       d) = B.squotes $ B.day d
+encodeTextField (MySQLTime  sign t) = B.squotes $ do
+                                          when (sign == 1) (B.char8 '-')
+                                          B.string8 (formatTime defaultTimeLocale "%T%Q" t)
                                       -- this works even for hour > 24
-putTextField (MySQLGeometry  bs) = putInQuotes $ putByteString . escapeBytes $ bs
-putTextField (MySQLBytes     bs) = putInQuotes $ putByteString . escapeBytes $ bs
-putTextField (MySQLText       t) = putInQuotes $
-                                      putByteString . T.encodeUtf8 . escapeText $ t
-putTextField (MySQLBit        b) = do putBuilder "b\'"
-                                      putBuilder . execPut $ putTextBits b
-                                      putCharUtf8 '\''
+encodeTextField (MySQLGeometry  bs) = B.squotes $ escapeBytes $ bs
+encodeTextField (MySQLBytes     bs) = B.squotes $ escapeBytes $ bs
+encodeTextField (MySQLText       t) = B.squotes $ escapeText $ t
+encodeTextField (MySQLBit        b) = do
+                                      "b\'"
+                                      encodeTextBits b
+                                      B.char8 '\''
   where
-    putTextBits :: Word64 -> Put
-    putTextBits word = forM_ [63,62..0] $ \ pos ->
-            if word `testBit` pos then putCharUtf8 '1' else putCharUtf8 '0'
-    {-# INLINE putTextBits #-}
+    encodeTextBits :: Word64 -> B.Builder ()
+    encodeTextBits word = forM_ [63,62..0] $ \ pos ->
+            if word `testBit` pos then B.char8 '1' else B.char8 '0'
+    {-# INLINE encodeTextBits #-}
 
-putTextField MySQLNull           = putBuilder "NULL"
-
-putInQuotes :: Put -> Put
-putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
-{-# INLINE putInQuotes #-}
+encodeTextField MySQLNull           = "NULL"
 
 --------------------------------------------------------------------------------
 -- | Text row decoder
-getTextRow :: [ColumnDef] -> Get [MySQLValue]
-getTextRow fs = forM fs $ \ f -> do
-    p <- peek
-    if p == 0xFB
-    then skipN 1 >> return MySQLNull
-    else getTextField f
-{-# INLINE getTextRow #-}
 
-getTextRowVector :: V.Vector ColumnDef -> Get (V.Vector MySQLValue)
-getTextRowVector fs = V.forM fs $ \ f -> do
-    p <- peek
+decodeTextRow :: V.Vector ColumnDef -> P.Parser (V.Vector MySQLValue)
+{-# INLINABLE decodeTextRow #-}
+decodeTextRow fs = (`V.traverse` fs) $ \ f -> do
+    p <- P.peek
     if p == 0xFB
-    then skipN 1 >> return MySQLNull
-    else getTextField f
-{-# INLINE getTextRowVector #-}
+    then P.skipWord8 >> return MySQLNull
+    else decodeTextField f
 
 --------------------------------------------------------------------------------
 -- | Binary protocol decoder
-getBinaryField :: ColumnDef -> Get MySQLValue
-getBinaryField f
-    | t == mySQLTypeNull              = pure MySQLNull
-    | t == mySQLTypeDecimal
-        || t == mySQLTypeNewDecimal   = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == mySQLTypeTiny              = if isUnsigned then MySQLInt8U <$> getWord8
-                                                      else MySQLInt8  <$> getInt8
-    | t == mySQLTypeShort             = if isUnsigned then MySQLInt16U <$> getWord16le
-                                                      else MySQLInt16  <$> getInt16le
-    | t == mySQLTypeLong
-        || t == mySQLTypeInt24        = if isUnsigned then MySQLInt32U <$> getWord32le
-                                                      else MySQLInt32  <$> getInt32le
-    | t == mySQLTypeYear              = MySQLYear . fromIntegral <$> getWord16le
-    | t == mySQLTypeLongLong          = if isUnsigned then MySQLInt64U <$> getWord64le
-                                                      else MySQLInt64  <$> getInt64le
-    | t == mySQLTypeFloat             = MySQLFloat  <$> getFloatle
-    | t == mySQLTypeDouble            = MySQLDouble <$> getDoublele
-    | t == mySQLTypeTimestamp
-        || t == mySQLTypeTimestamp2   = do
-            n <- getLenEncInt
+decodeBinaryField :: ColumnDef -> P.Parser MySQLValue
+{-# INLINE decodeBinaryField #-}
+decodeBinaryField f
+    | t == MySQLTypeNull              = pure MySQLNull
+    | t == MySQLTypeDecimal
+        || t == MySQLTypeNewDecimal   = feedLenEncBytes t MySQLDecimal P.scientific'
+    | t == MySQLTypeTiny              = if isUnsigned then MySQLInt8U <$> P.decodePrim
+                                                      else MySQLInt8  <$> P.decodePrim
+    | t == MySQLTypeShort             = if isUnsigned then MySQLInt16U <$> P.decodePrimLE
+                                                      else MySQLInt16  <$> P.decodePrimLE
+    | t == MySQLTypeLong
+        || t == MySQLTypeInt24        = if isUnsigned then MySQLInt32U <$> P.decodePrimLE
+                                                      else MySQLInt32  <$> P.decodePrimLE
+    | t == MySQLTypeYear              = MySQLYear <$> P.decodePrimLE
+    | t == MySQLTypeLongLong          = if isUnsigned then MySQLInt64U <$> P.decodePrimLE
+                                                      else MySQLInt64  <$> P.decodePrimLE
+    | t == MySQLTypeFloat             = MySQLFloat  <$> P.decodePrimLE
+    | t == MySQLTypeDouble            = MySQLDouble <$> P.decodePrimLE
+    | t == MySQLTypeTimestamp
+        || t == MySQLTypeTimestamp2   = do
+            n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLTimeStamp (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
                4 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- decodeDay
                    pure $ MySQLTimeStamp (LocalTime d (TimeOfDay 0 0 0))
                7 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4
+                   d <- decodeDay
+                   td <- decodeTimeOfDay
                    pure $ MySQLTimeStamp (LocalTime d td)
                11 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
+                   d <- decodeDay
+                   td <- decodeTimeOfDay'
                    pure $ MySQLTimeStamp (LocalTime d td)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
-    | t == mySQLTypeDateTime
-        || t == mySQLTypeDateTime2    = do
-            n <- getLenEncInt
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
+    | t == MySQLTypeDateTime
+        || t == MySQLTypeDateTime2    = do
+            n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLDateTime (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
                4 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- decodeDay
                    pure $ MySQLDateTime (LocalTime d (TimeOfDay 0 0 0))
                7 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4
+                   d <- decodeDay
+                   td <- decodeTimeOfDay
                    pure $ MySQLDateTime (LocalTime d td)
                11 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
+                   d <- decodeDay
+                   td <- decodeTimeOfDay'
                    pure $ MySQLDateTime (LocalTime d td)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
 
-    | t == mySQLTypeDate
-        || t == mySQLTypeNewDate      = do
-            n <- getLenEncInt
+    | t == MySQLTypeDate
+        || t == MySQLTypeNewDate      = do
+            n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLDate (fromGregorian 0 0 0)
-               4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
+               4 -> MySQLDate <$> decodeDay
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
 
-    | t == mySQLTypeTime
-        || t == mySQLTypeTime2        = do
-            n <- getLenEncInt
+    | t == MySQLTypeTime
+        || t == MySQLTypeTime2        = do
+            n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLTime 0 (TimeOfDay 0 0 0)
                8 -> do
-                   sign <- getWord8   -- is_negative(1 if minus, 0 for plus)
-                   d <- fromIntegral <$> getWord32le
-                   h <-  getInt8'
-                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> getInt8' <*> getSecond4)
+                   sign <- P.anyWord8   -- is_negative(1 if minus, 0 for plus)
+                   d <- fromIntegral <$> P.decodePrimLE @Word32
+                   h <-  decodeInt8
+                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> decodeInt8 <*> decodeSecond4)
 
                12 -> do
-                   sign <- getWord8   -- is_negative(1 if minus, 0 for plus)
-                   d <- fromIntegral <$> getWord32le
-                   h <-  getInt8'
-                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> getInt8' <*> getSecond8)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
+                   sign <- P.anyWord8   -- is_negative(1 if minus, 0 for plus)
+                   d <- fromIntegral <$> P.decodePrimLE @Word32
+                   h <-  decodeInt8
+                   MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> decodeInt8 <*> decodeSecond8)
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
-    | t == mySQLTypeGeometry          = MySQLGeometry <$> getLenEncBytes
-    | t == mySQLTypeVarChar
-        || t == mySQLTypeEnum
-        || t == mySQLTypeSet
-        || t == mySQLTypeTinyBlob
-        || t == mySQLTypeMediumBlob
-        || t == mySQLTypeLongBlob
-        || t == mySQLTypeBlob
-        || t == mySQLTypeVarString
-        || t == mySQLTypeString       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
-                                                  else MySQLBytes <$> getLenEncBytes
-    | t == mySQLTypeBit               = MySQLBit <$> (getBits =<< getLenEncInt)
-    | otherwise                       = fail $ "Database.MySQL.Protocol.MySQLValue:\
-                                               \ missing binary decoder for " ++ show t
+    | t == MySQLTypeGeometry          = MySQLGeometry <$> decodeLenEncBytes
+    | t == MySQLTypeVarChar
+        || t == MySQLTypeEnum
+        || t == MySQLTypeSet
+        || t == MySQLTypeTinyBlob
+        || t == MySQLTypeMediumBlob
+        || t == MySQLTypeLongBlob
+        || t == MySQLTypeBlob
+        || t == MySQLTypeVarString
+        || t == MySQLTypeString       = do
+            bs <- decodeLenEncBytes
+            if isText
+            then pure (MySQLText (T.validate bs))
+            else pure (MySQLBytes bs)
+    | t == MySQLTypeBit               = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
+    | otherwise                       = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for type tag: " <> T.toText t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
     isText = columnCharSet f /= 63
-    fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
-    getYear :: Get Integer
-    getYear = fromIntegral <$> getWord16le
-    getInt8' :: Get Int
-    getInt8' = fromIntegral <$> getWord8
-    getSecond4 :: Get Pico
-    getSecond4 = realToFrac <$> getWord8
-    getSecond8 :: Get Pico
-    getSecond8 = realToFrac <$> do
-        s <- getInt8'
-        ms <- fromIntegral <$> getWord32le :: Get Int
+    decodeDay :: P.Parser Day
+    decodeDay = do
+        y <- decodeYear
+        m <- decodeInt8
+        d <- decodeInt8
+        case P.fromGregorianValidInt64 y m d of
+            Just d -> pure d
+            _ -> P.fail' $ T.concat ["Database.MySQL.Protocol.MySQLValue: invalid date: ", T.toText y, "-", T.toText m, "-", T.toText d]
+    decodeTimeOfDay :: P.Parser TimeOfDay
+    decodeTimeOfDay = TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond4
+    decodeTimeOfDay' :: P.Parser TimeOfDay
+    decodeTimeOfDay' = TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond8
+    decodeYear :: P.Parser Int64
+    decodeYear = fromIntegral <$> P.decodeWord16LE
+    decodeInt8 :: P.Parser Int
+    decodeInt8 = fromIntegral <$> P.anyWord8
+    decodeSecond4 :: P.Parser Pico
+    decodeSecond4 = realToFrac <$> P.anyWord8
+    decodeSecond8 :: P.Parser Pico
+    decodeSecond8 = realToFrac <$> do
+        s <- decodeInt8
+        (ms :: Int) <- fromIntegral <$> P.decodePrimLE @Word32
         pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
 
 
--- | Get a bit sequence as a Word64
+-- | decode a bit sequence as a Word64
 --
--- Since 'Word64' has a @Bits@ instance, it's easier to deal with in haskell.
+-- Since 'Word64' has a @Bits@ instance, it's easier to deal with in Haskell.
 --
-getBits :: Int -> Get Word64
-getBits bytes =
-    if  | bytes == 0 || bytes == 1 -> fromIntegral <$> getWord8
-        | bytes == 2 -> fromIntegral <$> getWord16be
-        | bytes == 3 -> fromIntegral <$> getWord24be
-        | bytes == 4 -> fromIntegral <$> getWord32be
-        | bytes == 5 -> fromIntegral <$> getWord40be
-        | bytes == 6 -> fromIntegral <$> getWord48be
-        | bytes == 7 -> fromIntegral <$> getWord56be
-        | bytes == 8 -> fromIntegral <$> getWord64be
-        | otherwise  -> fail $  "Database.MySQL.Protocol.MySQLValue: \
-                                \wrong bit length size: " ++ show bytes
-{-# INLINE getBits #-}
+decodeBits :: Int -> P.Parser Word64
+decodeBits bytes =
+    if  | bytes == 0 || bytes == 1 -> fromIntegral <$> P.anyWord8
+        | bytes == 2 -> fromIntegral <$> P.decodePrimBE @Word16
+        | bytes == 3 -> fromIntegral <$> decodeWord24BE
+        | bytes == 4 -> fromIntegral <$> P.decodePrimBE @Word32
+        | bytes == 5 -> fromIntegral <$> decodeWord40BE
+        | bytes == 6 -> fromIntegral <$> decodeWord48BE
+        | bytes == 7 -> fromIntegral <$> decodeWord56BE
+        | bytes == 8 -> fromIntegral <$> P.decodePrimBE @Word64
+        | otherwise  -> P.fail' $  "Database.MySQL.Protocol.MySQLValue: \
+                                \wrong bit length size: " <> T.toText bytes
+{-# INLINE decodeBits #-}
 
 
 --------------------------------------------------------------------------------
 -- | Binary protocol encoder
-putBinaryField :: MySQLValue -> Put
-putBinaryField (MySQLDecimal    n) = putLenEncBytes . L.toStrict . BB.toLazyByteString $
-                                        formatScientificBuilder Fixed Nothing n
-putBinaryField (MySQLInt8U      n) = putWord8 n
-putBinaryField (MySQLInt8       n) = putWord8 (fromIntegral n)
-putBinaryField (MySQLInt16U     n) = putWord16le n
-putBinaryField (MySQLInt16      n) = putInt16le n
-putBinaryField (MySQLInt32U     n) = putWord32le n
-putBinaryField (MySQLInt32      n) = putInt32le n
-putBinaryField (MySQLInt64U     n) = putWord64le n
-putBinaryField (MySQLInt64      n) = putInt64le n
-putBinaryField (MySQLFloat      x) = putFloatle x
-putBinaryField (MySQLDouble     x) = putDoublele x
-putBinaryField (MySQLYear       n) = putLenEncBytes . L.toStrict . BB.toLazyByteString $
-                                        Textual.integral n  -- this's really weird, it's not documented anywhere
+encodeBinaryField :: MySQLValue -> B.Builder ()
+encodeBinaryField (MySQLDecimal    n) = encodeLenEncBytes $ B.build (B.scientific n)
+encodeBinaryField (MySQLInt8U      n) = B.word8 n
+encodeBinaryField (MySQLInt8       n) = B.word8 (fromIntegral n)
+encodeBinaryField (MySQLInt16U     n) = B.encodePrimLE n
+encodeBinaryField (MySQLInt16      n) = B.encodePrimLE n
+encodeBinaryField (MySQLInt32U     n) = B.encodePrimLE n
+encodeBinaryField (MySQLInt32      n) = B.encodePrimLE n
+encodeBinaryField (MySQLInt64U     n) = B.encodePrimLE n
+encodeBinaryField (MySQLInt64      n) = B.encodePrimLE n
+encodeBinaryField (MySQLFloat      x) = B.encodePrimLE x
+encodeBinaryField (MySQLDouble     x) = B.encodePrimLE x
+encodeBinaryField (MySQLYear       n) = encodeLenEncBytes $ B.build (B.int n)
+                                                            -- this's really weird, it's not documented anywhere
                                                             -- we must encode year into string in binary mode!
-putBinaryField (MySQLTimeStamp (LocalTime date time)) = do putWord8 11    -- always put full
-                                                           putBinaryDay date
-                                                           putBinaryTime' time
-putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- always put full
-                                                           putBinaryDay date
-                                                           putBinaryTime' time
-putBinaryField (MySQLDate    d)    = do putWord8 4
-                                        putBinaryDay d
-putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
-                                        putWord8 sign
-                                        putBinaryTime t
-putBinaryField (MySQLGeometry bs)  = putLenEncBytes bs
-putBinaryField (MySQLBytes  bs)    = putLenEncBytes bs
-putBinaryField (MySQLBit    word)  = do putWord8 8     -- always put full
-                                        putWord64be word
-putBinaryField (MySQLText    t)    = putLenEncBytes (T.encodeUtf8 t)
-putBinaryField MySQLNull           = return ()
+encodeBinaryField (MySQLTimeStamp (LocalTime date time)) = do B.word8 11    -- always encode full
+                                                              encodeBinaryDay date
+                                                              encodeBinaryTime' time
+encodeBinaryField (MySQLDateTime  (LocalTime date time)) = do B.word8 11    -- always encode full
+                                                              encodeBinaryDay date
+                                                              encodeBinaryTime' time
+encodeBinaryField (MySQLDate    d)    = do B.word8 4
+                                           encodeBinaryDay d
+encodeBinaryField (MySQLTime sign t)  = do B.word8 12    -- always encode full
+                                           B.word8 sign
+                                           encodeBinaryTime t
+encodeBinaryField (MySQLGeometry bs)  = encodeLenEncBytes bs
+encodeBinaryField (MySQLBytes  bs)    = encodeLenEncBytes bs
+encodeBinaryField (MySQLBit    word)  = do B.word8 8     -- always encode full
+                                           B.encodePrimBE word
+encodeBinaryField (MySQLText    t)    = encodeLenEncBytes (T.getUTF8Bytes t)
+encodeBinaryField MySQLNull           = return ()
 
-putBinaryDay :: Day -> Put
-putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
-                    putWord16le (fromIntegral yyyy)
-                    putWord8 (fromIntegral mm)
-                    putWord8 (fromIntegral dd)
-{-# INLINE putBinaryDay #-}
+encodeBinaryDay :: Day -> B.Builder ()
+encodeBinaryDay d = do
+    let (yyyy, mm, dd) = toGregorian d
+    B.encodePrimLE @Word16 (fromIntegral yyyy)
+    B.word8 (fromIntegral mm)
+    B.word8 (fromIntegral dd)
+{-# INLINE encodeBinaryDay #-}
 
-putBinaryTime' :: TimeOfDay -> Put
-putBinaryTime' (TimeOfDay hh mm ss) = do let s = floor ss
-                                             ms = floor $ (ss - realToFrac s) * 1000000
-                                         putWord8 (fromIntegral hh)
-                                         putWord8 (fromIntegral mm)
-                                         putWord8 s
-                                         putWord32le ms
-{-# INLINE putBinaryTime' #-}
+encodeBinaryTime' :: TimeOfDay -> B.Builder ()
+encodeBinaryTime' (TimeOfDay hh mm ss) = do
+    let s = floor ss
+        ms = floor $ (ss - realToFrac s) * 1000000
+    B.word8 (fromIntegral hh)
+    B.word8 (fromIntegral mm)
+    B.word8 s
+    B.encodePrimLE @Word32 ms
+{-# INLINE encodeBinaryTime' #-}
 
-putBinaryTime :: TimeOfDay -> Put
-putBinaryTime (TimeOfDay hh mm ss) = do let s = floor ss
-                                            ms = floor $ (ss - realToFrac s) * 1000000
-                                            (d, h) = hh `quotRem` 24  -- hour may exceed 24 here
-                                        putWord32le (fromIntegral d)
-                                        putWord8 (fromIntegral h)
-                                        putWord8 (fromIntegral mm)
-                                        putWord8 s
-                                        putWord32le ms
-{-# INLINE putBinaryTime #-}
+encodeBinaryTime :: TimeOfDay -> B.Builder ()
+encodeBinaryTime (TimeOfDay hh mm ss) = do
+    let s = floor ss
+        ms = floor $ (ss - realToFrac s) * 1000000
+        (d, h) = hh `quotRem` 24  -- hour may exceed 24 here
+    B.encodePrimLE @Word32 (fromIntegral d)
+    B.word8 (fromIntegral h)
+    B.word8 (fromIntegral mm)
+    B.word8 s
+    B.encodePrimLE @Word32 ms
+{-# INLINE encodeBinaryTime #-}
 
 --------------------------------------------------------------------------------
 -- | Binary row decoder
 --
 -- MySQL use a special null bitmap without offset = 2 here.
---
-getBinaryRow :: [ColumnDef] -> Int -> Get [MySQLValue]
-getBinaryRow fields flen = do
-    skipN 1           -- 0x00
-    let maplen = (flen + 7 + 2) `shiftR` 3
-    nullmap <- BitMap <$> getByteString maplen
-    go fields nullmap 0
-  where
-    go :: [ColumnDef] -> BitMap -> Int -> Get [MySQLValue]
-    go []     _       _   = pure []
-    go (f:fs) nullmap pos = do
-        r <- if isColumnNull nullmap pos
-                then return MySQLNull
-                else getBinaryField f
-        let pos' = pos + 1
-        rest <- pos' `seq` go fs nullmap pos'
-        return (r `seq` (r : rest))
-{-# INLINE getBinaryRow #-}
 
-getBinaryRowVector :: V.Vector ColumnDef -> Int -> Get (V.Vector MySQLValue)
-getBinaryRowVector fields flen = do
-    skipN 1           -- 0x00
-    let maplen = (flen + 7 + 2) `shiftR` 3
-    nullmap <- BitMap <$> getByteString maplen
-    (`V.imapM` fields) $ \ pos f ->
-        if isColumnNull nullmap pos then return MySQLNull else getBinaryField f
-{-# INLINE getBinaryRowVector #-}
+decodeBinaryRow :: V.Vector ColumnDef -> Int -> P.Parser (V.Vector MySQLValue)
+decodeBinaryRow fields flen = do
+    P.skipWord8            -- 0x00
+    let !maplen = (flen + 7 + 2) `unsafeShiftR` 3
+    !nullmap <- BitMap <$> P.take maplen
+    (`V.traverseWithIndex` fields) $ \ !pos !f ->
+        if isColumnNull nullmap pos then return MySQLNull else decodeBinaryField f
+{-# INLINABLE decodeBinaryRow #-}
 
 --------------------------------------------------------------------------------
 -- | Use 'ByteString' to present a bitmap.
@@ -522,36 +486,37 @@ getBinaryRowVector fields flen = do
 --
 -- We don't use 'Int64' here because there maybe more than 64 columns.
 --
-newtype BitMap = BitMap { fromBitMap :: ByteString } deriving (Eq, Show)
+newtype BitMap = BitMap { fromBitMap :: V.Bytes } deriving (Eq, Show, Generic, T.Print)
 
 -- | Test if a column is set(binlog protocol).
 --
 -- The number counts from left to right.
 --
 isColumnSet :: BitMap -> Int -> Bool
+{-# INLINE isColumnSet #-}
 isColumnSet (BitMap bitmap) pos =
   let i = pos `unsafeShiftR` 3
       j = pos .&. 7
-  in (bitmap `B.unsafeIndex` i) `testBit` j
-{-# INLINE isColumnSet #-}
+  in (bitmap `V.unsafeIndex` i) `testBit` j
 
 -- | Test if a column is null(binary protocol).
 --
 -- The number counts from left to right.
 --
 isColumnNull :: BitMap -> Int -> Bool
+{-# INLINE isColumnNull #-}
 isColumnNull (BitMap nullmap) pos =
   let
     pos' = pos + 2
     i    = pos' `unsafeShiftR` 3
     j    = pos' .&. 7
-  in (nullmap `B.unsafeIndex` i) `testBit` j
-{-# INLINE isColumnNull #-}
+  in (nullmap `V.unsafeIndex` i) `testBit` j
 
 -- | Make a nullmap for params(binary protocol) without offset.
 --
 makeNullMap :: [MySQLValue] -> BitMap
-makeNullMap values = BitMap . B.pack $ go values 0x00 0
+{-# INLINE makeNullMap #-}
+makeNullMap values = BitMap . V.pack $ go values 0x00 0
   where
     go :: [MySQLValue] -> Word8 -> Int -> [Word8]
     go []             byte   8  = [byte]
@@ -563,5 +528,5 @@ makeNullMap values = BitMap . B.pack $ go values 0x00 0
     go (_        :vs) byte pos  = let pos' = pos + 1 in pos' `seq` go vs byte pos'
 
 --------------------------------------------------------------------------------
--- TODO: add helpers to parse mySQLTypeGEOMETRY
+-- TODO: add helpers to parse MySQLTypeGEOMETRY
 -- reference: https://github.com/felixge/node-mysql/blob/master/lib/protocol/Parser.js

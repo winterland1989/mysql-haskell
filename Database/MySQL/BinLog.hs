@@ -29,30 +29,25 @@ module Database.MySQL.BinLog
     ) where
 
 import           Control.Applicative
-import           Control.Exception                         (throwIO)
 import           Control.Monad
-import           Data.Binary.Put
-import           Data.ByteString                           (ByteString)
-import           Data.IORef                                (IORef, newIORef,
-                                                            readIORef,
-                                                            writeIORef)
-import           Data.Text.Encoding                        (encodeUtf8)
+import           Data.IORef
 import           Data.Word
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
 import           Database.MySQL.Connection
-import           GHC.Generics                              (Generic)
-import           System.IO.Streams                         (InputStream)
-import qualified System.IO.Streams                         as Stream
+import           GHC.Generics                               (Generic)
+import qualified Z.Data.Vector                              as V
+import           Z.IO.Exception
+import qualified Z.IO.BIO                                   as BIO
 
 type SlaveID = Word32
 
 -- | binlog filename and position to start listening.
 --
 data BinLogTracker = BinLogTracker
-    { btFileName :: {-# UNPACK #-} !ByteString
+    { btFileName :: {-# UNPACK #-} !V.Bytes
     , btNextPos  :: {-# UNPACK #-} !Word32
     } deriving (Show, Eq, Generic)
 
@@ -70,7 +65,7 @@ dumpBinLog :: MySQLConn               -- ^ connection to be listened
            -> BinLogTracker           -- ^ binlog position
            -> Bool                    -- ^ if master support semi-ack, do we want to enable it?
                                       -- if master doesn't support, this parameter will be ignored.
-           -> IO (FormatDescription, IORef ByteString, InputStream BinLogPacket)
+           -> IO (FormatDescription, IORef V.Bytes, BIO.Source BinLogPacket)
                 -- ^ 'FormatDescription', 'IORef' contains current binlog filename, 'BinLogPacket' stream.
 dumpBinLog conn@(MySQLConn is wp _ consumed) sid (BinLogTracker initfn initpos) wantAck = do
     guardUnconsumed conn
@@ -84,13 +79,13 @@ dumpBinLog conn@(MySQLConn is wp _ consumed) sid (BinLogTracker initfn initpos) 
 
     rp <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_ROTATE_EVENT
     re <- getFromBinLogPacket getRotateEvent rp
-    fref <- newIORef (rFileName re)
+    fref <- newTVarIO (rFileName re)
 
     p <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_FORMAT_DESCRIPTION_EVENT
     replyAck needAck p fref wp
     fmt <- getFromBinLogPacket getFormatDescription p
 
-    es <- Stream.makeInputStream $ do
+    es <- sourceFromIO $ do
         q <- readBinLogPacket checksum needAck is
         case q of
             Nothing   -> writeIORef consumed True >> return Nothing
@@ -119,7 +114,7 @@ dumpBinLog conn@(MySQLConn is wp _ consumed) sid (BinLogTracker initfn initpos) 
 
     readBinLogPacket checksum needAck is' = do
         p <- readPacket is'
-        if  | isOK p -> Just <$> getFromPacket (getBinLogPacket checksum needAck) p
+        if  | isOK p -> Just <$!> getFromPacket (getBinLogPacket checksum needAck) p
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
 
@@ -142,8 +137,8 @@ data RowBinLogEvent
   deriving (Show, Eq, Generic)
 
 -- | decode row based event from 'BinLogPacket' stream.
-decodeRowBinLogEvent :: (FormatDescription, IORef ByteString, InputStream BinLogPacket)
-                     -> IO (InputStream RowBinLogEvent)
+decodeRowBinLogEvent :: (FormatDescription, IORef V.Bytes, BIO.Source BinLogPacket)
+                     -> IO (Source RowBinLogEvent)
 decodeRowBinLogEvent (fd', fref', is') = Stream.makeInputStream (loop fd' fref' is')
   where
     loop fd fref is = do

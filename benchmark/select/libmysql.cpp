@@ -8,7 +8,7 @@
 #define THREAD_NUM  4
 #define DBHOST      "127.0.0.1"
 #define DBUSER      "testMySQLHaskell"
-#define DBPASS      ""
+#define DBPASS      "testMySQLHaskell123456!"
 #define DBPORT      3306
 #define DBNAME      "testMySQLHaskell"
 #define DBSOCK      NULL //"/var/lib/mysql/mysql.sock"

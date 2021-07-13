@@ -18,15 +18,12 @@ cabal-version:       >=1.10
 library
     hs-source-dirs:   ../../
     exposed-modules:    Database.MySQL.Base
-                    ,   Database.MySQL.TLS
-                    ,   Database.MySQL.OpenSSL
                     ,   Database.MySQL.Protocol.Auth
                     ,   Database.MySQL.Protocol.Command
                     ,   Database.MySQL.Protocol.ColumnDef
                     ,   Database.MySQL.Protocol.Packet
                     ,   Database.MySQL.Protocol.MySQLValue
                     ,   Database.MySQL.Protocol.Escape
-                    ,   Database.MySQL.BinLog
                     ,   Database.MySQL.BinLogProtocol.BinLogEvent
                     ,   Database.MySQL.BinLogProtocol.BinLogValue
                     ,   Database.MySQL.BinLogProtocol.BinLogMeta
@@ -34,33 +31,24 @@ library
     other-modules:      Database.MySQL.Connection
                     ,   Database.MySQL.Query
 
-    build-depends:      base >=4.7 && <5
+    build-depends:      base          >= 4.7 && < 5
                     ,   monad-loops   == 0.4.*
-                    ,   network       >= 2.3 && < 3.0
-                    ,   io-streams    >= 1.2 && < 2.0
-                    ,   tcp-streams   == 0.5.*
-                    ,   wire-streams  >= 0.1
-                    ,   binary        == 0.8.*
-                    ,   binary-ieee754 == 0.1.*
-                    ,   binary-parsers >= 0.2.1
-                    ,   bytestring    >= 0.10.2.0
-                    ,   text          >= 1.1 && < 1.3
-                    ,   cryptonite    == 0.*
-                    ,   memory        >= 0.8
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
-                    ,   bytestring-lexing == 0.5.*
-                    ,   blaze-textual     == 0.2.*
-                    ,   word24            == 1.*
-                    ,   tls           >=1.3.5 && < 1.4
-                    ,   HsOpenSSL     >=0.10.3 && <0.12
-                    ,   vector >= 0.8
+                    ,   Z-Data        >= 1.0   && < 1.1
+                    ,   Z-IO          >= 1.0 && < 1.1
+                    ,   Z-Botan       >= 0.4   && < 0.5
+                    ,   word24
+                    ,   deepseq
 
     default-language:    Haskell2010
     default-extensions:     DeriveDataTypeable
                         ,   DeriveGeneric
+                        ,   DeriveAnyClass
+                        ,   DerivingStrategies
                         ,   MultiWayIf
                         ,   OverloadedStrings
+                        ,   TypeApplications
 
     if os(mingw32) || os(windows)
         extra-libraries: eay32, ssl32
@@ -71,38 +59,40 @@ library
             include-dirs: /usr/local/opt/openssl/include
       else
             extra-libraries: crypto
+    c-sources:         ../../cbits/escape.c
+    -- ghc-options:      -ddump-rule-firings
 
 executable bench
-    build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async
+    build-depends:    base, mysql-haskell-bench, bytestring, Z-Data, Z-IO, async
     default-language: Haskell2010
     hs-source-dirs:   .
     main-is:          MySQLHaskell.hs
     ghc-options:      -O2 -threaded -rtsopts
 
-executable bench-tls
-    build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async, tcp-streams
-    default-language: Haskell2010
-    hs-source-dirs:   .
-    main-is:          MySQLHaskellTLS.hs
-    ghc-options:      -O2 -threaded -rtsopts
-
-executable bench-openssl
-    build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async, tcp-streams
-    default-language: Haskell2010
-    hs-source-dirs:   .
-    main-is:          MySQLHaskellOpenSSL.hs
-    ghc-options:      -O2 -threaded -rtsopts
+-- executable bench-tls
+--     build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async, tcp-streams
+--     default-language: Haskell2010
+--     hs-source-dirs:   .
+--     main-is:          MySQLHaskellTLS.hs
+--     ghc-options:      -O2 -threaded -rtsopts
+-- 
+-- executable bench-openssl
+--     build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async, tcp-streams
+--     default-language: Haskell2010
+--     hs-source-dirs:   .
+--     main-is:          MySQLHaskellOpenSSL.hs
+--     ghc-options:      -O2 -threaded -rtsopts
 
 executable benchPrepared
-    build-depends:    base, mysql-haskell-bench, bytestring, io-streams, async
+    build-depends:    base, mysql-haskell-bench, bytestring, Z-Data, Z-IO, async, deepseq
     default-language: Haskell2010
     hs-source-dirs:   .
     main-is:          MySQLHaskellPrepared.hs
-    ghc-options:      -O2 -threaded -rtsopts
+    ghc-options:      -O2 -threaded -rtsopts -eventlog
 
-executable benchFFI
-    build-depends:    base, async, mysql, text, mysql-simple, time
-    default-language: Haskell2010
-    hs-source-dirs:   .
-    main-is:          MySQLFFI.hs
-    ghc-options:      -O2 -threaded -rtsopts
+-- executable benchFFI
+--     build-depends:    base, async, mysql, text, mysql-simple, time 
+--     default-language: Haskell2010
+--     hs-source-dirs:   .
+--     main-is:          MySQLFFI.hs
+--     ghc-options:      -O2 -threaded -rtsopts

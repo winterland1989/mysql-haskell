@@ -24,6 +24,7 @@ go n = do
     void . flip mapConcurrently [1..n] $ \ _ -> do
         c <- connect defaultConnectInfo { ciUser = "testMySQLHaskell"
                                         , ciDatabase = "testMySQLHaskell"
+                                        , ciPassword =  "testMySQLHaskell123456!"
                                         }
                      (cparams, "MySQL")
 
