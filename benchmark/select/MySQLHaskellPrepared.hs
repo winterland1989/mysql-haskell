@@ -3,14 +3,15 @@
 
 module Main where
 
-import           Control.Concurrent.Async
+import           Control.Concurrent.QSemN
 import           Control.Monad
 import           Database.MySQL.Base
+import qualified Z.Data.Builder as B
+import qualified Z.Data.Vector as V
 import           Z.Data.CBytes  as CB
 import           Z.Data.PrimRef
-import           Z.IO.BIO
+import qualified Z.IO.BIO       as BIO
 import           Z.IO
-import  qualified Data.ByteString as B
 
 main :: IO ()
 main = do
@@ -19,8 +20,9 @@ main = do
                  _ -> putStdLn "No thread number provided."
 
 go :: Int -> IO ()
-go n = void . flip mapConcurrently [1..n] $ \ _ -> do
-    withResource (connect defaultConnectInfo { ciUser = "testMySQLHaskell"
+go n = do
+    q <- newQSemN 0
+    replicateM_ n . forkBa $ withResource (connect defaultConnectInfo { ciUser = "testMySQLHaskell"
                                     , ciDatabase = "testMySQLHaskell"
                                     , ciPassword =  "testMySQLHaskell123456!"
                                     }) $ \ c -> do
@@ -28,12 +30,16 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
         stmt <- prepareStmt c "SELECT * FROM employees"
         (fs, is) <- queryStmt c stmt []
         c <- newCounter 0
-        runBIO $ is . counterNode c
-        (rowCount :: Int) <- readPrimIORef c
-        putStd "field name: "
-        forM_ fs $ \ f -> printStd (columnName f) >> putStdLn ", "
-        putStd "numbers of rows: "
-        printStd rowCount
+        BIO.run_ $ is . BIO.counter c
+        (rowCount :: Int) <- readCounter c
+        putStdLn $ do
+            "field name: "
+            forM_ fs $ \ f -> B.text (columnName f)
+            ", numbers of rows: "
+            B.int rowCount
+        signalQSemN q 1
+    waitQSemN q n
+
 
 
 

@@ -29,7 +29,7 @@ library
 
                         Database.MySQL.Base
                     --,   Database.MySQL.TLS
-                    --  Database.MySQL.BinLog
+                        Database.MySQL.BinLog
                         Database.MySQL.BinLogProtocol.BinLogEvent
                         Database.MySQL.BinLogProtocol.BinLogValue
                         Database.MySQL.BinLogProtocol.BinLogMeta
@@ -40,9 +40,10 @@ library
                     ,   time          >= 1.5.0
                     ,   scientific    == 0.3.*
                     ,   word24        >= 2.0   && < 3.0
-                    ,   Z-Data        >= 0.8.8 && < 0.9
-                    ,   Z-IO          >= 0.8.1 && < 0.9
+                    ,   Z-Data        >= 1.0 && < 1.1
+                    ,   Z-IO          >= 1.0 && < 1.1
                     ,   Z-Botan       >= 0.4   && < 0.5
+                    ,   deepseq
 
 
     default-language:    Haskell2010

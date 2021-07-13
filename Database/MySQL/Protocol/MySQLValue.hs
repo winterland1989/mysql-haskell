@@ -1,5 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -33,6 +35,7 @@ module Database.MySQL.Protocol.MySQLValue
   ) where
 
 import           Control.Monad
+import           Control.DeepSeq
 import           Data.Bits
 import           Data.Fixed                        (Pico)
 import           Data.Int
@@ -50,10 +53,12 @@ import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                      (Generic)
 import qualified Z.Data.Builder                    as B
 import qualified Z.Data.Parser                     as P
+import qualified Z.Data.Parser.Time                as P
 import qualified Z.Data.Text                       as T
 import qualified Z.Data.Text.Base                  as T
 import qualified Z.Data.Vector                     as V
 import qualified Z.Data.Vector.Extra               as V
+import           Z.IO
 
 --------------------------------------------------------------------------------
 -- | Data type mapping between MySQL values and haskell values.
@@ -95,15 +100,15 @@ data MySQLValue
     | MySQLYear          {-# UNPACK #-} !Word16       -- ^ YEAR
     | MySQLDateTime      {-# UNPACK #-} !LocalTime    -- ^ DATETIME
     | MySQLTimeStamp     {-# UNPACK #-} !LocalTime    -- ^ TIMESTAMP
-    | MySQLDate          {-# UNPACK #-} !Day          -- ^ DATE
+    | MySQLDate                         !Day          -- ^ DATE
     | MySQLTime          {-# UNPACK #-} !Word8      -- ^ sign(0 = non-negative, 1 = negative), the sign is OPPOSITE to binlog one !!!
-                                        !TimeOfDay  -- ^ hh mm ss microsecond
+                         {-# UNPACK #-} !TimeOfDay  -- ^ hh mm ss microsecond
     | MySQLGeometry      {-# UNPACK #-} !V.Bytes       -- ^ todo: parsing to something meanful
     | MySQLBytes         {-# UNPACK #-} !V.Bytes
     | MySQLBit           {-# UNPACK #-} !Word64
     | MySQLText          {-# UNPACK #-} !T.Text
     | MySQLNull
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, NFData)
 
 -- | Put 'FieldType' and usigned bit(0x80/0x00) for 'MySQLValue's.
 --
@@ -133,7 +138,7 @@ encodeParamMySQLType MySQLNull              = B.encodePrim (MySQLTypeNull     , 
 --------------------------------------------------------------------------------
 -- | Text protocol decoder
 decodeTextField :: ColumnDef -> P.Parser MySQLValue
-{-# INLINABLE decodeTextField #-}
+{-# INLINE decodeTextField #-}
 decodeTextField f
     | t == MySQLTypeNull            = pure MySQLNull
     | t == MySQLTypeDecimal
@@ -151,9 +156,9 @@ decodeTextField f
     | t == MySQLTypeDouble          = feedLenEncBytes t MySQLDouble P.double'
     | t == MySQLTypeYear            = feedLenEncBytes t MySQLYear P.int
     | t == MySQLTypeTimestamp
-        || t == MySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp $ P.localTime
+        || t == MySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp P.localTime
     | t == MySQLTypeDateTime
-        || t == MySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime $ P.localTime
+        || t == MySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime P.localTime
     | t == MySQLTypeDate
         || t == MySQLTypeNewDate    = feedLenEncBytes t MySQLDate P.day
     | t == MySQLTypeTime
@@ -172,7 +177,10 @@ decodeTextField f
         || t == MySQLTypeLongBlob
         || t == MySQLTypeBlob
         || t == MySQLTypeVarString
-        || t == MySQLTypeString     = (if isText then MySQLText . T.Text else MySQLBytes) <$> decodeLenEncBytes
+        || t == MySQLTypeString     =  do bs <- decodeLenEncBytes
+                                          if isText
+                                          then pure (MySQLText (T.validate bs))
+                                          else pure (MySQLBytes bs)
 
     | t == MySQLTypeBit             = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
 
@@ -231,16 +239,17 @@ encodeTextField MySQLNull           = "NULL"
 -- | Text row decoder
 
 decodeTextRow :: V.Vector ColumnDef -> P.Parser (V.Vector MySQLValue)
-decodeTextRow fs = (`V.traverseVec` fs) $ \ f -> do
+{-# INLINABLE decodeTextRow #-}
+decodeTextRow fs = (`V.traverse` fs) $ \ f -> do
     p <- P.peek
     if p == 0xFB
     then P.skipWord8 >> return MySQLNull
     else decodeTextField f
-{-# INLINE decodeTextRow #-}
 
 --------------------------------------------------------------------------------
 -- | Binary protocol decoder
 decodeBinaryField :: ColumnDef -> P.Parser MySQLValue
+{-# INLINE decodeBinaryField #-}
 decodeBinaryField f
     | t == MySQLTypeNull              = pure MySQLNull
     | t == MySQLTypeDecimal
@@ -263,42 +272,42 @@ decodeBinaryField f
             case n of
                0 -> pure $ MySQLTimeStamp (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
                4 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
+                   d <- decodeDay
                    pure $ MySQLTimeStamp (LocalTime d (TimeOfDay 0 0 0))
                7 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
-                   td <- TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond4
+                   d <- decodeDay
+                   td <- decodeTimeOfDay
                    pure $ MySQLTimeStamp (LocalTime d td)
                11 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
-                   td <- TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond8
+                   d <- decodeDay
+                   td <- decodeTimeOfDay'
                    pure $ MySQLTimeStamp (LocalTime d td)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
     | t == MySQLTypeDateTime
         || t == MySQLTypeDateTime2    = do
             n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLDateTime (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
                4 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
+                   d <- decodeDay
                    pure $ MySQLDateTime (LocalTime d (TimeOfDay 0 0 0))
                7 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
-                   td <- TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond4
+                   d <- decodeDay
+                   td <- decodeTimeOfDay
                    pure $ MySQLDateTime (LocalTime d td)
                11 -> do
-                   d <- fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8
-                   td <- TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond8
+                   d <- decodeDay
+                   td <- decodeTimeOfDay'
                    pure $ MySQLDateTime (LocalTime d td)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
 
     | t == MySQLTypeDate
         || t == MySQLTypeNewDate      = do
             n <- decodeLenEncInt
             case n of
                0 -> pure $ MySQLDate (fromGregorian 0 0 0)
-               4 -> MySQLDate <$> (fromGregorian <$> decodeYear <*> decodeInt8 <*> decodeInt8)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
+               4 -> MySQLDate <$> decodeDay
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
 
     | t == MySQLTypeTime
         || t == MySQLTypeTime2        = do
@@ -316,7 +325,7 @@ decodeBinaryField f
                    d <- fromIntegral <$> P.decodePrimLE @Word32
                    h <-  decodeInt8
                    MySQLTime sign <$> (TimeOfDay (d*24 + h) <$> decodeInt8 <*> decodeSecond8)
-               _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
+               _ -> P.fail' "Database.MySQL.Protocol.MySQLValue: wrong TIME length"
 
     | t == MySQLTypeGeometry          = MySQLGeometry <$> decodeLenEncBytes
     | t == MySQLTypeVarChar
@@ -330,16 +339,28 @@ decodeBinaryField f
         || t == MySQLTypeString       = do
             bs <- decodeLenEncBytes
             if isText
-                then pure (MySQLText (T.validate bs))
-                else pure (MySQLBytes bs)
+            then pure (MySQLText (T.validate bs))
+            else pure (MySQLBytes bs)
     | t == MySQLTypeBit               = MySQLBit <$> (decodeBits =<< decodeLenEncInt)
-    | otherwise                       = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for " <> T.toText t
+    | otherwise                       = P.fail' $ "Database.MySQL.Protocol.MySQLValue: missing binary decoder for type tag: " <> T.toText t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
     isText = columnCharSet f /= 63
-    decodeYear :: P.Parser Integer
-    decodeYear = fromIntegral <$> P.decodePrimLE @Word16
+    decodeDay :: P.Parser Day
+    decodeDay = do
+        y <- decodeYear
+        m <- decodeInt8
+        d <- decodeInt8
+        case P.fromGregorianValidInt64 y m d of
+            Just d -> pure d
+            _ -> P.fail' $ T.concat ["Database.MySQL.Protocol.MySQLValue: invalid date: ", T.toText y, "-", T.toText m, "-", T.toText d]
+    decodeTimeOfDay :: P.Parser TimeOfDay
+    decodeTimeOfDay = TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond4
+    decodeTimeOfDay' :: P.Parser TimeOfDay
+    decodeTimeOfDay' = TimeOfDay <$> decodeInt8 <*> decodeInt8 <*> decodeSecond8
+    decodeYear :: P.Parser Int64
+    decodeYear = fromIntegral <$> P.decodeWord16LE
     decodeInt8 :: P.Parser Int
     decodeInt8 = fromIntegral <$> P.anyWord8
     decodeSecond4 :: P.Parser Pico
@@ -443,11 +464,11 @@ encodeBinaryTime (TimeOfDay hh mm ss) = do
 decodeBinaryRow :: V.Vector ColumnDef -> Int -> P.Parser (V.Vector MySQLValue)
 decodeBinaryRow fields flen = do
     P.skipWord8            -- 0x00
-    let maplen = (flen + 7 + 2) `shiftR` 3
-    nullmap <- BitMap <$> P.take maplen
-    (`V.traverseWithIndex` fields) $ \ pos f ->
+    let !maplen = (flen + 7 + 2) `unsafeShiftR` 3
+    !nullmap <- BitMap <$> P.take maplen
+    (`V.traverseWithIndex` fields) $ \ !pos !f ->
         if isColumnNull nullmap pos then return MySQLNull else decodeBinaryField f
-{-# INLINE decodeBinaryRow #-}
+{-# INLINABLE decodeBinaryRow #-}
 
 --------------------------------------------------------------------------------
 -- | Use 'ByteString' to present a bitmap.
@@ -465,7 +486,7 @@ decodeBinaryRow fields flen = do
 --
 -- We don't use 'Int64' here because there maybe more than 64 columns.
 --
-newtype BitMap = BitMap { fromBitMap :: V.Bytes } deriving (Eq, Show)
+newtype BitMap = BitMap { fromBitMap :: V.Bytes } deriving (Eq, Show, Generic, T.Print)
 
 -- | Test if a column is set(binlog protocol).
 --

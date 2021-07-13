@@ -15,6 +15,7 @@ MySQL packet decoder&encoder, and varities utility.
 
 module Database.MySQL.Protocol.Packet where
 
+import           Control.Monad
 import           Data.Bits
 import           Data.Word
 import           Data.Int.Int24
@@ -24,6 +25,7 @@ import           Z.IO.Exception
 import qualified Z.Data.Parser          as P
 import qualified Z.Data.Builder         as B
 import qualified Z.Data.Text            as T
+import qualified Z.Data.Text.Base       as T
 import qualified Z.Data.Vector          as V
 import qualified Z.Data.Vector.Extra    as V
 
@@ -155,17 +157,21 @@ decodeLenEncBytes :: P.Parser V.Bytes
 decodeLenEncBytes = decodeLenEncInt >>= P.take
 {-# INLINE decodeLenEncBytes #-}
 
+decodeLenEncText :: P.Parser T.Text
+decodeLenEncText = T.validate <$!> decodeLenEncBytes
+{-# INLINE decodeLenEncText #-}
+
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
 decodeLenEncInt:: P.Parser Int
 decodeLenEncInt = P.anyWord8 >>= word2Len
   where
     word2Len l
-         | l <  0xFB  = pure (fromIntegral l)
-         | l == 0xFC  = fromIntegral <$> P.decodePrimLE @Word16
-         | l == 0xFD  = fromIntegral <$> decodeWord24LE
-         | l == 0xFE  = fromIntegral <$> P.decodePrimLE @Word64
-         | otherwise = fail $ "invalid length val " ++ show l
+         | l <  0xFB  = pure $! fromIntegral l
+         | l == 0xFC  = fromIntegral <$!> P.decodeWord16LE
+         | l == 0xFD  = fromIntegral <$!> decodeWord24LE
+         | l == 0xFE  = fromIntegral <$!> P.decodeWord64LE
+         | otherwise  = P.fail' $ "invalid length val: " <> T.toText l
 {-# INLINE decodeLenEncInt #-}
 
 encodeLenEncInt:: Int -> B.Builder ()
@@ -184,7 +190,7 @@ encodeWord24LE v = do
 
 decodeWord24LE :: P.Parser Word32
 decodeWord24LE = do
-    a <- fromIntegral <$> P.decodePrimLE @Word16
+    a <- fromIntegral <$> P.decodeWord16LE
     b <- fromIntegral <$> P.anyWord8
     return $! a .|. (b `unsafeShiftL` 16)
 {-# INLINE decodeWord24LE #-}

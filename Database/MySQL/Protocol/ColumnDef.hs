@@ -44,21 +44,21 @@ data ColumnDef = ColumnDef
 
 decodeField :: P.Parser ColumnDef
 {-# INLINE decodeField #-}
-decodeField = do
-    P.skip 4               -- const "def"
-    db <- decodeLenEncBytes
-    table <- decodeLenEncBytes
-    origTable <- decodeLenEncBytes
-    name <- decodeLenEncBytes
-    origName <- decodeLenEncBytes
-    P.skipWord8             -- const 0x0c
-    charset <- P.decodePrimLE
-    len <- P.decodePrimLE
-    typ <- P.decodePrim
-    flags <- P.decodePrimLE
-    decimals <- P.decodePrim
-    P.skip 2                -- const 0x00 0x00
-    return (ColumnDef (T.Text db) (T.Text table) (T.Text origTable) (T.Text name) (T.Text origName) charset len typ flags decimals)
+decodeField = ColumnDef
+    <$> (P.skip 4                -- const "def"
+     *> decodeLenEncText)         -- db
+    <*> decodeLenEncText          -- table
+    <*> decodeLenEncText          -- origTable
+    <*> decodeLenEncText          -- name
+    <*> decodeLenEncText          -- origName
+    <*  P.skip 1                 -- const 0x0c
+    <*> P.decodeWord16LE          -- charset
+    <*> P.decodeWord32LE          -- length
+    <*> P.decodeWord8               -- type
+    <*> P.decodeWord16LE          -- flags
+    <*> P.decodeWord8             -- decimals
+    <* P.skip 2                    -- const 0x00 0x00
+
 
 encodeField :: ColumnDef -> B.Builder ()
 {-# INLINE encodeField #-}

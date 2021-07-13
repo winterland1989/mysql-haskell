@@ -80,6 +80,7 @@ import           Z.Data.ASCII
 import qualified Z.Data.Vector                      as V
 import qualified Z.Data.Text                        as T
 import           Z.IO
+import           Z.IO.BIO                           (Source, sourceFromIO)
 
 --------------------------------------------------------------------------------
 
@@ -139,8 +140,7 @@ query conn qry params = query_ conn (renderParams qry params)
 
 readFields :: HasCallStack => Int -> BufferedInput -> IO (V.Vector ColumnDef)
 {-# INLINABLE readFields #-}
-readFields len is =
-    V.replicateMVec len (decodeFromPacket decodeField =<< readPacket is)
+readFields len is = V.replicateM len (decodeFromPacket decodeField =<< readPacket is)
 
 -- | Execute a MySQL query which return a result-set.
 --
@@ -157,7 +157,7 @@ query_ conn@(MySQLConn is os consumed) (Query qry) = do
             q <- readPacket is
             if isEOF q
             then writeIORef consumed True >> return Nothing
-            else Just <$> decodeFromPacket (decodeTextRow fields) q
+            else Just <$!> decodeFromPacket (decodeTextRow fields) q
     return (fields, rows)
 
 -- | Ask MySQL to prepare a query statement.
@@ -217,6 +217,7 @@ executeStmt conn stid params =
 --
 queryStmt :: HasCallStack
           => MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef, Source (V.Vector MySQLValue))
+{-# INLINABLE queryStmt #-}
 queryStmt conn@(MySQLConn is os consumed) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
@@ -227,7 +228,7 @@ queryStmt conn@(MySQLConn is os consumed) stid params = do
     writeIORef consumed False
     let rows = sourceFromIO $ do
             q <- readPacket is
-            if  | isOK  q  -> Just <$> decodeFromPacket (decodeBinaryRow fields len) q
+            if  | isOK  q  -> Just <$!> decodeFromPacket (decodeBinaryRow fields len) q
                 | isEOF q  -> writeIORef consumed True >> return Nothing
                 | otherwise -> throwIO (UnexpectedPacket q callStack)
     return (fields, rows)

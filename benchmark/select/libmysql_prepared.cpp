@@ -8,7 +8,7 @@
 #define THREAD_NUM  4
 #define DBHOST      "127.0.0.1"
 #define DBUSER      "testMySQLHaskell"
-#define DBPASS      ""
+#define DBPASS      "testMySQLHaskell123456!"
 #define DBPORT      3306
 #define DBNAME      "testMySQLHaskell"
 #define DBSOCK      NULL //"/var/lib/mysql/mysql.sock"
@@ -39,8 +39,8 @@ void *func(void *arg)
     int           int_data;
     char          str_data[STRING_SIZE];
     char          str_data2[STRING_SIZE];
-    my_bool       is_null[6];
-    my_bool       error[6];
+    bool          is_null[6];
+    bool          error[6];
     MYSQL_TIME    ts;
     unsigned long length[6];
 

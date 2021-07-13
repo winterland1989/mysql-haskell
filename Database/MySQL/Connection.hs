@@ -73,7 +73,7 @@ data ConnectInfo = ConnectInfo
 defaultConnectInfo :: ConnectInfo
 defaultConnectInfo = ConnectInfo
     (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
-    defaultChunkSize defaultChunkSize
+    V.defaultChunkSize V.defaultChunkSize
     "" "root" "" utf8_general_ci Nothing
 
 -- | 'defaultConnectInfo' with charset set to @utf8mb4_unicode_ci@
@@ -83,7 +83,7 @@ defaultConnectInfo = ConnectInfo
 defaultConnectInfoMB4 :: ConnectInfo
 defaultConnectInfoMB4 = ConnectInfo
     (Right defaultTCPClientConfig{ tcpRemoteAddr = SocketAddrIPv4 ipv4Loopback 3306 })
-    defaultChunkSize defaultChunkSize
+    V.defaultChunkSize V.defaultChunkSize
     "" "root" "" utf8mb4_unicode_ci Nothing
 
 utf8_general_ci :: Word8
@@ -93,13 +93,6 @@ utf8mb4_unicode_ci :: Word8
 utf8mb4_unicode_ci = 224
 
 --------------------------------------------------------------------------------
-
--- | Socket buffer size.
---
--- maybe exposed to 'ConnectInfo' laster?
---
-bUFSIZE :: Int
-bUFSIZE = 16384
 
 -- | Establish a MySQL connection.
 --
@@ -114,8 +107,7 @@ connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user (T.getUTF8Bytes ->
     initResource (do
         (bi, bo) <- newBufferedIO' uvs recvBufSiz sendBufSiz
         greet <- decodeFromPacket decodeGreeting =<< readPacket bi
-        writeBuilder bo $ encodePacket (encodeToPacket 1 (encodeHandshakeResponse41 (mkAuth41 greet)))
-        flushBuffer bo
+        writePacket bo (encodeToPacket 1 (encodeHandshakeResponse41 (mkAuth41 greet)))
         handleAuthRes greet bi bo
         consumed <- newIORef True
         return (greet, MySQLConn bi bo consumed))
@@ -139,8 +131,7 @@ connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user (T.getUTF8Bytes ->
             -- TODO, update greet packet?
             (AuthSwitchRequest plugin salt) <- decodeFromPacket decodeAuthSwitchRequest authRes
             let scambleBuf = scramble plugin salt
-            writeBuilder bo $ encodePacket (Packet (V.length scambleBuf) 3 scambleBuf)
-            flushBuffer bo
+            writePacket bo (Packet (V.length scambleBuf) 3 scambleBuf)
             handleAuthRes greet bi bo
 
         when (isAuthResponse authRes) $ do
@@ -152,16 +143,14 @@ connectDetail (ConnectInfo conf recvBufSiz sendBufSiz db user (T.getUTF8Bytes ->
                                 decodePubKey = do
                                     P.skipWord8 -- 0x01
                                     P.takeRemaining
-                            writeBuilder bo $ encodePacket pubkeyRequest
-                            flushBuffer bo
+                            writePacket bo pubkeyRequest
                             loadPubKey =<< decodeFromPacket decodePubKey =<< readPacket bi) return mpubkey
                     rng <- getRNG
                     let salt = greetingSalt1 greet `V.append` greetingSalt2 greet
                     encryptedPass <- if V.null pass
                         then return V.empty
                         else pkEncrypt pubkey (EME_OAEP SHA160 "") rng (V.zipWith' xor (pass `V.snoc` 0) salt)
-                    writeBuilder bo $ encodePacket (Packet 256 5 encryptedPass)
-                    flushBuffer bo
+                    writePacket bo (Packet 256 5 encryptedPass)
                 _ -> return ()
             handleAuthRes greet bi bo
 
@@ -221,18 +210,35 @@ waitCommandReplys is = do
 -- This function will raise 'ERRException' if 'ERR' packet is met.
 readPacket :: HasCallStack => BufferedInput -> IO Packet
 readPacket bi = do
-    bs <- readExactly 4 bi
-    let len =  fromIntegral (bs `V.unsafeIndex` 0)
-           .|. fromIntegral (bs `V.unsafeIndex` 1) `unsafeShiftL` 8
-           .|. fromIntegral (bs `V.unsafeIndex` 2) `unsafeShiftL` 16
-        seqN = bs `V.unsafeIndex` 3
-    body <- readExactly len bi
-    let p = Packet len seqN body
-    when (isERR p) $ do
-        err <- decodeFromPacket decodeERR p
-        throwIO (ERRException err callStack)
-    return p
+    p@(Packet l _ body) <- packet
+    if l < 16777215
+    then pure p
+    else loopRead l [body]
+  where
+    loopRead !l acc = do
+        (Packet l' seqN body) <- packet
+        if l' < 16777215
+        then pure (Packet (l + l') seqN (V.concat . reverse $ body:acc))
+        else loopRead (l + l') (body:acc)
+    packet = do
+        bs <- readExactly 4 bi
+        let !len =  fromIntegral (bs `V.unsafeIndex` 0)
+               .|. fromIntegral (bs `V.unsafeIndex` 1) `unsafeShiftL` 8
+               .|. fromIntegral (bs `V.unsafeIndex` 2) `unsafeShiftL` 16
+            !seqN = bs `V.unsafeIndex` 3
+        body <- readExactly len bi
+        let p = Packet len seqN body
+        if (isERR p)
+        then do
+            err <- decodeFromPacket decodeERR p
+            throwIO (ERRException err callStack)
+        else pure p
 {-# INLINE readPacket #-}
+
+writePacket :: HasCallStack => BufferedOutput -> Packet -> IO ()
+writePacket bo p = do
+    writeBuilder bo (encodePacket p)
+    flushBuffer bo
 
 writeCommand :: Command -> BufferedOutput -> IO ()
 writeCommand a bo = do

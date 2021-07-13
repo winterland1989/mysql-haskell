@@ -78,7 +78,7 @@ decodeGreeting = do
     status <- P.decodePrimLE
     capH <- P.decodePrimLE @Word16
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
-    authPluginLen <- P.anyWord8   -- this will issue an unused warning, see the notes below
+    authPluginLen <- P.anyWord8
     P.skip 10 -- 10 * 0x00A
 
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0

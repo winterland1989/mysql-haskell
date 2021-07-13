@@ -196,7 +196,7 @@ decodeTableMapEvent fd = do
     typs <- P.take cc
     colMetaBS <- decodeLenEncBytes
 
-    metas <- case P.parse' (V.traverseVec decodeBinLogMeta typs) colMetaBS of
+    metas <- case P.parse' (V.traverse decodeBinLogMeta typs) colMetaBS of
         Left errmsg  -> P.fail' (T.concat errmsg)
         Right r      -> return r
 
