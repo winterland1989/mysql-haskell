@@ -1,0 +1,1 @@
+shell-ghc-8-10.nix
