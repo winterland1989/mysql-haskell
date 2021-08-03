@@ -1,4 +1,16 @@
 {
+    "blaze-textual": {
+        "branch": "master",
+        "description": "A fast Haskell library for rendering common Haskell datatypes in text form.",
+        "homepage": "",
+        "owner": "NoRedInk",
+        "repo": "blaze-textual",
+        "rev": "c93b53a4aaad5a6ee2ddf90010957981d75d3579",
+        "sha256": "0z0ky132j5bcs4i5wvsrd09ndny7jwsaxvaigw5jiszyibj0syyg",
+        "type": "tarball",
+        "url": "https://github.com/NoRedInk/blaze-textual/archive/c93b53a4aaad5a6ee2ddf90010957981d75d3579.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
     "niv": {
         "branch": "master",
         "description": "Easy dependency management for Nix projects",
@@ -33,6 +45,18 @@
         "sha256": "1ld29fsviq5ax1drh25fxqcxi44g3cisf5hfib29d0qxjqlicbdf",
         "type": "tarball",
         "url": "https://github.com/NixOS/nixpkgs/archive/4c0834929cafb7478a5e82616d484578a80a3e41.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
+    "word24": {
+        "branch": "nixify",
+        "description": "signed and unsigned 24-bit word types",
+        "homepage": null,
+        "owner": "NoRedInk",
+        "repo": "word24",
+        "rev": "37e3b05f011d58da4b910e6ba3fcc0ce3aa6f920",
+        "sha256": "1hp0i6yapidyp3nlzs8z8fskzycsahi1man5cvvibq68ps6nvl75",
+        "type": "tarball",
+        "url": "https://github.com/NoRedInk/word24/archive/37e3b05f011d58da4b910e6ba3fcc0ce3aa6f920.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     }
 }
