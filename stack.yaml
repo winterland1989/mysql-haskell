@@ -1,0 +1,6 @@
+flags:
+  yesod-middleware-csp: {}
+packages:
+- '.'
+extra-deps: []
+resolver: lts-20
