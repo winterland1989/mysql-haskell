@@ -14,7 +14,6 @@ extra-source-files:
   ChangeLog.md
   README.md
 
-cabal-version:      >=1.10
 homepage:           https://github.com/winterland1989/mysql-haskell
 bug-reports:        https://github.com/winterland1989/mysql-haskell/issues
 
