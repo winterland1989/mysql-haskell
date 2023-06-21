@@ -5,4 +5,5 @@ packages:
 extra-deps: ['binary-parsers-0.2.4.0', 'wire-streams-0.1.1.0', 'word24-2.0.1']
 resolver: lts-20
 
+# TODO go trough all depedencies, see why they don't work
 allow-newer: true
