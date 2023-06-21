@@ -1,5 +1,5 @@
 flags:
-  yesod-middleware-csp: {}
+  mysql-haskell: {}
 packages:
 - '.'
 extra-deps: []
