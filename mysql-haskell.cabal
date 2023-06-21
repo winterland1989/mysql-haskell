@@ -3,7 +3,7 @@ name:               mysql-haskell
 version:            0.8.4.3
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver
-license:            BSD3
+license:            BSD-3-Clause
 license-file:       LICENSE
 author:             winterland1989
 maintainer:         winterland1989@gmail.com
