@@ -17,10 +17,6 @@ with the difference that it's maintained.
 
 `mysql-pure` is a MySQL driver written entirely in haskell.
 
-<a href="http://www.genshuixue.com/"><img height=42 src='http://cdn.gsxservice.com/asset/img/logo-release2.png'></a>
-<a href="http://chordify.net/"><img height=42 src='https://chordify.net/img/about/slide_250_1.jpg'></a>
-<a href="http://www.didichuxing.com/"><img height=42 src='http://www.didichuxing.com/images/icon02.png'></a>
-
 Is it fast?
 ----------
 
