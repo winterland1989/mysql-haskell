@@ -1,4 +1,12 @@
-# Revision history for mysql-haskell
+# Revision history for mysql-pure
+
+## 1.0.0.0 -- 2023.08.12 
+
++ Fork from mysql-haskell into mysql-pure
++ add flake
++ merge packages:
+  + word24
+  + ...
 
 ## 0.8.4.3 -- 2020-11-04
 
