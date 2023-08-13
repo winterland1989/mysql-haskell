@@ -2,7 +2,7 @@ cabal-version:      2.2
 name:               mysql-pure
 version:            1.0.0
 synopsis:           pure haskell MySQL driver
-description:        pure haskell MySQL driver
+description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             winterland1989
@@ -10,8 +10,9 @@ maintainer:         hi@jappie.me
 copyright:          (c) 2016 Winterland
 category:           Database
 build-type:         Simple
-extra-source-files:
+extra-doc-files:
   ChangeLog.md
+extra-source-files:
   README.md
 
 homepage:           https://github.com/winterland1989/mysql-pure
