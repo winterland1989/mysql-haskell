@@ -13,7 +13,6 @@ so this package can be used as a drop in replacement for any listed above,
 with the difference that it's maintained.
 
 [![Hackage](https://img.shields.io/hackage/v/mysql-pure.svg?style=flat)](http://hackage.haskell.org/package/mysql-pure)
-[![Build Status](https://travis-ci.org/winterland1989/mysql-pure.svg)](https://travis-ci.org/winterland1989/mysql-pure)
 
 `mysql-pure` is a MySQL driver written entirely in haskell.
 
