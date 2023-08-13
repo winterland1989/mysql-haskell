@@ -1,6 +1,9 @@
 # Revision history for mysql-pure
 
-## 1.0.0.0 -- 2023.08.12 
+## 1.0.1 -- 2023.08.12 
++ add json testfiles as extra source files to make tests pass in nix builds
+
+## 1.0.0 -- 2023.08.12 
 
 + Fork from mysql-haskell into mysql-pure
 + add flake
