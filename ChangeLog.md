@@ -7,6 +7,8 @@
 + merge packages:
   + word24
   + binary-parsers
+  + wirestreams
++ Add which relies on native cabal instead of stack
 
 ## 0.8.4.3 -- 2020-11-04
 
