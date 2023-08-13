@@ -1,0 +1,64 @@
+on:
+  workflow_dispatch:
+
+  # pull_request: # comment out to have this run on PR's
+  # runs daily at 8:00
+  schedule:
+           # ┌───────────── minute (0 - 59)
+           # │ ┌───────────── hour (0 - 23)
+           # │ │ ┌───────────── day of the month (1 - 31)
+           # │ │ │ ┌───────────── month (1 - 12 or JAN-DEC)
+           # │ │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+           # │ │ │ │ │
+           # │ │ │ │ │
+           # │ │ │ │ │
+           # * * * * *
+    - cron: '0 8 * * 1' # run monday's at 8 hour, https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+      # 8 hour maybe night for you depending on your timezone.
+      # change to another hour if it's not night and you're bothered by it.
+      # You could also choose to run this once per week as this will open up an issue
+      # on failure. (and you don't want to be spammed by issues)
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install ghcup
+      run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
+          ghcup --url-source https://ghc.gitlab.haskell.org/ghcup-metadata/ghcup-nightlies-0.0.7.yaml install ghc latest-nightly
+          ghcup --url-source https://ghc.gitlab.haskell.org/ghcup-metadata/ghcup-nightlies-0.0.7.yaml set ghc latest-nightly
+    - name: cabal update
+      run: |
+          cabal update
+    - name: cabal build and test
+      run: |
+          cabal build all
+          cabal test all
+    - name : create issue 
+      uses: dacbd/create-issue-action@v1
+      if: ${{ failure() }}
+      with:
+        # for the token get it at https://github.com/settings/tokens
+        # you need the public_repo permission only
+        # I'd set it to have infinite expirery so you don't end
+        # up with silent failures.
+        # then in your repository settings,
+        # settings -> secrets and variables -> actions
+        # new repository secret.
+        # you need to add it with name ISSUE_TOKEN
+        # and the token you just made.
+        token: ${{ secrets.ISSUE_TOKEN }}       
+        title: Nightly failed ${{ runner.os }}
+        body: |
+          The nightly build failed.
+          Check the actions for details.
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
