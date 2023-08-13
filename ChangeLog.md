@@ -8,7 +8,16 @@
   + word24
   + binary-parsers
   + wirestreams
-+ Add which relies on native cabal instead of stack
+  
+  This involved copying over all source files,
+  furthermore I copied in all tests and benchmarks.
+  The tests are now one giant test suite.
+  I temporarly disabled the mysql tests as they need a mysql
+  database to run which won't work nicely with CI right now.
+  However you can run these locally by uncommenting that line.
++ Add CI which relies on native cabal instead of stack
++ Add an action to automatically bump version.
++ Add nightly build cron job.
 
 ## 0.8.4.3 -- 2020-11-04
 
