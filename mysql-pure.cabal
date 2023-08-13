@@ -1,12 +1,12 @@
 cabal-version:      2.2
-name:               mysql-haskell
-version:            0.8.4.3
+name:               mysql-pure
+version:            1.0.0
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver
 license:            BSD-3-Clause
 license-file:       LICENSE
 author:             winterland1989
-maintainer:         winterland1989@gmail.com
+maintainer:         hi@jappie.me
 copyright:          (c) 2016 Winterland
 category:           Database
 build-type:         Simple
@@ -14,15 +14,19 @@ extra-source-files:
   ChangeLog.md
   README.md
 
-homepage:           https://github.com/winterland1989/mysql-haskell
-bug-reports:        https://github.com/winterland1989/mysql-haskell/issues
+homepage:           https://github.com/winterland1989/mysql-pure
+bug-reports:        https://github.com/winterland1989/mysql-pure/issues
 
 source-repository head
   type:     git
-  location: git://github.com/winterland1989/mysql-haskell.git
+  location: git://github.com/winterland1989/mysql-pure.git
 
 library
   exposed-modules:
+    Data.Binary.Parser
+    Data.Binary.Parser.Char8
+    Data.Binary.Parser.Numeric
+    Data.Binary.Parser.Word8
     Database.MySQL.Base
     Database.MySQL.BinLog
     Database.MySQL.BinLogProtocol.BinLogEvent
@@ -39,10 +43,9 @@ library
 
   other-modules:      Database.MySQL.Query
   build-depends:
-      base               >=4.7      && <5
+    , base               >=4.7      && <5
     , binary             >=0.8.3
     , binary-ieee754
-    , binary-parsers     >=0.2.1
     , blaze-textual      >=0.2      && <0.3
     , bytestring         >=0.10.2.0
     , bytestring-lexing  >=0.5      && <0.6
@@ -83,11 +86,11 @@ test-suite test
 
   hs-source-dirs:     test
   build-depends:
-      base
+    , base
     , bytestring
     , io-streams
-    , mysql-haskell
-    , tasty          >=0.11 && <2.0
+    , mysql-pure
+    , tasty        >=0.11 && <2.0
     , tasty-hunit
     , text
     , time
@@ -99,3 +102,76 @@ test-suite test
 
   ghc-options:        -threaded
   default-language:   Haskell2010
+
+benchmark binary-parsers-bench
+  other-modules:
+    Aeson
+    AesonBP
+    Common
+    HttpReq
+    Network.Wai.Handler.Warp.ReadInt
+    Network.Wai.Handler.Warp.RequestHeader
+
+  build-depends:
+    , attoparsec
+    , base
+    , binary
+    , bytestring
+    , case-insensitive
+    , criterion             >=1.1 && <1.2
+    , deepseq
+    , directory
+    , filepath
+    , http-types
+    , mysql-pure
+    , scanner
+    , scientific
+    , text
+    , unordered-containers
+    , vector
+
+  default-language: Haskell2010
+  hs-source-dirs:   binary-parsers-bench
+  main-is:          Bench.hs
+  type:             exitcode-stdio-1.0
+  ghc-options:      -O2
+
+test-suite binary-parsers-tests
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   binary-parsers-tests
+  main-is:          Main.hs
+  other-modules:
+    Aeson
+    AesonBP
+    JSON
+    QC.ByteString
+    QC.Combinator
+    QC.Common
+
+  default-language: Haskell2010
+  ghc-options:      -Wall -threaded -rtsopts
+  build-depends:
+    , attoparsec
+    , base                  >=4    && <5
+    , binary
+    , bytestring
+    , bytestring-lexing
+    , deepseq
+    , directory
+    , filepath
+    , QuickCheck            >=2.7
+    , quickcheck-instances  >=0.3
+    , quickcheck-unicode
+    , scientific
+    , tasty                 >=0.11
+    , tasty-hunit           >=0.8
+    , tasty-quickcheck      >=0.8
+    , text
+    , unordered-containers
+    , vector
+
+  if !impl(ghc >=8.0)
+    -- Data.Semigroup && Control.Monad.Fail are available in base-4.9+
+    build-depends:
+      , fail        >=4.9    && <4.10
+      , semigroups  >=0.16.1 && <0.19

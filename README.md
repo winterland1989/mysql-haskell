@@ -1,10 +1,10 @@
-mysql-haskell
+mysql-pure
 =============
 
-[![Hackage](https://img.shields.io/hackage/v/mysql-haskell.svg?style=flat)](http://hackage.haskell.org/package/mysql-haskell)
-[![Build Status](https://travis-ci.org/winterland1989/mysql-haskell.svg)](https://travis-ci.org/winterland1989/mysql-haskell)
+[![Hackage](https://img.shields.io/hackage/v/mysql-pure.svg?style=flat)](http://hackage.haskell.org/package/mysql-pure)
+[![Build Status](https://travis-ci.org/winterland1989/mysql-pure.svg)](https://travis-ci.org/winterland1989/mysql-pure)
 
-`mysql-haskell` is a MySQL driver written entirely in haskell.
+`mysql-pure` is a MySQL driver written entirely in haskell.
 
 <a href="http://www.genshuixue.com/"><img height=42 src='http://cdn.gsxservice.com/asset/img/logo-release2.png'></a>
 <a href="http://chordify.net/"><img height=42 src='https://chordify.net/img/about/slide_250_1.jpg'></a>
@@ -15,7 +15,7 @@ Is it fast?
 
 In short, `select`(decode) is about 1.5 times slower than pure c/c++ but 5 times faster than `mysql-simple`, `insert` (encode) is about 1.5 times slower than pure c/c++, there're many factors involved(tls, prepared statment, batch using multiple statement):
 
-<img src="https://github.com/winterland1989/mysql-haskell/blob/master/benchmark/result.png?raw=true" width="100%">
+<img src="https://github.com/winterland1989/mysql-pure/blob/master/benchmark/result.png?raw=true" width="100%">
 
 Above figures showed the time to:
 
@@ -35,7 +35,7 @@ While MySQL may not be the most advanced sql database, it's widely used among Ch
 
 + no replication protocol support.
 
-`mysql-haskell` is intended to solve these problems, and provide foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
+`mysql-pure` is intended to solve these problems, and provide foundation for higher level libraries such as groundhog and persistent, so that accessing MySQL is both fast and easy in haskell.
 
 Guide
 -----
@@ -106,8 +106,8 @@ Build Test Benchmark
 Just use the old way:
 
 ```bash
-git clone https://github.com/winterland1989/mysql-haskell.git
-cd mysql-haskell
+git clone https://github.com/winterland1989/mysql-pure.git
+cd mysql-pure
 cabal install --enable-tests --only-dependencies
 cabal build
 ```
@@ -143,10 +143,10 @@ New features will be automatically tested by inspecting MySQL server's version, 
 
 Please reference `.travis.yml` if you have problems with setting up test environment.
 
-Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-haskell 3) FFI version mysql, you may need to:
+Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) mysql-pure 3) FFI version mysql, you may need to:
 
 + Modify `bench.sh`(change the include path) to get c++ version compiled.
-+ Modify `mysql-haskell-bench.cabal`(change the openssl's lib path) to get haskell version compiled.
++ Modify `mysql-pure-bench.cabal`(change the openssl's lib path) to get haskell version compiled.
 + Setup MySQL's TLS support, modify `MySQLHaskellOpenSSL.hs/MySQLHaskellTLS.hs` to change the CA file's path, and certificate's subject name.
 + Adjust rts options `-N` to get best results.
 
@@ -155,7 +155,7 @@ With `-N10` on my company's 24-core machine, binary protocol performs almost ide
 Reference
 ---------
 
-[MySQL official site](https://dev.mysql.com/doc/internals/en/) provided intensive document, but without following project, `mysql-haskell` may not be written at all:
+[MySQL official site](https://dev.mysql.com/doc/internals/en/) provided intensive document, but without following project, `mysql-pure` may not be written at all:
 
 + [mysql-binlog-connector-java](https://github.com/shyiko/mysql-binlog-connector-java)
 
