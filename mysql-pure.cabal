@@ -1,6 +1,6 @@
 cabal-version:      2.2
 name:               mysql-pure
-version:            1.0.0
+version:            1.0.1
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -10,13 +10,27 @@ maintainer:         hi@jappie.me
 copyright:          (c) 2016 Winterland
 category:           Database
 build-type:         Simple
-extra-doc-files:
-  ChangeLog.md
+extra-doc-files:    ChangeLog.md
 extra-source-files:
   README.md
+  test/json-data/buffer-builder.json
+  test/json-data/dates-fract.json
+  test/json-data/dates.json
+  test/json-data/example.json
+  test/json-data/geometry.json
+  test/json-data/integers.json
+  test/json-data/jp10.json
+  test/json-data/jp100.json
+  test/json-data/jp50.json
+  test/json-data/numbers.json
+  test/json-data/twitter1.json
+  test/json-data/twitter10.json
+  test/json-data/twitter100.json
+  test/json-data/twitter20.json
+  test/json-data/twitter50.json
 
-homepage:           https://github.com/winterland1989/mysql-pure
-bug-reports:        https://github.com/winterland1989/mysql-pure/issues
+homepage:           https://github.com/jappeace/mysql-pure
+bug-reports:        https://github.com/jappeace/mysql-pure/issues
 
 source-repository head
   type:     git
