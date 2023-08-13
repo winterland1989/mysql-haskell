@@ -47,14 +47,14 @@ library
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
-    , base               >=4.7      && <5
-    , deepseq
+    , base               >=4.7      && <4.19.0
     , binary             >=0.8.3
     , binary-ieee754
     , blaze-textual      >=0.2      && <0.3
     , bytestring         >=0.10.2.0
     , bytestring-lexing  >=0.5      && <0.6
     , cryptonite         <1
+    , deepseq
     , io-streams         >=1.2      && <2.0
     , memory             >=0.14.4   && <0.19
     , monad-loops        >=0.4      && <0.5
@@ -65,7 +65,7 @@ library
     , time               >=1.5.0
     , tls                >=1.3.5    && <1.7
     , vector             >=0.8
-    , word-compat                >= 0.0 && <0.1
+    , word-compat        >=0.0      && <0.1
 
   default-language:   Haskell2010
   default-extensions:
@@ -80,25 +80,47 @@ test-suite test
   type:               exitcode-stdio-1.0
   main-is:            Main.hs
   other-modules:
+    Aeson
+    AesonBP
     BinaryRow
     BinaryRowNew
     BinLog
     BinLogNew
     ExecuteMany
+    JSON
+    MysqlTests
+    QC.ByteString
+    QC.Combinator
+    QC.Common
+    QCUtils
     TextRow
     TextRowNew
+    WireStreams
+    Word24
 
   hs-source-dirs:     test
   build-depends:
+    , attoparsec
     , base
-    , bytestring
+    , binary                >=0.8
+    , bytestring            >=0.10
+    , bytestring-lexing     >=0.5
+    , containers
+    , deepseq
+    , directory
+    , filepath
     , io-streams
     , mysql-pure
-    , tasty        >=0.11 && <2.0
+    , QuickCheck            >=2.7
+    , scientific            >=0.3.0
+    , tasty                 >=0.11  && <2.0
     , tasty-hunit
+    , tasty-quickcheck      >=0.8
     , text
     , time
+    , unordered-containers
     , vector
+    , quickcheck-instances
 
   default-extensions:
     MultiWayIf
@@ -140,7 +162,7 @@ benchmark binary-parsers-bench
   type:             exitcode-stdio-1.0
   ghc-options:      -O2
 
-benchmark bench
+benchmark bench-wirestream
   type:             exitcode-stdio-1.0
   main-is:          Main.hs
   other-modules:    System.IO.Streams.Cereal

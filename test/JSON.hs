@@ -16,9 +16,9 @@ import Data.List
 
 pathTo :: String -> IO FilePath
 pathTo wat = do
-  exists <- doesDirectoryExist "tests"
+  exists <- doesDirectoryExist "test"
   return $ if exists
-           then "tests" </> wat
+           then "test" </> wat
            else wat
 
 tests :: IO [TestTree]

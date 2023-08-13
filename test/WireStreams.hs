@@ -12,7 +12,7 @@ import           System.IO.Streams.List   (fromList, outputToList, toList,
                                            writeList)
 import           Test.QuickCheck.Monadic  (assert, monadicIO, run)
 import           Test.QuickCheck.Property (Property)
-import           Test.Tasty               (defaultMain, testGroup)
+import           Test.Tasty
 import           Test.Tasty.QuickCheck    (testProperty)
 
 
