@@ -22,7 +22,7 @@ Is it fast?
 
 In short, `select`(decode) is about 1.5 times slower than pure c/c++ but 5 times faster than `mysql-simple`, `insert` (encode) is about 1.5 times slower than pure c/c++, there're many factors involved(tls, prepared statment, batch using multiple statement):
 
-<img src="https://github.com/winterland1989/mysql-pure/blob/master/benchmark/result.png?raw=true" width="100%">
+<img src="https://github.com/winterland1989/jappeace/blob/master/benchmark/result.png?raw=true" width="100%">
 
 Above figures showed the time to:
 
