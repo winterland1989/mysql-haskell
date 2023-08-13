@@ -6,6 +6,7 @@ import Test.Tasty (defaultMain, testGroup)
 import qualified JSON
 import qualified MysqlTests
 import qualified WireStreams
+import qualified Word24
 
 main :: IO ()
 main = do
@@ -21,5 +22,8 @@ main = do
       ],
       testGroup "mysql" [
           MysqlTests.tests
-      ]
+      ],
+      testGroup "word24" [
+         Word24.tests
+      ],
       ]
