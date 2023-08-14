@@ -1,20 +1,13 @@
-mysql-pure
+mysql-haskell
 =============
 
-This is a fork of [mysql-haskell](https://hackage.haskell.org/package/mysql-haskell).
-It merges in:
-  + [word24](https://hackage.haskell.org/package/word24)
-  + [binary-parsers](https://hackage.haskell.org/package/binary-parsers-0.2.4.0)
-  + [tcp-streams](https://hackage.haskell.org/package/tcp-streams)
+[![Hackage](https://img.shields.io/hackage/v/mysql-haskell.svg?style=flat)](http://hackage.haskell.org/package/mysql-haskell)
 
-this makes maintenance easier.
-It remains backwards compatible,
-so this package can be used as a drop in replacement for any listed above,
-with the difference that it's maintained.
+`mysql-haskell` is a MySQL driver written entirely in haskell.
 
-[![Hackage](https://img.shields.io/hackage/v/mysql-pure.svg?style=flat)](http://hackage.haskell.org/package/mysql-pure)
+<a href="http://chordify.net/"><img height=42 src='https://chordify.net/img/about/slide_250_1.jpg'></a>
 
-`mysql-pure` is a MySQL driver written entirely in haskell.
+`mysql-haskell` is a MySQL driver written entirely in haskell.
 
 Is it fast?
 ----------
