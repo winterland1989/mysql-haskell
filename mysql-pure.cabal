@@ -225,6 +225,6 @@ benchmark bench24
     base,
     criterion >=1.1,
     deepseq >=1.2 && <2,
-    word24
+    mysql-pure
 
   ghc-options:      -O2
