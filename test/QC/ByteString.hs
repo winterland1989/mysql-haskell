@@ -15,7 +15,6 @@ import Test.QuickCheck
 import qualified Data.Scientific as Sci
 import qualified Data.ByteString.Builder.Scientific as Sci
 import qualified Data.Binary.Parser as P
-import qualified Data.Binary.Parser.Char8 as P8
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as B8
@@ -65,12 +64,6 @@ peek s = parseBS P.peek s === (fst <$> L.uncons s)
 string :: L.ByteString -> L.ByteString -> Property
 string s t = parseBS (P.string s' *> pure s') (s `L.append` t) === Just s'
   where s' = toStrictBS s
-
-stringCI :: ASCII L.ByteString -> ASCII L.ByteString -> Property
-stringCI (ASCII s) (ASCII t) =
-    parseBS (P8.stringCI up) (s `L.append` t) === Just s'
-  where s' = toStrictBS s
-        up = B8.map toUpper s'
 
 strings :: L.ByteString -> L.ByteString -> L.ByteString -> Property
 strings s t u =
@@ -171,7 +164,6 @@ tests = [
     , testProperty "skipWord8" skipWord8
     , testProperty "skipWhile" skipWhile
     , testProperty "string" string
-    , testProperty "stringCI" stringCI
     , testProperty "strings" strings
     , testProperty "take" take
     , testProperty "takeCount" takeCount

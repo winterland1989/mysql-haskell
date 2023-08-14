@@ -45,7 +45,6 @@ source-repository head
 library
   exposed-modules:
     Data.Binary.Parser
-    Data.Binary.Parser.Char8
     Data.Binary.Parser.Numeric
     Data.Binary.Parser.Word8
     Data.Connection
