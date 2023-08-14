@@ -1,8 +1,9 @@
 # Revision history for mysql-haskell
 
-## 1.1.2 -- TBD
+## 1.1.2 -- 2023.08.14
 
 + Fix package name of changelog
++ Drop support for RC4 chipher which is depracated
 
 ## 1.1.1 -- 2023.08.14
 

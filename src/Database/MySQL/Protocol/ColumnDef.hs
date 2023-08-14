@@ -16,7 +16,6 @@ Column definition(aka. field type).
 
 module Database.MySQL.Protocol.ColumnDef where
 
-import           Control.Applicative
 import           Data.Binary
 import           Data.Binary.Get
 import           Data.Binary.Parser

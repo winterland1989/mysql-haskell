@@ -15,7 +15,6 @@ Common MySQL commands supports.
 
 module Database.MySQL.Protocol.Command where
 
-import           Control.Applicative
 import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get

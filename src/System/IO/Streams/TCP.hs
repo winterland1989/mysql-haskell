@@ -81,10 +81,10 @@ connectSocket host port = do
                                   return (sock, addr)
                      )
   where
-    resolveAddrInfo host port = do
+    resolveAddrInfo host' port' = do
         -- Partial function here OK, network will throw an exception rather than
         -- return the empty list here.
-        (addrInfo:_) <- N.getAddrInfo (Just hints) (Just host) (Just $ show port)
+        (addrInfo:_) <- N.getAddrInfo (Just hints) (Just host') (Just $ show port')
         let family     = N.addrFamily addrInfo
         let socketType = N.addrSocketType addrInfo
         let protocol   = N.addrProtocol addrInfo
@@ -107,11 +107,11 @@ socketToConnection bufsiz (sock, addr) = do
     is <- S.makeInputStream $ do
         s <- NB.recv sock bufsiz
         return $! if B.null s then Nothing else Just s
-    return (Connection is (send sock) (N.close sock) (sock, addr))
+    return (Connection is (send' sock) (N.close sock) (sock, addr))
   where
-    send _    (L.Empty) = return ()
-    send sock (L.Chunk bs L.Empty) = unless (B.null bs) (NB.sendAll sock bs)
-    send sock lbs = NL.sendAll sock lbs
+    send' _    (L.Empty) = return ()
+    send' sock' (L.Chunk bs L.Empty) = unless (B.null bs) (NB.sendAll sock' bs)
+    send' sock' lbs = NL.sendAll sock' lbs
 
 -- | Connect to server using 'defaultChunkSize'.
 --

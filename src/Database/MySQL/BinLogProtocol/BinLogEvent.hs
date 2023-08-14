@@ -14,7 +14,6 @@ Binlog event type
 
 module Database.MySQL.BinLogProtocol.BinLogEvent where
 
-import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Loops                       (untilM)
 import           Data.Binary
@@ -230,7 +229,7 @@ getDeleteRowEvent fd tme typ = do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
-    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    let (plen, poffset) = (colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
     DeleteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
@@ -252,7 +251,7 @@ getWriteRowEvent fd tme typ = do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
-    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    let (plen, poffset) = (colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
     WriteRowsEvent tid flgs colCnt pmap <$> untilM (getBinLogRow (tmColumnMeta tme) pmap) isEmpty
 
@@ -274,7 +273,7 @@ getUpdateRowEvent fd tme typ = do
         extraLen <- getWord16le
         void $ getByteString (fromIntegral extraLen - 2)
     colCnt <- getLenEncInt
-    let (plen, poffset) = (fromIntegral colCnt + 7) `quotRem` 8
+    let (plen, poffset) = (colCnt + 7) `quotRem` 8
     pmap <- getPresentMap plen poffset
     pmap' <- getPresentMap plen poffset
     UpdateRowsEvent tid flgs colCnt (pmap, pmap') <$>

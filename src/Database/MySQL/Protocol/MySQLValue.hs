@@ -34,11 +34,9 @@ module Database.MySQL.Protocol.MySQLValue
   ) where
 
 import qualified Blaze.Text                         as Textual
-import           Control.Applicative
 import           Control.Monad
 import           Data.Binary.Put
 import           Data.Binary.Parser
-import           Data.Binary.IEEE754
 import           Data.Bits
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
@@ -294,7 +292,7 @@ getBinaryField f
     | t == mySQLTypeLong
         || t == mySQLTypeInt24        = if isUnsigned then MySQLInt32U <$> getWord32le
                                                       else MySQLInt32  <$> getInt32le
-    | t == mySQLTypeYear              = MySQLYear . fromIntegral <$> getWord16le
+    | t == mySQLTypeYear              = MySQLYear <$> getWord16le
     | t == mySQLTypeLongLong          = if isUnsigned then MySQLInt64U <$> getWord64le
                                                       else MySQLInt64  <$> getInt64le
     | t == mySQLTypeFloat             = MySQLFloat  <$> getFloatle
@@ -386,7 +384,7 @@ getBinaryField f
     getSecond4 :: Get Pico
     getSecond4 = realToFrac <$> getWord8
     getSecond8 :: Get Pico
-    getSecond8 = realToFrac <$> do
+    getSecond8 =  do
         s <- getInt8'
         ms <- fromIntegral <$> getWord32le :: Get Int
         pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
@@ -402,10 +400,10 @@ getBits bytes =
         | bytes == 2 -> fromIntegral <$> getWord16be
         | bytes == 3 -> fromIntegral <$> getWord24be
         | bytes == 4 -> fromIntegral <$> getWord32be
-        | bytes == 5 -> fromIntegral <$> getWord40be
-        | bytes == 6 -> fromIntegral <$> getWord48be
-        | bytes == 7 -> fromIntegral <$> getWord56be
-        | bytes == 8 -> fromIntegral <$> getWord64be
+        | bytes == 5 -> getWord40be
+        | bytes == 6 -> getWord48be
+        | bytes == 7 -> getWord56be
+        | bytes == 8 -> getWord64be
         | otherwise  -> fail $  "Database.MySQL.Protocol.MySQLValue: \
                                 \wrong bit length size: " ++ show bytes
 {-# INLINE getBits #-}

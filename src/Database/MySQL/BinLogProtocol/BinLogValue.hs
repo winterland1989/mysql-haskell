@@ -13,9 +13,7 @@ Binlog protocol
 
 module Database.MySQL.BinLogProtocol.BinLogValue where
 
-import           Control.Applicative
 import           Data.Binary.Get
-import           Data.Binary.IEEE754
 import           Data.Binary.Put                          ()
 import           Data.Bits
 import           Data.ByteString                          (ByteString)
@@ -206,7 +204,7 @@ getBinLogField BINLOG_TYPE_YEAR                = do
 -- following a simple lookup table.
 --
 getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
-    let i = fromIntegral (precision - scale)
+    let i = (precision - scale)
         (ucI, cI) = i `quotRem` digitsPerInteger
         (ucF, cF) = scale `quotRem` digitsPerInteger
         ucISize = fromIntegral (ucI `shiftL` 2)
@@ -215,7 +213,7 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
         cFSize = fromIntegral (sizeTable `B.unsafeIndex` fromIntegral cF)
         len = ucISize + cISize + ucFSize + cFSize
 
-    buf <- getByteString (fromIntegral len)
+    buf <- getByteString len
 
     let fb = buf `B.unsafeIndex` 0
         sign = if fb .&. 0x80 == 0x80 then 1 else 0 :: Word8
@@ -254,7 +252,7 @@ getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
 
 getBinLogField (BINLOG_TYPE_ENUM size) =
     if  | size == 1 -> BinLogEnum . fromIntegral <$> getWord8
-        | size == 2 -> BinLogEnum . fromIntegral <$> getWord16be
+        | size == 2 -> BinLogEnum <$> getWord16be
         | otherwise -> fail $ "Database.MySQL.BinLogProtocol.BinLogValue: wrong \
                               \BINLOG_TYPE_ENUM size: " ++ show size
 

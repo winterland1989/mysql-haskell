@@ -74,7 +74,6 @@ module Database.MySQL.Base
     , module  Database.MySQL.Protocol.MySQLValue
     ) where
 
-import           Control.Applicative
 import           Control.Exception                  (mask, onException, throwIO)
 import           Control.Monad
 import qualified Data.ByteString.Lazy               as L
