@@ -28,7 +28,6 @@ module Database.MySQL.BinLog
     , module Database.MySQL.BinLogProtocol.BinLogMeta
     ) where
 
-import           Control.Applicative
 import           Control.Exception                         (throwIO)
 import           Control.Monad
 import           Data.Binary.Put
@@ -122,6 +121,7 @@ dumpBinLog conn@(MySQLConn is wp _ consumed) sid (BinLogTracker initfn initpos) 
         if  | isOK p -> Just <$> getFromPacket (getBinLogPacket checksum needAck) p
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+            | otherwise -> error ("unkown package" <> show p)
 
 -- | Row based binlog event type.
 --

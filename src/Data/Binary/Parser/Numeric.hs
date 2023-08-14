@@ -16,7 +16,6 @@ import           Control.Applicative
 import           Control.Monad
 import           Data.Binary.Get.Internal
 import qualified Data.Binary.Parser.Word8     as W
-import           Data.Bits
 import qualified Data.ByteString              as B
 import qualified Data.ByteString.Lex.Integral as LexInt
 import           Data.Int
@@ -35,7 +34,7 @@ import           Data.Word
 --
 -- This parser does not accept a leading @\"0x\"@ string.
 --
-hexadecimal :: (Integral a, Bits a) => Get a
+hexadecimal :: (Integral a) => Get a
 hexadecimal = do
     bs <- W.takeWhile1 W.isHexDigit
     case LexInt.readHexadecimal bs of
