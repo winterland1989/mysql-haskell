@@ -64,9 +64,9 @@ testTCPSocket = testCase "network/socket" $
 ------------------------------------------------------------------------------
 
 tlsTests :: [TestTree]
-tlsTests = [ testTLSSocket,
+tlsTests = [ testTLSSocket
              -- TODO disabled because won't work in a  nix container
-             -- testHTTPS
+             -- , testHTTPS
            ]
 
 testTLSSocket :: TestTree
