@@ -1,0 +1,67 @@
+name:                tcp-streams
+version:             0.5.0.0
+synopsis:            One stop solution for tcp client and server with tls support.
+description:         One stop solution for tcp client and server with tls support.
+license:             BSD3
+license-file:        LICENSE
+author:              winterland1989
+maintainer:          winterland1989@gmail.com
+-- copyright:           
+category:            Network
+build-type:          Simple
+extra-source-files:     ChangeLog.md
+                    ,   README.md
+                    ,   test/cert/*.pem
+                    ,   test/cert/*.crt
+                    ,   test/cert/*.key
+
+data-files:          mozillaCAStore.pem
+cabal-version:       >=1.10
+
+flag openssl
+  description:  Enable openssl support via @HsOpenSSL@
+  default:      True
+
+source-repository head
+  type:     git
+  location: git://github.com/didi-FP/tcp-streams.git
+
+library
+  hs-source-dirs:   ../
+  exposed-modules:      Data.TLSSetting
+                    ,   Data.Connection
+                    ,   System.IO.Streams.TCP
+                    ,   System.IO.Streams.TLS
+  if !os(windows)
+    exposed-modules:    System.IO.Streams.UnixSocket
+
+  other-modules:    Paths_tcp_streams
+  -- other-extensions:    
+  build-depends:        base           >=4.7  && < 5.0
+                    ,   network        >=2.3  && < 3.0
+                    ,   bytestring     >= 0.10.2.0
+                    ,   io-streams     >= 1.2 && < 2.0
+                    ,   tls            >= 1.3 && < 2.0
+                    ,   data-default-class
+                    ,   x509           >= 1.5 && < 2.0
+                    ,   x509-system    >= 1.5 && < 2.0
+                    ,   x509-store     >= 1.5 && < 2.0
+                    ,   pem           
+
+  ghc-options:    -Wall
+  -- hs-source-dirs:      
+  default-language:    Haskell2010
+
+executable bench
+    build-depends:    base, tcp-streams, io-streams, bytestring, network
+    default-language: Haskell2010
+    hs-source-dirs:   .
+    main-is:          TCPLoopBack.hs
+    ghc-options:      -O2 -threaded -rtsopts
+
+executable bench-unix-socket
+    build-depends:    base, tcp-streams, io-streams, bytestring, network, directory
+    default-language: Haskell2010
+    hs-source-dirs:   .
+    main-is:          UnixSocketLoopBack.hs
+    ghc-options:      -O2 -threaded -rtsopts
