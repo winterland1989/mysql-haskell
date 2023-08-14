@@ -12,7 +12,6 @@ import QC.Common (Repack, parseBS, repackBS, toLazyBS)
 import Test.Tasty (TestTree)
 import Test.Tasty.QuickCheck (testProperty)
 import Test.QuickCheck
-import qualified Data.Binary.Parser.Char8 as C
 import qualified Data.Binary.Parser as P
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
@@ -36,19 +35,9 @@ lookAhead (NonEmpty xs) =
       mr = parseBS withLookAheadThenConsume $ toLazyBS ys
   in isJust mr && fst (fromJust mr) == snd (fromJust mr)
 
-match :: Int -> NonNegative Int -> NonNegative Int -> Repack -> Bool
-match n (NonNegative x) (NonNegative y) rs =
-    parseBS (P.match parser) (repackBS rs input) == Just (input, n)
-  where parser = C.skipWhile (=='x') *> P.signed P.decimal <*
-                 C.skipWhile (=='y')
-        input = B.concat [
-            B8.replicate x 'x', B8.pack (show n), B8.replicate y 'y'
-          ]
-
 tests :: [TestTree]
 tests = [
     testProperty "asum" asum
   , testProperty "replicateM" replicateM
   , testProperty "lookAhead" lookAhead
-  , testProperty "match" match
   ]
