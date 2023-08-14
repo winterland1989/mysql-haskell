@@ -103,7 +103,11 @@ library
     MultiWayIf
     OverloadedStrings
 
-  ghc-options:        -Wall
+  ghc-options:
+    -Wall -Wincomplete-uni-patterns
+    -Wincomplete-record-updates -Widentities -Wredundant-constraints
+    -Wcpp-undef -fwarn-tabs -Wpartial-fields
+    -Wunused-packages -fenable-th-splice-warnings
 
 test-suite test
   type:               exitcode-stdio-1.0
