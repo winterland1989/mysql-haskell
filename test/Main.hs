@@ -28,6 +28,6 @@ main = do
       ],
       testGroup "word24"
          Word24.tests
-      testGroup "tcp-streams"
-         TCPStreams.tests
+      , testGroup "tcp-streams"
+         [TCPStreams.tests]
       ]

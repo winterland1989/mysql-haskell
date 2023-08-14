@@ -8,9 +8,8 @@ import           Control.Concurrent             (forkIO, newEmptyMVar, putMVar,
                                                  takeMVar)
 import qualified Network.Socket                 as N
 import           System.Timeout                 (timeout)
-import           Test.Framework
-import           Test.Framework.Providers.HUnit
-import           Test.HUnit                     hiding (Test)
+import           Test.Tasty
+import           Test.Tasty.HUnit                     hiding (Test)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
 import           System.Directory               (removeFile)
@@ -23,16 +22,16 @@ import qualified System.IO.Streams.TLS          as TLS
 ------------------------------------------------------------------------------
 
 tests :: TestTree
-tests = [ testGroup "TCP" tcpTests
+tests = testGroup "tests" [ testGroup "TCP" tcpTests
         , testGroup "TLS"  tlsTests
         ]
 
 ------------------------------------------------------------------------------
 
-tcpTests :: [Test]
+tcpTests :: [TestTree]
 tcpTests = [ testTCPSocket ]
 
-testTCPSocket :: Test
+testTCPSocket :: TestTree
 testTCPSocket = testCase "network/socket" $
     N.withSocketsDo $ do
     x <- timeout (10 * 10^(6::Int)) go
@@ -64,10 +63,10 @@ testTCPSocket = testCase "network/socket" $
 
 ------------------------------------------------------------------------------
 
-tlsTests :: [Test]
+tlsTests :: [TestTree]
 tlsTests = [ testTLSSocket, testHTTPS ]
 
-testTLSSocket :: Test
+testTLSSocket :: TestTree
 testTLSSocket = testCase "network/socket" $
     N.withSocketsDo $ do
     x <- timeout (10 * 10^(6::Int)) go
@@ -99,7 +98,7 @@ testTLSSocket = testCase "network/socket" $
         send conn (L.fromStrict req)
         close conn
 
-testHTTPS :: Test
+testHTTPS :: TestTree
 testHTTPS = testCase "network/https" $
     N.withSocketsDo $ do
     x <- timeout (10 * 10^(6::Int)) go

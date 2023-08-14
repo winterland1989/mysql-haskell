@@ -121,6 +121,7 @@ test-suite test
     TextRowNew
     WireStreams
     Word24
+    TCPStreams
 
   hs-source-dirs:     test
   build-depends:
@@ -145,6 +146,7 @@ test-suite test
     , time
     , unordered-containers
     , vector
+    , network
 
   default-extensions:
     MultiWayIf
