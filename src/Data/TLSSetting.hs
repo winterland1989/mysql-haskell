@@ -22,7 +22,7 @@ import qualified Data.X509                  as X509
 import qualified Data.X509.CertificateStore as X509
 import qualified Network.TLS                as TLS
 import qualified Network.TLS.Extra          as TLS
-import           Paths_mysql_pure          (getDataFileName)
+import           Paths_mysql_haskell          (getDataFileName)
 import qualified System.X509                as X509
 
 -- | The whole point of TLS is that: a peer should have already trusted

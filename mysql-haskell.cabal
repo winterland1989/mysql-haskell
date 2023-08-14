@@ -67,8 +67,8 @@ library
     System.IO.Streams.TCP
     System.IO.Streams.TLS
 
-  other-modules:      Paths_mysql_pure
-  autogen-modules:    Paths_mysql_pure
+  other-modules:      Paths_mysql_haskell
+  autogen-modules:    Paths_mysql_haskell
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
