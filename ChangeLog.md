@@ -5,6 +5,7 @@
 + Fix package name of changelog
 + Drop support for RC4 chipher which is depracated
 + drop dependency on binary-ieee754, which was unused.
++ Fix text 2 support, thanks @RikvanToor
 
 ## 1.1.1 -- 2023.08.14
 
