@@ -17,6 +17,8 @@
       hpkgs = pkgs.haskellPackages.override {
         overrides = hnew: hold: {
           mysql-pure = hnew.callCabal2nix "mysql-pure" ./. { };
+          # untill they figure out how to compile the test suite
+          crypton-x509 = pkgs.haskell.lib.markUnbroken (pkgs.haskell.lib.dontCheck hold.crypton-x509);
         };
       };
     in
