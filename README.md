@@ -7,8 +7,6 @@ mysql-haskell
 
 <a href="http://chordify.net/"><img height=42 src='https://chordify.net/img/about/slide_250_1.jpg'></a>
 
-`mysql-haskell` is a MySQL driver written entirely in haskell.
-
 Is it fast?
 ----------
 
