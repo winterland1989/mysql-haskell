@@ -1,5 +1,9 @@
 # Revision history for mysql-pure
 
+## 1.0.2 -- 2023.08.12 
++ Bump dependencies, go all into crypton
++ merge tcp-streams into the package
+
 ## 1.0.1 -- 2023.08.12 
 + add json testfiles as extra source files to make tests pass in nix builds
 

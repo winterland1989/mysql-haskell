@@ -7,6 +7,7 @@ import qualified JSON
 import qualified MysqlTests
 import qualified WireStreams
 import qualified Word24
+import qualified TCPStreams
 
 main :: IO ()
 main = do
@@ -27,4 +28,8 @@ main = do
       ],
       testGroup "word24"
          Word24.tests
+      , testGroup "tcp-streams"
+         [
+           TCPStreams.tests
+         ]
       ]
