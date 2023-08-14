@@ -1,5 +1,9 @@
 # Revision history for mysql-pure
 
+## 1.1.1 -- TBD
+
++ cleaned up some warnings
+
 ## 1.1.0 -- 2023.08.12 
 There was a bunch of stuff unrelated to mysql
 which I purged.
