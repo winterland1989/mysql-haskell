@@ -1,6 +1,6 @@
 cabal-version:      2.2
 name:               mysql-pure
-version:            1.0.1
+version:            1.0.2
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -12,7 +12,13 @@ category:           Database
 build-type:         Simple
 extra-doc-files:    ChangeLog.md
 extra-source-files:
+  mozillaCAStore.pem
   README.md
+  test/cert/ca-key.pem
+  test/cert/ca.pem
+  test/cert/server-cert.pem
+  test/cert/server-key.pem
+  test/cert/server-req.pem
   test/json-data/buffer-builder.json
   test/json-data/dates-fract.json
   test/json-data/dates.json
@@ -28,13 +34,6 @@ extra-source-files:
   test/json-data/twitter100.json
   test/json-data/twitter20.json
   test/json-data/twitter50.json
-  test/cert/ca-key.pem
-  test/cert/ca.pem
-  test/cert/server-cert.pem
-  test/cert/server-key.pem
-  test/cert/server-req.pem
-  test/cert/server-req.pem
-  mozillaCAStore.pem
 
 homepage:           https://github.com/jappeace/mysql-pure
 bug-reports:        https://github.com/jappeace/mysql-pure/issues
@@ -69,14 +68,12 @@ library
     System.IO.Streams.Binary
     System.IO.Streams.TCP
     System.IO.Streams.TLS
-  other-modules:    Paths_mysql_pure
 
+  other-modules:      Paths_mysql_pure
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
     , base                 >=4.7      && <4.19.0
-    , data-default-class
-    , pem
     , binary               >=0.8.3    && <0.9
     , binary-ieee754       >=0.1.0    && <0.2
     , blaze-textual        >=0.2      && <0.3
@@ -86,11 +83,13 @@ library
     , crypton-x509         >=1.5      && <2.0
     , crypton-x509-store   >=1.5      && <2.0
     , crypton-x509-system  >=1.5      && <2.0
+    , data-default-class   >=0.1.2    && <0.2
     , deepseq              >=1.4.6    && <1.5
     , io-streams           >=1.2      && <2.0
     , memory               >=0.14.4   && <0.19
     , monad-loops          >=0.4      && <0.5
     , network              >=2.3      && <4.0
+    , pem                  >=0.2.4    && <0.3
     , scientific           >=0.3      && <0.4
     , text                 >=1.1      && <2.1
     , time                 >=1.5.0    && <1.12
@@ -124,11 +123,11 @@ test-suite test
     QC.Combinator
     QC.Common
     QCUtils
+    TCPStreams
     TextRow
     TextRowNew
     WireStreams
     Word24
-    TCPStreams
 
   hs-source-dirs:     test
   build-depends:
@@ -143,6 +142,7 @@ test-suite test
     , filepath
     , io-streams
     , mysql-pure
+    , network
     , QuickCheck            >=2.7
     , quickcheck-instances
     , scientific            >=0.3.0
@@ -153,7 +153,6 @@ test-suite test
     , time
     , unordered-containers
     , vector
-    , network
 
   default-extensions:
     MultiWayIf
