@@ -15,7 +15,6 @@ MySQL packet decoder&encoder, and varities utility.
 
 module Database.MySQL.Protocol.Packet where
 
-import           Control.Applicative
 import           Control.Exception     (Exception (..), throwIO)
 import           Data.Binary.Parser
 import           Data.Binary.Put
@@ -50,7 +49,7 @@ getPacket :: Get Packet
 getPacket = do
     len <- fromIntegral <$> getWord24le
     seqN <- getWord8
-    body <- getLazyByteString (fromIntegral len)
+    body <- getLazyByteString len
     return (Packet len seqN body)
 {-# INLINE getPacket #-}
 
@@ -101,14 +100,14 @@ encodeToPacket :: Binary a => Word8 -> a -> Packet
 encodeToPacket seqN payload =
     let s = encode payload
         l = L.length s
-    in Packet (fromIntegral l) seqN s
+    in Packet l seqN s
 {-# INLINE encodeToPacket #-}
 
 putToPacket :: Word8 -> Put -> Packet
 putToPacket seqN payload =
     let s = runPut payload
         l = L.length s
-    in Packet (fromIntegral l) seqN s
+    in Packet l seqN s
 {-# INLINE putToPacket #-}
 
 --------------------------------------------------------------------------------

@@ -45,7 +45,9 @@ makeCAStore SystemCAStore       = X509.getSystemCertificateStore
 makeCAStore MozillaCAStore      = makeCAStore . CustomCAStore =<< mozillaCAStorePath
 makeCAStore (CustomCAStore fp)  = do
     bs <- B.readFile fp
-    let Right pems = X509.pemParseBS bs
+    let pems = case X509.pemParseBS bs of
+          Right pms -> pms
+          Left err -> error err
     case mapM (X509.decodeSignedCertificate . X509.pemContent) pems of
         Right cas -> return (X509.makeCertificateStore cas)
         Left err  -> error err
@@ -65,7 +67,7 @@ makeClientParams :: TrustedCAStore          -- ^ trusted certificates.
 makeClientParams tca = do
     caStore <- makeCAStore tca
     return (TLS.defaultParamsClient "" B.empty)
-        {   TLS.clientSupported = def { TLS.supportedCiphers = TLS.ciphersuite_all }
+        {   TLS.clientSupported = def { TLS.supportedCiphers = TLS.ciphersuite_default }
         ,   TLS.clientShared    = def
             {   TLS.sharedCAStore         = caStore
             ,   TLS.sharedValidationCache = def

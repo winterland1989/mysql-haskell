@@ -16,7 +16,6 @@ Auth related packet.
 
 module Database.MySQL.Protocol.Auth where
 
-import           Control.Applicative
 import           Control.Monad
 import           Data.Binary
 import           Data.Binary.Get
@@ -97,7 +96,7 @@ getGreeting = do
     status <- getWord16le
     capH <- getWord16le
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
-    authPluginLen <- getWord8   -- this will issue an unused warning, see the notes below
+    _authPluginLen <- getWord8   -- this will issue an unused warning, see the notes below
     skipN 10 -- 10 * 0x00
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure B.empty

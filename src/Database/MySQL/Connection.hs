@@ -13,7 +13,6 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 
 module Database.MySQL.Connection where
 
-import           Control.Applicative
 import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
@@ -234,7 +233,7 @@ readPacket is = Stream.read is >>= maybe
 
 writeCommand :: Command -> (Packet -> IO ()) -> IO ()
 writeCommand a writePacket = let bs = Binary.runPut (putCommand a) in
-    go (fromIntegral (L.length bs)) 0 bs writePacket
+    go (L.length bs) 0 bs writePacket
   where
     go len seqN bs writePacket' = do
         if len < 16777215

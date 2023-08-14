@@ -1,8 +1,22 @@
-# Revision history for mysql-pure
+# Revision history for mysql-haskell
 
-## 1.1.1 -- TBD
+## 1.1.2 -- 2023.08.14
+
++ Fix package name of changelog
++ Drop support for RC4 chipher which is depracated
++ drop dependency on binary-ieee754, which was unused.
+
+## 1.1.1 -- 2023.08.14
 
 + cleaned up some warnings
++ Merge back into mysql-haskell after gaining hackage access.
++ Deprecate mysql-pure in favor of old hackage
+  since it's only been out for a day this sort off
+  stream lines upgrading for most applications.
+  Cabal will just figure it out, rather then
+  users having to "find" mysql-pure.
+  I'll just make a bonus announcement to
+  let people not depend on mysql-pure.
 
 ## 1.1.0 -- 2023.08.12 
 There was a bunch of stuff unrelated to mysql
