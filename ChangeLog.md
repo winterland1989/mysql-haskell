@@ -1,8 +1,12 @@
 # Revision history for mysql-pure
 
 ## 1.1.0 -- 2023.08.12 
+There was a bunch of stuff unrelated to mysql
+which I purged.
+If you need any on these go depend on the 
+respective unmaintained package.
 
-+ Delete module UnixSocket
++ Delete module System.IO.Streams.UnixSocket
 + Dleete module Data.Binary.Parser.Char8
 + Delete module System.IO.Streams.Binary
 
