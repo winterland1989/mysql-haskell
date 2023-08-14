@@ -35,12 +35,12 @@ extra-source-files:
   test/json-data/twitter20.json
   test/json-data/twitter50.json
 
-homepage:           https://github.com/jappeace/mysql-haskell
-bug-reports:        https://github.com/jappeace/mysql-haskell/issues
+homepage:           https://github.com/winterland1989/mysql-haskell
+bug-reports:        https://github.com/winterland1989/mysql-haskell/issues
 
 source-repository head
   type:     git
-  location: git://github.com/jappeace/mysql-haskell.git
+  location: git://github.com/winterland1989/mysql-haskell.git
 
 library
   exposed-modules:
