@@ -3,7 +3,8 @@
 ## 1.1.0 -- 2023.08.12 
 
 + Delete module UnixSocket
-+ Dleete module   Data.Binary.Parser.Char8
++ Dleete module Data.Binary.Parser.Char8
++ Delete module System.IO.Streams.Binary
 
 ## 1.0.2 -- 2023.08.12 
 + Bump dependencies, go all into crypton
