@@ -28,6 +28,13 @@ extra-source-files:
   test/json-data/twitter100.json
   test/json-data/twitter20.json
   test/json-data/twitter50.json
+  test/cert/ca-key.pem
+  test/cert/ca.pem
+  test/cert/server-cert.pem
+  test/cert/server-key.pem
+  test/cert/server-req.pem
+  test/cert/server-req.pem
+  mozillaCAStore.pem
 
 homepage:           https://github.com/jappeace/mysql-pure
 bug-reports:        https://github.com/jappeace/mysql-pure/issues
