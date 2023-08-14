@@ -1,4 +1,44 @@
-# Revision history for mysql-haskell
+# Revision history for mysql-pure
+
+## 1.1.1 -- TBD
+
++ cleaned up some warnings
+
+## 1.1.0 -- 2023.08.12 
+There was a bunch of stuff unrelated to mysql
+which I purged.
+If you need any on these go depend on the 
+respective unmaintained package.
+
++ Delete module System.IO.Streams.UnixSocket
++ Dleete module Data.Binary.Parser.Char8
++ Delete module System.IO.Streams.Binary
+
+## 1.0.2 -- 2023.08.12 
++ Bump dependencies, go all into crypton
++ merge tcp-streams into the package
+
+## 1.0.1 -- 2023.08.12 
++ add json testfiles as extra source files to make tests pass in nix builds
+
+## 1.0.0 -- 2023.08.12 
+
++ Fork from mysql-haskell into mysql-pure
++ add flake
++ merge packages:
+  + word24
+  + binary-parsers
+  + wirestreams
+  
+  This involved copying over all source files,
+  furthermore I copied in all tests and benchmarks.
+  The tests are now one giant test suite.
+  I temporarly disabled the mysql tests as they need a mysql
+  database to run which won't work nicely with CI right now.
+  However you can run these locally by uncommenting that line.
++ Add CI which relies on native cabal instead of stack
++ Add an action to automatically bump version.
++ Add nightly build cron job.
 
 ## 0.8.4.3 -- 2020-11-04
 
