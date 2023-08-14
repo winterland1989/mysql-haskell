@@ -1,5 +1,5 @@
 cabal-version:      2.2
-name:               mysql-pure
+name:               mysql-haskell
 version:            1.1.0
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
@@ -35,12 +35,12 @@ extra-source-files:
   test/json-data/twitter20.json
   test/json-data/twitter50.json
 
-homepage:           https://github.com/jappeace/mysql-pure
-bug-reports:        https://github.com/jappeace/mysql-pure/issues
+homepage:           https://github.com/jappeace/mysql-haskell
+bug-reports:        https://github.com/jappeace/mysql-haskell/issues
 
 source-repository head
   type:     git
-  location: git://github.com/jappeace/mysql-pure.git
+  location: git://github.com/jappeace/mysql-haskell.git
 
 library
   exposed-modules:
@@ -143,7 +143,7 @@ test-suite test
     directory,
     filepath,
     io-streams,
-    mysql-pure,
+    mysql-haskell,
     network,
     QuickCheck >=2.7,
     quickcheck-instances,
@@ -183,7 +183,7 @@ benchmark binary-parsers-bench
     directory,
     filepath,
     http-types,
-    mysql-pure,
+    mysql-haskell,
     scanner,
     scientific,
     text,
@@ -205,6 +205,6 @@ benchmark bench24
     base,
     criterion >=1.1,
     deepseq >=1.2 && <2,
-    mysql-pure
+    mysql-haskell
 
   ghc-options:      -O2

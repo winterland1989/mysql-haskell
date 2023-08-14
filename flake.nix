@@ -16,7 +16,7 @@
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
       hpkgs = pkgs.haskellPackages.override {
         overrides = hnew: hold: {
-          mysql-pure = hnew.callCabal2nix "mysql-pure" ./. { };
+          mysql-haskell = hnew.callCabal2nix "mysql-haskell" ./. { };
           # untill they figure out how to compile the test suite
           crypton-x509 = pkgs.haskell.lib.markUnbroken (pkgs.haskell.lib.dontCheck hold.crypton-x509);
 
@@ -32,10 +32,10 @@
       };
     in
     {
-      defaultPackage.x86_64-linux =  hpkgs.mysql-pure;
+      defaultPackage.x86_64-linux =  hpkgs.mysql-haskell;
       inherit pkgs;
       devShell.x86_64-linux = hpkgs.shellFor {
-        packages = ps : [ ps."mysql-pure" ];
+        packages = ps : [ ps."mysql-haskell" ];
         # TODO disabled untill crypton/crytponite clusterfuck is resolved
         # withHoogle = true;
 
