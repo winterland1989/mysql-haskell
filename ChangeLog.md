@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.1.3 -- 2023.08.30
++ bump constraints
+
 ## 1.1.2 -- 2023.08.14
 
 + Fix package name of changelog
