@@ -72,7 +72,7 @@ library
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
-    base >=4.7 && <4.19.0,
+    base >=4.7 && <4.19.0 || ^>=4.19.0,
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
