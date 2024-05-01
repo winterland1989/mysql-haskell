@@ -77,7 +77,7 @@ library
     blaze-textual >=0.2 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
-    crypton >=0.31 && <0.40,
+    crypton >=0.31 && <0.40 || ^>=1.0.0,
     crypton-x509 >=1.5 && <2.0,
     crypton-x509-store >=1.5 && <2.0,
     crypton-x509-system >=1.5 && <2.0,
