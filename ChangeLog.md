@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.1.5 -- 2024.06.25
++ bump constraints
+
 ## 1.1.4 -- 2024.02.17 
 + bump constraints
 
