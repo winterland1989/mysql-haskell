@@ -1,6 +1,19 @@
 # Revision history for mysql-haskell
 
-## 1.1.8 
+## 1.1.9 -- 2026.03.07
++ Fix binary protocol error 1210 on modern MySQL/MariaDB:
+  `MYSQL_TYPE_BIT` and `MYSQL_TYPE_YEAR` are not valid parameter types
+  for `COM_STMT_EXECUTE`. Send `MySQLBit` as `MYSQL_TYPE_LONGLONG`
+  (unsigned, little-endian) and `MySQLYear` as `MYSQL_TYPE_SHORT`
+  (unsigned, 2-byte integer) instead.
++ Fix `MySQLYear` binary encoding: was sending a length-encoded string
+  which caused data misalignment for all subsequent parameters.
++ Fix version detection for MariaDB 10+/11+ (fractional seconds support).
++ Fix CI: enable binary logging and grant binlog privileges for
+  integration tests on MariaDB.
++ Add roundtrip integration tests for `MySQLBit` and `MySQLYear`.
+
+## 1.1.8
 + bump constraints
 
 ## 1.1.7 -- 2025.08.23 
