@@ -1,3 +1,6 @@
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE PackageImports #-}
+
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment
@@ -20,7 +23,11 @@ import qualified Crypto.Hash                     as Crypto
 import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-import qualified Data.ByteArray                  as BA
+#if MIN_VERSION_crypton(1,1,0)
+import qualified "ram" Data.ByteArray             as BA
+#else
+import qualified "memory" Data.ByteArray          as BA
+#endif
 import           Data.ByteString                 (ByteString)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as L
