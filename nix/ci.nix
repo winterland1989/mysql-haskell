@@ -16,6 +16,7 @@ in
       server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"CREATE DATABASE testMySQLHaskell;\"")
       server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost';\"")
+      server.succeed("mysql -u root -e \"GRANT BINLOG MONITOR, REPLICATION SLAVE ON *.* TO 'testMySQLHaskell'@'localhost';\"")
       print(server.succeed("${package}/bin/integration/integration"))
     '';
     nodes.server = {
@@ -26,6 +27,9 @@ in
         package = pkgs.mariadb;
         settings.mysqld = {
           max_allowed_packet = "256M";
+          log_bin = "mysql-bin";
+          server_id = 1;
+          binlog_format = "ROW";
         };
       };
     };

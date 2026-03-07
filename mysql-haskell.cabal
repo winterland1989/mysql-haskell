@@ -181,7 +181,6 @@ test-suite integration
     io-streams,
     mysql-haskell,
     tasty >=0.11 && <2.0,
-    tasty-expected-failure < 1.0,
     tasty-hunit < 1.0,
     text,
     time,
