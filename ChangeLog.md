@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.1.8 
++ bump constraints
+
 ## 1.1.7 -- 2025.08.23 
 + bump constraints
 + upgrade cabal file
