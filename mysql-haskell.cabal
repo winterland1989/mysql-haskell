@@ -130,6 +130,7 @@ test-suite test
     ExecuteMany
     JSON
     MysqlTests
+    SelectOne
     QC.ByteString
     QC.Combinator
     QC.Common
@@ -154,9 +155,9 @@ test-suite test
     quickcheck-instances < 1.0,
     scientific >=0.3.0,
     tasty >=0.11 && <2.0,
+    tasty-expected-failure < 1.0,
     tasty-hunit < 1.0,
     tasty-quickcheck >=0.8 && < 1.0,
-    tasty-expected-failure  < 1.0,
     text,
     time,
     unordered-containers < 1.0,
