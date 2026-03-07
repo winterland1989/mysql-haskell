@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | Helpers for setting up a tls connection with @tls@ package,
 -- for further customization, please refer to @tls@ package.
 --
@@ -16,7 +18,6 @@ module Data.TLSSetting
     ) where
 
 import qualified Data.ByteString            as B
-import           Data.Default.Class         (def)
 import qualified Data.PEM                   as X509
 import qualified Data.X509                  as X509
 import qualified Data.X509.CertificateStore as X509
@@ -24,6 +25,10 @@ import qualified Network.TLS                as TLS
 import qualified Network.TLS.Extra          as TLS
 import           Paths_mysql_haskell          (getDataFileName)
 import qualified System.X509                as X509
+
+#if !MIN_VERSION_tls(2,0,0)
+import           Data.Default.Class         (def)
+#endif
 
 -- | The whole point of TLS is that: a peer should have already trusted
 -- some certificates, which can be used for validating other peer's certificates.
@@ -67,10 +72,10 @@ makeClientParams :: TrustedCAStore          -- ^ trusted certificates.
 makeClientParams tca = do
     caStore <- makeCAStore tca
     return (TLS.defaultParamsClient "" B.empty)
-        {   TLS.clientSupported = def { TLS.supportedCiphers = TLS.ciphersuite_default }
-        ,   TLS.clientShared    = def
+        {   TLS.clientSupported = defaultSupported' { TLS.supportedCiphers = TLS.ciphersuite_default }
+        ,   TLS.clientShared    = defaultShared'
             {   TLS.sharedCAStore         = caStore
-            ,   TLS.sharedValidationCache = def
+            ,   TLS.sharedValidationCache = defaultValidationCache'
             }
         }
 
@@ -112,13 +117,13 @@ makeServerParams pub certs priv = do
     c <- TLS.credentialLoadX509Chain pub certs priv
     case c of
         Right c'@(X509.CertificateChain c'', _) ->
-            return def
+            return defaultServerParams'
                 {   TLS.serverCACertificates =  c''
-                ,   TLS.serverShared = def
+                ,   TLS.serverShared = defaultShared'
                     {
                         TLS.sharedCredentials = TLS.Credentials [c']
                     }
-                ,   TLS.serverSupported = def { TLS.supportedCiphers = TLS.ciphersuite_strong }
+                ,   TLS.serverSupported = defaultSupported' { TLS.supportedCiphers = TLS.ciphersuite_strong }
                 }
         Left err -> error err
 
@@ -138,3 +143,30 @@ makeServerParams' pub certs priv tca = do
             {   TLS.sharedCAStore = caStore
             }
         }
+
+-- Compatibility shims for tls < 2.0 vs >= 2.0
+#if MIN_VERSION_tls(2,0,0)
+defaultServerParams' :: TLS.ServerParams
+defaultServerParams' = TLS.defaultParamsServer
+
+defaultShared' :: TLS.Shared
+defaultShared' = TLS.defaultShared
+
+defaultSupported' :: TLS.Supported
+defaultSupported' = TLS.defaultSupported
+
+defaultValidationCache' :: TLS.ValidationCache
+defaultValidationCache' = TLS.defaultValidationCache
+#else
+defaultServerParams' :: TLS.ServerParams
+defaultServerParams' = def
+
+defaultShared' :: TLS.Shared
+defaultShared' = def
+
+defaultSupported' :: TLS.Supported
+defaultSupported' = def
+
+defaultValidationCache' :: TLS.ValidationCache
+defaultValidationCache' = def
+#endif
