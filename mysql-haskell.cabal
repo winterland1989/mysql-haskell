@@ -123,20 +123,12 @@ test-suite test
   other-modules:
     Aeson
     AesonBP
-    BinaryRow
-    BinaryRowNew
-    BinLog
-    BinLogNew
-    ExecuteMany
     JSON
-    MysqlTests
     QC.ByteString
     QC.Combinator
     QC.Common
     Orphans
     TCPStreams
-    TextRow
-    TextRowNew
     Word24
 
   hs-source-dirs:     test
@@ -154,9 +146,9 @@ test-suite test
     quickcheck-instances < 1.0,
     scientific >=0.3.0,
     tasty >=0.11 && <2.0,
+    tasty-expected-failure < 1.0,
     tasty-hunit < 1.0,
     tasty-quickcheck >=0.8 && < 1.0,
-    tasty-expected-failure  < 1.0,
     text,
     time,
     unordered-containers < 1.0,
@@ -167,6 +159,40 @@ test-suite test
     OverloadedStrings
 
   ghc-options:        -threaded 
+
+test-suite integration
+  type:               exitcode-stdio-1.0
+  main-is:            Integration.hs
+  other-modules:
+    BinaryRow
+    BinaryRowNew
+    BinLog
+    BinLogNew
+    ExecuteMany
+    MysqlTests
+    SelectOne
+    TextRow
+    TextRowNew
+
+  hs-source-dirs:     test
+  build-depends:
+    base,
+    bytestring >=0.10,
+    io-streams,
+    mysql-haskell,
+    tasty >=0.11 && <2.0,
+    tasty-expected-failure < 1.0,
+    tasty-hunit < 1.0,
+    text,
+    time,
+    vector
+
+  default-extensions:
+    MultiWayIf
+    OverloadedStrings
+
+  ghc-options:        -threaded
+  default-language:   Haskell2010
 
 benchmark binary-parsers-bench
   import: common-options

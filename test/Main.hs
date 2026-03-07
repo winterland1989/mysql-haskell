@@ -4,7 +4,6 @@ import qualified QC.ByteString as ByteString
 import qualified QC.Combinator as Combinator
 import Test.Tasty (defaultMain, testGroup)
 import qualified JSON
-import qualified MysqlTests
 import qualified Word24
 import qualified TCPStreams
 
@@ -16,11 +15,6 @@ main = do
         testGroup "bs" ByteString.tests
       , testGroup "combinator" Combinator.tests
       , testGroup "JSON" jsonTests
-      ],
-      testGroup "mysql" [
-          -- TODO figure out how to run the tests that need a mysql
-          -- db
-          -- MysqlTests.tests
       ],
       testGroup "word24"
          Word24.tests
