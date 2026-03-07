@@ -115,20 +115,12 @@ test-suite test
   other-modules:
     Aeson
     AesonBP
-    BinaryRow
-    BinaryRowNew
-    BinLog
-    BinLogNew
-    ExecuteMany
     JSON
-    MysqlTests
     QC.ByteString
     QC.Combinator
     QC.Common
     QCUtils
     TCPStreams
-    TextRow
-    TextRowNew
     Word24
 
   hs-source-dirs:     test
@@ -137,8 +129,6 @@ test-suite test
     base,
     binary >=0.8,
     bytestring >=0.10,
-    bytestring-lexing >=0.5,
-    containers,
     deepseq,
     directory,
     filepath,
@@ -154,6 +144,40 @@ test-suite test
     text,
     time,
     unordered-containers,
+    vector
+
+  default-extensions:
+    MultiWayIf
+    OverloadedStrings
+
+  ghc-options:        -threaded
+  default-language:   Haskell2010
+
+test-suite integration
+  type:               exitcode-stdio-1.0
+  main-is:            Integration.hs
+  other-modules:
+    BinaryRow
+    BinaryRowNew
+    BinLog
+    BinLogNew
+    ExecuteMany
+    MysqlTests
+    SelectOne
+    TextRow
+    TextRowNew
+
+  hs-source-dirs:     test
+  build-depends:
+    base,
+    bytestring >=0.10,
+    io-streams,
+    mysql-haskell,
+    tasty >=0.11 && <2.0,
+    tasty-expected-failure,
+    tasty-hunit,
+    text,
+    time,
     vector
 
   default-extensions:

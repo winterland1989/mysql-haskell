@@ -23,9 +23,8 @@ jobs:
       with:
         name: jappie
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-    - run: nix build -Lv
-    - run: nix flake check -Lv
-    - run: nix develop -Lv -c echo OK
+    - run: nix-build nix/ci.nix
+    - run: nix-shell --run "echo OK"
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true
@@ -66,7 +65,7 @@ jobs:
     - name: Build using cabal
       run: cabal build all
     - name: Test
-      run: cabal test all
+      run: cabal test test
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true
