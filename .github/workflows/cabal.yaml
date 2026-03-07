@@ -5,7 +5,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         ghc: # should mirror current stable releases: https://www.haskell.org/ghc/download.html
           - '9.12'
