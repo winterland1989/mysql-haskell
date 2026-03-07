@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               mysql-haskell
-version:            1.1.8
+version:            1.1.9
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -170,6 +170,8 @@ test-suite integration
     BinLogNew
     ExecuteMany
     MysqlTests
+    RoundtripBit
+    RoundtripYear
     SelectOne
     TextRow
     TextRowNew
@@ -181,7 +183,6 @@ test-suite integration
     io-streams,
     mysql-haskell,
     tasty >=0.11 && <2.0,
-    tasty-expected-failure < 1.0,
     tasty-hunit < 1.0,
     text,
     time,

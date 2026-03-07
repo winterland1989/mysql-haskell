@@ -130,14 +130,14 @@ putParamMySQLType (MySQLInt64U       _)  = putFieldType mySQLTypeLongLong >> put
 putParamMySQLType (MySQLInt64        _)  = putFieldType mySQLTypeLongLong >> putWord8 0x00
 putParamMySQLType (MySQLFloat        _)  = putFieldType mySQLTypeFloat    >> putWord8 0x00
 putParamMySQLType (MySQLDouble       _)  = putFieldType mySQLTypeDouble   >> putWord8 0x00
-putParamMySQLType (MySQLYear         _)  = putFieldType mySQLTypeYear     >> putWord8 0x80
+putParamMySQLType (MySQLYear         _)  = putFieldType mySQLTypeShort    >> putWord8 0x80
 putParamMySQLType (MySQLDateTime     _)  = putFieldType mySQLTypeDateTime >> putWord8 0x00
 putParamMySQLType (MySQLTimeStamp    _)  = putFieldType mySQLTypeTimestamp>> putWord8 0x00
 putParamMySQLType (MySQLDate         _)  = putFieldType mySQLTypeDate     >> putWord8 0x00
 putParamMySQLType (MySQLTime       _ _)  = putFieldType mySQLTypeTime     >> putWord8 0x00
 putParamMySQLType (MySQLBytes        _)  = putFieldType mySQLTypeBlob     >> putWord8 0x00
 putParamMySQLType (MySQLGeometry     _)  = putFieldType mySQLTypeGeometry >> putWord8 0x00
-putParamMySQLType (MySQLBit          _)  = putFieldType mySQLTypeBit      >> putWord8 0x00
+putParamMySQLType (MySQLBit          _)  = putFieldType mySQLTypeLongLong >> putWord8 0x80
 putParamMySQLType (MySQLText         _)  = putFieldType mySQLTypeString   >> putWord8 0x00
 putParamMySQLType MySQLNull              = putFieldType mySQLTypeNull     >> putWord8 0x00
 
@@ -424,9 +424,7 @@ putBinaryField (MySQLInt64U     n) = putWord64le n
 putBinaryField (MySQLInt64      n) = putInt64le n
 putBinaryField (MySQLFloat      x) = putFloatle x
 putBinaryField (MySQLDouble     x) = putDoublele x
-putBinaryField (MySQLYear       n) = putLenEncBytes . L.toStrict . BB.toLazyByteString $
-                                        Textual.integral n  -- this's really weird, it's not documented anywhere
-                                                            -- we must encode year into string in binary mode!
+putBinaryField (MySQLYear       n) = putWord16le n
 putBinaryField (MySQLTimeStamp (LocalTime date time)) = do putWord8 11    -- always put full
                                                            putBinaryDay date
                                                            putBinaryTime' time
@@ -440,8 +438,7 @@ putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
                                         putBinaryTime t
 putBinaryField (MySQLGeometry bs)  = putLenEncBytes bs
 putBinaryField (MySQLBytes  bs)    = putLenEncBytes bs
-putBinaryField (MySQLBit    word)  = do putWord8 8     -- always put full
-                                        putWord64be word
+putBinaryField (MySQLBit    word)  = putWord64le word
 putBinaryField (MySQLText    t)    = putLenEncBytes (T.encodeUtf8 t)
 putBinaryField MySQLNull           = return ()
 

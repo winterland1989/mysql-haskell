@@ -27,9 +27,11 @@ tests = testCaseSteps "mysql-haskell test suit" $ \step -> do
     (greet, c) <- connectDetail defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
 
     let ver = greetingVersion greet
-        isNew = "5.6" `B.isPrefixOf` ver
-                || "5.7" `B.isPrefixOf` ver  -- from MySQL 5.6.4 and up
-                                             -- TIME, DATETIME, and TIMESTAMP support fractional seconds
+        isOld = "5.0" `B.isPrefixOf` ver
+                || "5.1" `B.isPrefixOf` ver
+                || "5.5" `B.isPrefixOf` ver
+        isNew = not isOld  -- MySQL 5.6+ and MariaDB 10+ support fractional seconds
+                           -- in TIME, DATETIME, and TIMESTAMP columns
 
 
     execute_ c "DROP TABLE IF EXISTS test"
