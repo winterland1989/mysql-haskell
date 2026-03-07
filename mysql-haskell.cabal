@@ -170,6 +170,8 @@ test-suite integration
     BinLogNew
     ExecuteMany
     MysqlTests
+    RoundtripBit
+    RoundtripYear
     SelectOne
     TextRow
     TextRowNew
