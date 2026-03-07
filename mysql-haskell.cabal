@@ -40,7 +40,7 @@ bug-reports:        https://github.com/winterland1989/mysql-haskell/issues
 
 source-repository head
   type:     git
-  location: git://github.com/winterland1989/mysql-haskell.git
+  location: https://github.com/winterland1989/mysql-haskell
 
 
 common common-options
