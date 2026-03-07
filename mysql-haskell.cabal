@@ -72,26 +72,27 @@ library
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
-    base >=4.7 && <4.19.0,
+    base >=4.7 && <4.22,
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
-    crypton >=0.31 && <0.40,
+    crypton >=0.31 && <0.40 || ^>=1.0.0 || ^>=1.1.0,
     crypton-x509 >=1.5 && <2.0,
     crypton-x509-store >=1.5 && <2.0,
     crypton-x509-system >=1.5 && <2.0,
-    data-default-class >=0.1.2 && <0.2,
+    data-default-class >=0.1.2 && <0.2 || ^>=0.2.0,
     deepseq >=1.4.6 && <1.5 || ^>=1.5.0,
     io-streams >=1.2 && <2.0,
     memory >=0.14.4 && <0.19,
     monad-loops >=0.4 && <0.5,
+    ram >=0.20 && <0.23,
     network >=2.3 && <4.0,
     pem >=0.2.4 && <0.3,
     scientific >=0.3 && <0.4,
     text >=1.1 && <2.1 || ^>=2.1,
     time >=1.5.0 && <1.12 || ^>=1.12.2,
-    tls >=1.7.0 && <1.8 || ^>=1.8.0,
+    tls >=1.7.0 && <1.8 || ^>=1.8.0 || ^>=1.9.0 || ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0 || ^>=2.3.0,
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
 

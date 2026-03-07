@@ -17,17 +17,11 @@
       hpkgs = pkgs.haskellPackages.override {
         overrides = hnew: hold: {
           mysql-haskell = hnew.callCabal2nix "mysql-haskell" ./. { };
-          # untill they figure out how to compile the test suite
-          crypton-x509 = pkgs.haskell.lib.markUnbroken (pkgs.haskell.lib.dontCheck hold.crypton-x509);
-
-          # need to override untill nixpkgs merges in the new tls
-          # do to the cryptonite/crypton clusterfuck
-          tls = (hold.callHackageDirect {
-              pkg = "tls";
-              ver = "1.7.1";
-              sha256 = "sha256-l8+Kgx7A8zg2tl64mC7t/S0gJNCS10fQ/2I65bTMpjY=";
-          } {});
-
+          ram = hnew.callHackageDirect {
+            pkg = "ram";
+            ver = "0.21.1";
+            sha256 = "sha256-J+gP+rZft1xkxzxmvXcktnDIymRkjg5u5wmhEge3+GQ=";
+          } {};
         };
       };
     in
