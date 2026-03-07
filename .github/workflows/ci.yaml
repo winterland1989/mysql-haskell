@@ -1,4 +1,8 @@
 on: [pull_request]
+
+permissions:
+  actions: write
+
 jobs:
   nix:
     runs-on: ubuntu-latest
@@ -24,6 +28,7 @@ jobs:
     - run: nix develop -Lv -c echo OK
     - name: Cancel workflow on failure
       if: failure()
+      continue-on-error: true
       run: gh run cancel ${{ github.run_id }}
       env:
         GH_TOKEN: ${{ github.token }}
@@ -64,6 +69,7 @@ jobs:
       run: cabal test all
     - name: Cancel workflow on failure
       if: failure()
+      continue-on-error: true
       run: gh run cancel ${{ github.run_id }}
       env:
         GH_TOKEN: ${{ github.token }}
