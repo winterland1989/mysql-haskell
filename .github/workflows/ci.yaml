@@ -65,7 +65,7 @@ jobs:
     - name: Build using cabal
       run: cabal build all
     - name: Test
-      run: cabal test all
+      run: cabal test test
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true

@@ -7,10 +7,8 @@ pkgs.haskellPackages.override {
       pkgs.haskell.lib.overrideCabal (hnew.callCabal2nix "mysql-haskell" ../. { })
         {
           postBuild = ''
-            mkdir -p $out/bin/test/test
-            cp ./dist/build/test/test $out/bin/test/test-exe
-            cp -r ./test/json-data $out/bin/test/test/json-data
-            cp -r ./test/cert $out/bin/test/test/cert
+            mkdir -p $out/bin/integration
+            cp ./dist/build/integration/integration $out/bin/integration/integration
           '';
           checkPhase = ''
             echo "tests run in VM"
