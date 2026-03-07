@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.2.0 -- 2026.03.07
++ Add support for  caching_sha2_password authentiation.
+
 ## 1.1.9 -- 2026.03.07
 + Fix binary protocol error 1210 on modern MySQL/MariaDB:
   `MYSQL_TYPE_BIT` and `MYSQL_TYPE_YEAR` are not valid parameter types
