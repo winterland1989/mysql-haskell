@@ -122,6 +122,7 @@ data Auth = Auth
     , authName      :: !ByteString
     , authPassword  :: !ByteString
     , authSchema    :: !ByteString
+    , authPlugin    :: !ByteString
     } deriving (Show, Eq)
 
 getAuth :: Get Auth
@@ -131,10 +132,10 @@ getAuth = do
     c <- getWord8
     skipN 23
     n <- getByteStringNul
-    return $ Auth a m c n B.empty B.empty
+    return $ Auth a m c n B.empty B.empty B.empty
 
 putAuth :: Auth -> Put
-putAuth (Auth cap m c n p s) = do
+putAuth (Auth cap m c n p s plugin) = do
     putWord32le cap
     putWord32le m
     putWord8 c
@@ -143,6 +144,8 @@ putAuth (Auth cap m c n p s) = do
     putWord8 $ fromIntegral (B.length p)
     putByteString p
     putByteString s
+    putWord8 0x00
+    putByteString plugin
     putWord8 0x00
 
 instance Binary Auth where
@@ -182,6 +185,7 @@ clientCap =  CLIENT_LONG_PASSWORD
                 .|. CLIENT_MULTI_STATEMENTS
                 .|. CLIENT_MULTI_RESULTS
                 .|. CLIENT_SECURE_CONNECTION
+                .|. CLIENT_PLUGIN_AUTH
 
 clientMaxPacketSize :: Word32
 clientMaxPacketSize = 0x00ffffff :: Word32

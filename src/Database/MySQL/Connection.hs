@@ -14,7 +14,9 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 
 -}
 
-module Database.MySQL.Connection where
+module Database.MySQL.Connection
+    ( module Database.MySQL.Connection
+    ) where
 
 import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO, catch, SomeException)
@@ -124,18 +126,16 @@ connectDetail (ConnectInfo host port db user pass charset)
         let auth = mkAuth db user pass charset greet
         write c $ encodeToPacket 1 auth
         q <- readPacket is'
-        if isOK q
-        then do
-            consumed <- newIORef True
-            let waitNotMandatoryOK = catch
-                    (void (waitCommandReply is'))           -- server will either reply an OK packet
-                    ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
-                conn = MySQLConn is'
-                    (write c)
-                    (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
-                    consumed
-            return (greet, conn)
-        else TCP.close c >> decodeFromPacket q >>= throwIO . ERRException
+        completeAuth is' (write c) pass q plainFullAuth
+        consumed <- newIORef True
+        let waitNotMandatoryOK = catch
+                (void (waitCommandReply is'))           -- server will either reply an OK packet
+                ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
+            conn = MySQLConn is'
+                (write c)
+                (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
+                consumed
+        return (greet, conn)
 
     connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
     write c a = TCP.send c $ Binary.runPut . Binary.put $ a
@@ -143,18 +143,90 @@ connectDetail (ConnectInfo host port db user pass charset)
 mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
 mkAuth db user pass charset greet =
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
-        scambleBuf = scramble salt pass
-    in Auth clientCap clientMaxPacketSize charset user scambleBuf db
-  where
-    scramble :: ByteString -> ByteString -> ByteString
-    scramble salt pass'
-        | B.null pass' = B.empty
-        | otherwise   = B.pack (B.zipWith xor sha1pass withSalt)
-        where sha1pass = sha1 pass'
-              withSalt = sha1 (salt `B.append` sha1 sha1pass)
+        plugin = greetingAuthPlugin greet
+        scambleBuf = scrambleForPlugin plugin salt pass
+    in Auth clientCap clientMaxPacketSize charset user scambleBuf db plugin
 
-    sha1 :: ByteString -> ByteString
-    sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
+-- | Dispatch scramble based on the authentication plugin name.
+scrambleForPlugin :: ByteString -> ByteString -> ByteString -> ByteString
+scrambleForPlugin plugin salt pass
+    | plugin == "caching_sha2_password" = scrambleSHA256 salt pass
+    | otherwise                         = scrambleSHA1 salt pass
+
+-- | SHA1-based scramble for @mysql_native_password@.
+scrambleSHA1 :: ByteString -> ByteString -> ByteString
+scrambleSHA1 salt pass
+    | B.null pass = B.empty
+    | otherwise   = B.pack (B.zipWith xor sha1pass withSalt)
+    where sha1pass = sha1 pass
+          withSalt = sha1 (salt `B.append` sha1 sha1pass)
+          sha1 :: ByteString -> ByteString
+          sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
+
+-- | SHA256-based scramble for @caching_sha2_password@.
+-- XOR(SHA256(password), SHA256(SHA256(SHA256(password)) + nonce))
+scrambleSHA256 :: ByteString -> ByteString -> ByteString
+scrambleSHA256 salt pass
+    | B.null pass = B.empty
+    | otherwise   = B.pack (B.zipWith xor sha256pass withSalt)
+    where sha256pass = sha256 pass
+          withSalt   = sha256 (sha256 sha256pass `B.append` salt)
+          sha256 :: ByteString -> ByteString
+          sha256 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA256)
+
+-- | Handle multi-step authentication after sending the initial auth response.
+--
+-- This handles OK, ERR, AuthMoreData (0x01), and AuthSwitchRequest (0xFE).
+-- The @fullAuth@ callback is invoked when the server requests full authentication
+-- (e.g., cleartext password over TLS).
+completeAuth :: InputStream Packet       -- ^ packet input stream
+             -> (Packet -> IO ())        -- ^ packet writer
+             -> ByteString               -- ^ password
+             -> Packet                   -- ^ the first response packet from server
+             -> (Word8 -> ByteString -> (Packet -> IO ()) -> InputStream Packet -> IO ())
+                                         -- ^ full auth callback (seqN, password, writer, input)
+             -> IO ()
+completeAuth is writePacket pass p fullAuth
+    | isOK p  = return ()
+    | isERR p = decodeFromPacket p >>= throwIO . ERRException
+    | isAuthMoreData p = do
+        let body = L.toStrict (pBody p)
+        case B.index body 1 of
+            0x03 -> do  -- fast auth success, read the final OK
+                ok <- readPacket is
+                if isOK ok
+                    then return ()
+                    else decodeFromPacket ok >>= throwIO . ERRException
+            0x04 -> do  -- full auth required
+                fullAuth (pSeqN p + 1) pass writePacket is
+            _    -> throwIO (UnexpectedPacket p)
+    | isAuthSwitch p = do
+        -- Parse AuthSwitchRequest: 0xFE, plugin name (NUL), salt
+        let body = L.toStrict (pBody p)
+            rest = B.drop 1 body  -- skip 0xFE
+            (newPlugin, rest') = B.break (== 0) rest
+            newSalt = B.drop 1 rest'  -- skip NUL; trailing NUL may or may not be present
+            -- Remove trailing NUL from salt if present
+            newSalt' = if not (B.null newSalt) && B.last newSalt == 0
+                       then B.init newSalt
+                       else newSalt
+            scrambled = scrambleForPlugin newPlugin newSalt' pass
+            seqN = pSeqN p + 1
+            responseBody = L.fromStrict scrambled
+            responsePacket = Packet (fromIntegral (B.length scrambled)) seqN responseBody
+        writePacket responsePacket
+        q <- readPacket is
+        completeAuth is writePacket pass q fullAuth
+    | otherwise = throwIO (UnexpectedPacket p)
+
+-- | Full auth handler for plain TCP connections: throws an error because
+-- caching_sha2_password full authentication requires a secure connection.
+plainFullAuth :: Word8 -> ByteString -> (Packet -> IO ()) -> InputStream Packet -> IO ()
+plainFullAuth _ _ _ _ =
+    throwIO $ AuthException "caching_sha2_password full authentication requires a TLS connection. Use Database.MySQL.TLS to connect, or ensure the password verifier is cached (fast auth path)."
+
+data AuthException = AuthException String deriving (Typeable, Show)
+instance Exception AuthException
 
 -- | A specialized 'decodeInputStream' here for speed
 decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
