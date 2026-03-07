@@ -128,6 +128,7 @@ test-suite test
     QC.Combinator
     QC.Common
     Orphans
+    Sha256Scramble
     TCPStreams
     Word24
 
@@ -168,6 +169,7 @@ test-suite integration
     BinaryRowNew
     BinLog
     BinLogNew
+    CachingSha2
     ExecuteMany
     MysqlTests
     RoundtripBit

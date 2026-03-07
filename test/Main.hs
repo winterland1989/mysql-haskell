@@ -4,6 +4,7 @@ import qualified QC.ByteString as ByteString
 import qualified QC.Combinator as Combinator
 import Test.Tasty (defaultMain, testGroup)
 import qualified JSON
+import qualified Sha256Scramble
 import qualified Word24
 import qualified TCPStreams
 
@@ -22,4 +23,5 @@ main = do
          [
            TCPStreams.tests
          ]
+      , Sha256Scramble.tests
       ]
