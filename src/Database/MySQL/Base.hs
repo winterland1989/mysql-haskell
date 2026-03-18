@@ -32,6 +32,8 @@ module Database.MySQL.Base
     , defaultConnectInfoMB4
     , connect
     , connectDetail
+    , connectUnixSocket
+    , connectUnixSocketDetail
     , close
     , ping
       -- * Direct query

@@ -42,6 +42,7 @@ import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           Network.Socket                  (HostName, PortNumber)
+import qualified Network.Socket                  as N
 import           System.IO.Streams               (InputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.TCP           as TCP
@@ -138,6 +139,46 @@ connectDetail (ConnectInfo host port db user pass charset)
         return (greet, conn)
 
     connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
+    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
+
+-- | Connect to MySQL via a Unix domain socket.
+--
+connectUnixSocket :: FilePath -> ConnectInfo -> IO MySQLConn
+connectUnixSocket socketPath ci = fmap snd (connectUnixSocketDetail socketPath ci)
+
+-- | Connect to MySQL via a Unix domain socket with 'Greeting' back,
+-- so you can find server's version .etc.
+--
+connectUnixSocketDetail :: FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
+connectUnixSocketDetail socketPath (ConnectInfo _host _port db user pass charset)
+    = bracketOnError open TCP.close go
+  where
+    open  = bracketOnError
+                (N.socket N.AF_UNIX N.Stream 0)
+                N.close
+                (\sock -> do
+                    N.connect sock (N.SockAddrUnix socketPath)
+                    TCP.socketToConnection bUFSIZE (sock, N.SockAddrUnix socketPath)
+                )
+    go c  = do
+        let is = TCP.source c
+        is' <- decodeInputStream is
+        p <- readPacket is'
+        greet <- decodeFromPacket p
+        let auth = mkAuth db user pass charset greet
+        write c $ encodeToPacket 1 auth
+        q <- readPacket is'
+        completeAuth is' (write c) pass q plainFullAuth
+        consumed <- newIORef True
+        let waitNotMandatoryOK = catch
+                (void (waitCommandReply is'))           -- server will either reply an OK packet
+                ((\_ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
+            conn = MySQLConn is'
+                (write c)
+                (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
+                consumed
+        return (greet, conn)
+
     write c a = TCP.send c $ Binary.runPut . Binary.put $ a
 
 mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
