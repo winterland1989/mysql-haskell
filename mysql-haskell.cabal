@@ -187,11 +187,13 @@ test-suite integration
     SelectOne
     TextRow
     TextRowNew
+    UnixSocket
 
   hs-source-dirs:     test
   build-depends:
     base,
     bytestring >=0.10,
+    directory,
     io-streams,
     mysql-haskell,
     tasty >=0.11 && <2.0,

@@ -8,6 +8,7 @@ import qualified MysqlTests
 import qualified RoundtripBit
 import qualified RoundtripYear
 import qualified SelectOne
+import qualified UnixSocket
 
 main :: IO ()
 main = do
@@ -19,6 +20,10 @@ main = do
     let ver = greetingVersion greet
         isMySql80 = "8." `B.isPrefixOf` ver
                  || "9." `B.isPrefixOf` ver
+
+    -- Probe for a Unix domain socket (MYSQL_UNIX_SOCKET env var, then common paths).
+    mSockPath <- UnixSocket.findSocketPath
+
     defaultMain $ testGroup "mysql-integration" $
         [ SelectOne.tests
         , RoundtripBit.tests
@@ -28,3 +33,5 @@ main = do
         -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
         -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
         ++ [ CachingSha2.tests | isMySql80 ]
+        -- Unix socket tests are included only when a socket file is found.
+        ++ [ UnixSocket.tests p | Just p <- [mSockPath] ]
