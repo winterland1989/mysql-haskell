@@ -6,6 +6,7 @@ module Aeson where
 import Data.ByteString.Builder
   (Builder, byteString, toLazyByteString, charUtf8, word8)
 
+import Control.Applicative (liftA2)
 import Control.DeepSeq (NFData(..))
 import Data.Attoparsec.ByteString.Char8 (Parser, char, endOfInput, scientific,
                                          skipSpace, string)
