@@ -1,5 +1,12 @@
 # Revision history for mysql-haskell
 
+## 1.2.1 -- 2026.03.23
++ Export `connectUnixSocket` function.
++ Tweak cabal file to better handle crypton vs cryptonite.
++ Fix version cut off for tls compatibility.
++ Fix missing `liftA2` import when running tests on GHC 9.4.
++ Add integration test for Unix socket.
+
 ## 1.2.0 -- 2026.03.07
 + Add support for  caching_sha2_password authentiation.
 
