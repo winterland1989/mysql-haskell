@@ -6,6 +6,7 @@ module AesonBP where
 import Data.ByteString.Builder
   (Builder, byteString, toLazyByteString, charUtf8, word8)
 
+import Control.Applicative (liftA2)
 import Data.Bits ((.|.), shiftL)
 import Data.ByteString (ByteString)
 import Data.Char (chr)

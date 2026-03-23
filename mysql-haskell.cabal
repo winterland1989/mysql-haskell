@@ -42,6 +42,10 @@ source-repository head
   type:     git
   location: https://github.com/winterland1989/mysql-haskell
 
+flag crypton-1-1
+  description: Build with crypton >= 1.1.0 (uses ram instead of memory for ByteArrayAccess)
+  default: True
+  manual: False
 
 common common-options
   ghc-options:
@@ -90,16 +94,13 @@ library
     blaze-textual >=0.2 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
-    crypton >=0.31 && <0.40 || ^>=1.0.0 || ^>=1.1.0,
     crypton-x509 >=1.5 && <2.0,
     crypton-x509-store >=1.5 && <2.0,
     crypton-x509-system >=1.5 && <2.0,
     data-default-class >=0.1.2 && <0.2 || ^>=0.2.0,
     deepseq >=1.4.6 && <1.5 || ^>=1.5.0,
     io-streams >=1.2 && <2.0,
-    memory >=0.14.4 && <0.19,
     monad-loops >=0.4 && <0.5,
-    ram >=0.20 && <0.23,
     network >=2.3 && <4.0,
     pem >=0.2.4 && <0.3,
     scientific >=0.3 && <0.4,
@@ -108,6 +109,15 @@ library
     tls >=1.7.0 && <1.8 || ^>=1.8.0 || ^>=1.9.0 || ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0 || ^>=2.3.0,
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
+
+  if flag(crypton-1-1)
+    build-depends:
+      crypton ^>=1.1.0,
+      ram >=0.20 && <0.23
+  else
+    build-depends:
+      crypton >=0.31 && <0.40 || ^>=1.0.0,
+      memory >=0.14.4 && <0.19
 
   default-extensions:
     DeriveDataTypeable
@@ -177,11 +187,13 @@ test-suite integration
     SelectOne
     TextRow
     TextRowNew
+    UnixSocket
 
   hs-source-dirs:     test
   build-depends:
     base,
     bytestring >=0.10,
+    directory,
     io-streams,
     mysql-haskell,
     tasty >=0.11 && <2.0,

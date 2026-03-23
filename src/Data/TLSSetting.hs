@@ -26,7 +26,7 @@ import qualified Network.TLS.Extra          as TLS
 import           Paths_mysql_haskell          (getDataFileName)
 import qualified System.X509                as X509
 
-#if !MIN_VERSION_tls(2,0,0)
+#if !MIN_VERSION_tls(2,1,4)
 import           Data.Default.Class         (def)
 #endif
 
@@ -144,8 +144,8 @@ makeServerParams' pub certs priv tca = do
             }
         }
 
--- Compatibility shims for tls < 2.0 vs >= 2.0
-#if MIN_VERSION_tls(2,0,0)
+-- Compatibility shims for tls < 2.1.4 vs >= 2.1.4
+#if MIN_VERSION_tls(2,1,4)
 defaultServerParams' :: TLS.ServerParams
 defaultServerParams' = TLS.defaultParamsServer
 
