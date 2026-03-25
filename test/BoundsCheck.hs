@@ -60,22 +60,29 @@ assertParseFailure label result = case result of
 
 textProtocolTests :: [TestTree]
 textProtocolTests =
-    [ testCase "timestamp: short input (3 bytes)" $ do
-        -- TIMESTAMP expects "YYYY-MM-DD HH:MM:SS" (19+ chars)
-        -- 3 bytes is far too short; unsafeDrop 11 on 3 bytes is UB
+    [ testCase "timestamp: date-only no time part" $ do
+        -- "2024-01-01" is 10 bytes. dateParser succeeds, then
+        -- unsafeDrop 11 on a 10-byte string is UB.
+        -- With "abc" this wouldn't trigger because readDecimal "abc" → Nothing
+        -- short-circuits via Maybe's Applicative before unsafeDrop is forced.
         let cd = mkColumnDef mySQLTypeTimestamp
-            result = parseLenEncField cd "abc"
-        assertParseFailure "timestamp short" result
+            result = parseLenEncField cd "2024-01-01"
+        assertParseFailure "timestamp no time" result
 
-    , testCase "timestamp: empty input" $ do
+    , testCase "timestamp: truncated time" $ do
+        -- "2024-01-01 1" is 12 bytes. dateParser succeeds, unsafeDrop 11
+        -- gives "1", timeParser reads hour=1, rest="", then unsafeTail
+        -- on empty remainder is UB.
         let cd = mkColumnDef mySQLTypeTimestamp
-            result = parseLenEncField cd ""
-        assertParseFailure "timestamp empty" result
+            result = parseLenEncField cd "2024-01-01 1"
+        assertParseFailure "timestamp truncated time" result
 
-    , testCase "datetime: short input (3 bytes)" $ do
+    , testCase "datetime: date-only no time part" $ do
+        -- Same as timestamp: dateParser succeeds on "2024-01-01",
+        -- then unsafeDrop 11 on 10-byte string is UB.
         let cd = mkColumnDef mySQLTypeDateTime
-            result = parseLenEncField cd "abc"
-        assertParseFailure "datetime short" result
+            result = parseLenEncField cd "2024-01-01"
+        assertParseFailure "datetime no time" result
 
     , testCase "time: empty input" $ do
         -- TIME parser does unsafeIndex 0 on the payload; empty = UB
