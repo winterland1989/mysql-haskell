@@ -162,16 +162,19 @@ getTextField f
     | t == mySQLTypeYear            = feedLenEncBytes t MySQLYear intLexer
     | t == mySQLTypeTimestamp
         || t == mySQLTypeTimestamp2 = feedLenEncBytes t MySQLTimeStamp $ \ bs ->
-                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
+                                          guard (B.length bs >= 12) >>
+                                          LocalTime <$> dateParser bs <*> timeParser (B.drop 11 bs)
     | t == mySQLTypeDateTime
         || t == mySQLTypeDateTime2  = feedLenEncBytes t MySQLDateTime $ \ bs ->
-                                          LocalTime <$> dateParser bs <*> timeParser (B.unsafeDrop 11 bs)
+                                          guard (B.length bs >= 12) >>
+                                          LocalTime <$> dateParser bs <*> timeParser (B.drop 11 bs)
     | t == mySQLTypeDate
         || t == mySQLTypeNewDate    = feedLenEncBytes t MySQLDate dateParser
     | t == mySQLTypeTime
         || t == mySQLTypeTime2      = feedLenEncBytes t id $ \ bs ->
-                                          if bs `B.unsafeIndex` 0 == 45  -- '-'
-                                               then MySQLTime 1 <$> timeParser (B.unsafeDrop 1 bs)
+                                          guard (not (B.null bs)) >>
+                                          if B.index bs 0 == 45  -- '-'
+                                               then MySQLTime 1 <$> timeParser (B.drop 1 bs)
                                                else MySQLTime 0 <$> timeParser bs
 
     | t == mySQLTypeGeometry        = MySQLGeometry <$> getLenEncBytes
@@ -196,14 +199,18 @@ getTextField f
     fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
     dateParser bs = do
         (yyyy, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
-        (dd, _) <- LexInt.readDecimal (B.unsafeTail rest')
+        guard (not (B.null rest))
+        (mm, rest') <- LexInt.readDecimal (B.tail rest)
+        guard (not (B.null rest'))
+        (dd, _) <- LexInt.readDecimal (B.tail rest')
         return (fromGregorian yyyy mm dd)
 
     timeParser bs = do
         (hh, rest) <- LexInt.readDecimal bs
-        (mm, rest') <- LexInt.readDecimal (B.unsafeTail rest)
-        (ss, _) <- LexFrac.readDecimal (B.unsafeTail rest')
+        guard (not (B.null rest))
+        (mm, rest') <- LexInt.readDecimal (B.tail rest)
+        guard (not (B.null rest'))
+        (ss, _) <- LexFrac.readDecimal (B.tail rest')
         return (TimeOfDay hh mm ss)
 
 

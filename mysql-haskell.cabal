@@ -115,6 +115,7 @@ test-suite test
   other-modules:
     Aeson
     AesonBP
+    BoundsCheck
     JSON
     QC.ByteString
     QC.Combinator

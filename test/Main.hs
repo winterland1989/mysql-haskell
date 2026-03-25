@@ -6,6 +6,7 @@ import Test.Tasty (defaultMain, testGroup)
 import qualified JSON
 import qualified Word24
 import qualified TCPStreams
+import qualified BoundsCheck
 
 main :: IO ()
 main = do
@@ -22,4 +23,5 @@ main = do
          [
            TCPStreams.tests
          ]
+      , BoundsCheck.tests
       ]
