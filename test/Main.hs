@@ -7,6 +7,7 @@ import qualified JSON
 import qualified Sha256Scramble
 import qualified Word24
 import qualified TCPStreams
+import qualified BoundsCheck
 
 main :: IO ()
 main = do
@@ -24,4 +25,5 @@ main = do
            TCPStreams.tests
          ]
       , Sha256Scramble.tests
+      , BoundsCheck.tests
       ]

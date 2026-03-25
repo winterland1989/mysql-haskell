@@ -135,7 +135,14 @@ getFormatDescription = FormatDescription <$> getWord16le
                                          <*> (L.toStrict <$> getRemainingLazyByteString)
 
 eventHeaderLen :: FormatDescription -> BinLogEventType -> Word8
-eventHeaderLen fd typ = B.unsafeIndex (fdEventHeaderLenVector fd) (fromEnum typ - 1)
+eventHeaderLen fd typ
+    | idx < 0 || idx >= B.length vec = 0
+    | otherwise = B.unsafeIndex vec idx
+  where
+    vec :: ByteString
+    vec = fdEventHeaderLenVector fd
+    idx :: Int
+    idx = fromEnum typ - 1
 
 data RotateEvent = RotateEvent
     { rPos :: !Word64, rFileName :: !ByteString } deriving (Show, Eq)
