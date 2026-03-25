@@ -1,5 +1,12 @@
 # Revision history for mysql-haskell
 
+## 1.2.2 -- 2026.03.25
++ Fix unsafe ByteString operations (`unsafeDrop`, `unsafeTail`, `unsafeIndex`)
+  on untrusted wire protocol data that caused undefined behavior (segfaults,
+  garbage reads) on malformed input. The safe alternatives are also O(1).
+  Affected parsers: text protocol timestamp/datetime/time/date fields,
+  NEWDECIMAL in binlog, and `eventHeaderLen` for unknown event types.
+
 ## 1.2.1 -- 2026.03.23
 + Export `connectUnixSocket` function.
 + Tweak cabal file to better handle crypton vs cryptonite.
