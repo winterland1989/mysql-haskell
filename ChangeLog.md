@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.2.3 -- 2026.03.31
++ Widen tls upper bound to allow tls 2.4.x
+
 ## 1.2.2 -- 2026.03.25
 + Fix unsafe ByteString operations (`unsafeDrop`, `unsafeTail`, `unsafeIndex`)
   on untrusted wire protocol data that caused undefined behavior (segfaults,
