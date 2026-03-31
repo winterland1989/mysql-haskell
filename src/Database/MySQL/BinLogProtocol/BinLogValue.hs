@@ -203,7 +203,9 @@ getBinLogField BINLOG_TYPE_YEAR                = do
 -- if there're < 9 digits at first, it will be compressed into suitable length words
 -- following a simple lookup table.
 --
-getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale) = do
+getBinLogField (BINLOG_TYPE_NEWDECIMAL precision scale)
+    | precision < scale = fail "NEWDECIMAL: precision must be >= scale"
+    | otherwise = do
     let i = (precision - scale)
         (ucI, cI) = i `quotRem` digitsPerInteger
         (ucF, cF) = scale `quotRem` digitsPerInteger
