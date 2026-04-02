@@ -89,10 +89,9 @@ jobs:
     - name: Configure
       run: |
         cabal configure \
-          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
-          ${{ runner.os == 'Windows' && '--extra-include-dirs=C:/msys64/mingw64/include' || '' }} \
-          ${{ runner.os == 'Windows' && '--extra-lib-dirs=C:/msys64/mingw64/lib' || '' }} \
-          --constraint="botan-bindings +pkg-config"
+          --extra-include-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/include' || '/usr/local/include' }} \
+          --extra-lib-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/lib' || '/usr/local/lib' }} \
+          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }}
     - name: Build using cabal
       run: cabal build all
     - name: Test
