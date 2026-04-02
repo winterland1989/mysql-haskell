@@ -83,7 +83,13 @@ jobs:
         pkg-config --cflags botan-3 || echo "pkg-config --cflags failed"
     - name: Show botan pc file (Windows debug)
       if: runner.os == 'Windows'
-      run: cat /mingw64/lib/pkgconfig/botan-3.pc || echo "pc file not found"
+      run: |
+        find /c/msys64/mingw64 -name "botan-3.pc" 2>/dev/null || echo "not under /c/msys64/mingw64"
+        find /usr/local -name "botan-3.pc" 2>/dev/null || echo "not under /usr/local"
+        cat C:/msys64/mingw64/lib/pkgconfig/botan-3.pc 2>/dev/null || echo "not at C:/msys64/mingw64/lib/pkgconfig"
+        ls -la /c/msys64/mingw64/lib/pkgconfig/ 2>/dev/null || echo "pkgconfig dir not found"
+        pkg-config --variable=libdir botan-3 || true
+        pkg-config --variable=prefix botan-3 || true
 
     - name: Cabal cache
       uses: actions/cache@v4
