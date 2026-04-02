@@ -42,11 +42,6 @@ source-repository head
   type:     git
   location: https://github.com/winterland1989/mysql-haskell
 
-flag crypton-1-1
-  description: Build with crypton >= 1.1.0 (uses ram instead of memory for ByteArrayAccess)
-  default: True
-  manual: False
-
 common common-options
   ghc-options:
     -Wall -Wincomplete-uni-patterns
@@ -92,6 +87,7 @@ library
   build-depends:
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
+    botan-low >=0.1.0.0 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
     crypton-x509 >=1.5 && <2.0,
@@ -109,15 +105,6 @@ library
     tls >=1.7.0 && <1.8 || ^>=1.8.0 || ^>=1.9.0 || ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0 || ^>=2.3.0 || ^>=2.4.0,
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
-
-  if flag(crypton-1-1)
-    build-depends:
-      crypton ^>=1.1.0,
-      ram >=0.20 && <0.23
-  else
-    build-depends:
-      crypton >=0.31 && <0.40 || ^>=1.0.0,
-      memory >=0.14.4 && <0.19
 
   default-extensions:
     DeriveDataTypeable
@@ -139,6 +126,7 @@ test-suite test
     QC.Combinator
     QC.Common
     Orphans
+    Sha1Scramble
     Sha256Scramble
     TCPStreams
     Word24
@@ -161,6 +149,7 @@ test-suite test
     tasty-expected-failure < 1.0,
     tasty-hunit < 1.0,
     tasty-quickcheck >=0.8 && < 1.0,
+    base16-bytestring >=1.0 && <2.0,
     text,
     time,
     unordered-containers < 1.0,

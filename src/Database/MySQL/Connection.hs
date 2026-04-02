@@ -1,6 +1,3 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE PackageImports #-}
-
 {-|
 Module      : Database.MySQL.Connection
 Description : Connection managment
@@ -21,15 +18,12 @@ module Database.MySQL.Connection
 import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
-import qualified Crypto.Hash                     as Crypto
+import           Botan.Low.Hash                  (HashName, hashInit,
+                                                  hashUpdateFinalize)
+import qualified Botan.Low.Hash                  as Botan
 import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-#if MIN_VERSION_crypton(1,1,0)
-import qualified "ram" Data.ByteArray             as BA
-#else
-import qualified "memory" Data.ByteArray          as BA
-#endif
 import           Data.ByteString                 (ByteString)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as L
@@ -124,7 +118,7 @@ connectDetail (ConnectInfo host port db user pass charset)
         is' <- decodeInputStream is
         p <- readPacket is'
         greet <- decodeFromPacket p
-        let auth = mkAuth db user pass charset greet
+        auth <- mkAuth db user pass charset greet
         write c $ encodeToPacket 1 auth
         q <- readPacket is'
         completeAuth is' (write c) pass q plainFullAuth
@@ -165,7 +159,7 @@ connectUnixSocketDetail socketPath (ConnectInfo _host _port db user pass charset
         is' <- decodeInputStream is
         p <- readPacket is'
         greet <- decodeFromPacket p
-        let auth = mkAuth db user pass charset greet
+        auth <- mkAuth db user pass charset greet
         write c $ encodeToPacket 1 auth
         q <- readPacket is'
         completeAuth is' (write c) pass q plainFullAuth
@@ -181,39 +175,45 @@ connectUnixSocketDetail socketPath (ConnectInfo _host _port db user pass charset
 
     write c a = TCP.send c $ Binary.runPut . Binary.put $ a
 
-mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
-mkAuth db user pass charset greet =
+mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> IO Auth
+mkAuth db user pass charset greet = do
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
         plugin = greetingAuthPlugin greet
-        scambleBuf = scrambleForPlugin plugin salt pass
-    in Auth clientCap clientMaxPacketSize charset user scambleBuf db plugin
+    scambleBuf <- scrambleForPlugin plugin salt pass
+    return $ Auth clientCap clientMaxPacketSize charset user scambleBuf db plugin
 
 -- | Dispatch scramble based on the authentication plugin name.
-scrambleForPlugin :: ByteString -> ByteString -> ByteString -> ByteString
+scrambleForPlugin :: ByteString -> ByteString -> ByteString -> IO ByteString
 scrambleForPlugin plugin salt pass
     | plugin == "caching_sha2_password" = scrambleSHA256 salt pass
     | otherwise                         = scrambleSHA1 salt pass
 
 -- | SHA1-based scramble for @mysql_native_password@.
-scrambleSHA1 :: ByteString -> ByteString -> ByteString
+scrambleSHA1 :: ByteString -> ByteString -> IO ByteString
 scrambleSHA1 salt pass
-    | B.null pass = B.empty
-    | otherwise   = B.pack (B.zipWith xor sha1pass withSalt)
-    where sha1pass = sha1 pass
-          withSalt = sha1 (salt `B.append` sha1 sha1pass)
-          sha1 :: ByteString -> ByteString
-          sha1 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA1)
+    | B.null pass = return B.empty
+    | otherwise   = do
+        sha1pass <- botanHash Botan.SHA1 pass
+        sha1sha1pass <- botanHash Botan.SHA1 sha1pass
+        withSalt <- botanHash Botan.SHA1 (salt `B.append` sha1sha1pass)
+        return $ B.pack (B.zipWith xor sha1pass withSalt)
 
 -- | SHA256-based scramble for @caching_sha2_password@.
 -- XOR(SHA256(password), SHA256(SHA256(SHA256(password)) + nonce))
-scrambleSHA256 :: ByteString -> ByteString -> ByteString
+scrambleSHA256 :: ByteString -> ByteString -> IO ByteString
 scrambleSHA256 salt pass
-    | B.null pass = B.empty
-    | otherwise   = B.pack (B.zipWith xor sha256pass withSalt)
-    where sha256pass = sha256 pass
-          withSalt   = sha256 (sha256 sha256pass `B.append` salt)
-          sha256 :: ByteString -> ByteString
-          sha256 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA256)
+    | B.null pass = return B.empty
+    | otherwise   = do
+        sha256pass <- botanHash Botan.SHA256 pass
+        sha256sha256pass <- botanHash Botan.SHA256 sha256pass
+        withSalt <- botanHash Botan.SHA256 (sha256sha256pass `B.append` salt)
+        return $ B.pack (B.zipWith xor sha256pass withSalt)
+
+-- | Hash a ByteString using the specified botan hash algorithm.
+botanHash :: HashName -> ByteString -> IO ByteString
+botanHash algorithm input = do
+    ctx <- hashInit algorithm
+    hashUpdateFinalize ctx input
 
 -- | Handle multi-step authentication after sending the initial auth response.
 --
@@ -251,9 +251,9 @@ completeAuth is writePacket pass p fullAuth
             newSalt' = if not (B.null newSalt) && B.last newSalt == 0
                        then B.init newSalt
                        else newSalt
-            scrambled = scrambleForPlugin newPlugin newSalt' pass
             seqN = pSeqN p + 1
-            responseBody = L.fromStrict scrambled
+        scrambled <- scrambleForPlugin newPlugin newSalt' pass
+        let responseBody = L.fromStrict scrambled
             responsePacket = Packet (fromIntegral (B.length scrambled)) seqN responseBody
         writePacket responsePacket
         q <- readPacket is

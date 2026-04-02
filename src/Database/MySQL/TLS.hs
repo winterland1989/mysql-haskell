@@ -67,7 +67,7 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                     tc <- TLS.tLsToConnection (ctx, sockAddr)
                     let tlsIs = TCP.source tc
                     tlsIs' <- decodeInputStream tlsIs
-                    let auth = mkAuth db user pass charset greet
+                    auth <- mkAuth db user pass charset greet
                     write tc (encodeToPacket 2 auth)
                     q <- readPacket tlsIs'
                     completeAuth tlsIs' (write tc) pass q tlsFullAuth
