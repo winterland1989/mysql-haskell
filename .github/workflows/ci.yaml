@@ -33,7 +33,11 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
   cabal:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.sys.os }}
+
+    defaults:
+      run:
+        shell: ${{ matrix.sys.shell }}
 
     strategy:
       fail-fast: true
@@ -43,7 +47,10 @@ jobs:
           - '9.10'
           - '9.8'
           - '9.6'
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        sys:
+          - { os: ubuntu-latest, shell: bash }
+          - { os: macOS-latest, shell: bash }
+          - { os: windows-latest, shell: "C:/msys64/usr/bin/bash.exe -e {0}" }
 
     steps:
     - uses: actions/checkout@v4
@@ -57,7 +64,6 @@ jobs:
 
     - name: Install pkg-config (Windows)
       if: runner.os == 'Windows'
-      shell: C:/msys64/usr/bin/bash.exe -e {0}
       run: |
         echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
         echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1"   >> $GITHUB_ENV
@@ -81,7 +87,6 @@ jobs:
     - name: Cabal update
       run: cabal update
     - name: Configure
-      shell: bash
       run: |
         cabal configure \
           ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
