@@ -62,11 +62,12 @@ jobs:
       if: runner.os == 'Linux'
       run: echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
-    - name: Install pkg-config (Windows)
+    - name: Install pkg-config and set env (Windows)
       if: runner.os == 'Windows'
       run: |
         echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
         echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1"   >> $GITHUB_ENV
+        echo "MSYS2_ARG_CONV_EXCL=*"            >> $GITHUB_ENV
         ghcup run -m -- pacman --noconfirm -S mingw-w64-x86_64-pkg-config
         echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
@@ -74,6 +75,12 @@ jobs:
       uses: haskell-cryptography/botan/.github/actions/setup-botan@main
       with:
         botan-version: "3.10.0"
+
+    - name: Verify Botan (debug)
+      run: |
+        which pkg-config || echo "pkg-config not found"
+        pkg-config --modversion botan-3 || echo "pkg-config can't find botan-3"
+        pkg-config --libs botan-3 || echo "pkg-config --libs failed"
 
     - name: Cabal cache
       uses: actions/cache@v4
@@ -91,13 +98,15 @@ jobs:
         cabal build all \
           --extra-include-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/include' || '/usr/local/include' }} \
           --extra-lib-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/lib' || '/usr/local/lib' }} \
-          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }}
+          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
+          --constraint="botan-bindings +pkg-config"
     - name: Test
       run: |
         cabal test test \
           --extra-include-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/include' || '/usr/local/include' }} \
           --extra-lib-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/lib' || '/usr/local/lib' }} \
-          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }}
+          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
+          --constraint="botan-bindings +pkg-config"
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true
