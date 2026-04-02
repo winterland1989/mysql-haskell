@@ -17,7 +17,8 @@ in
       server.succeed("mysql -u root -e \"CREATE DATABASE testMySQLHaskell;\"")
       server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"GRANT BINLOG MONITOR, REPLICATION SLAVE, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
-      print(server.succeed("${package}/bin/integration/integration"))
+      server.succeed("mysql -u root -e \"SHOW VARIABLES LIKE 'have_ssl'\" | grep YES")
+      print(server.succeed("MYSQL_TLS_CA_PATH=${package}/test/cert/ca.pem ${package}/bin/integration/integration"))
     '';
     nodes.server = {
       virtualisation.memorySize = 2048;
@@ -30,6 +31,9 @@ in
           log_bin = "mysql-bin";
           server_id = 1;
           binlog_format = "ROW";
+          ssl_ca   = "${package}/test/cert/ca.pem";
+          ssl_cert = "${package}/test/cert/server-cert.pem";
+          ssl_key  = "${package}/test/cert/server-key.pem";
         };
       };
     };
@@ -60,7 +64,8 @@ in
       server.succeed("mysql -u testMySQLHaskellSha2 -ptestPassword123 -e 'SELECT 1'")
 
       # Run the full integration test suite (sha2 tests are conditionally included for MySQL 8.0+)
-      print(server.succeed("${package}/bin/integration/integration"))
+      server.succeed("mysql -u root -e \"SHOW VARIABLES LIKE 'have_ssl'\" | grep YES")
+      print(server.succeed("MYSQL_TLS_CA_PATH=${package}/test/cert/ca.pem ${package}/bin/integration/integration"))
     '';
     nodes.server = {
       virtualisation.memorySize = 2048;
@@ -74,6 +79,9 @@ in
           server_id = 1;
           binlog_format = "ROW";
           default_authentication_plugin = "caching_sha2_password";
+          ssl_ca   = "${package}/test/cert/ca.pem";
+          ssl_cert = "${package}/test/cert/server-cert.pem";
+          ssl_key  = "${package}/test/cert/server-key.pem";
         };
       };
     };

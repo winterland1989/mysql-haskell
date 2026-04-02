@@ -51,6 +51,24 @@ jobs:
       with:
         ghc-version: ${{ matrix.ghc }}
 
+    - name: Set LD_LIBRARY_PATH (Linux)
+      if: runner.os == 'Linux'
+      run: echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+
+    - name: Install pkg-config (Windows)
+      if: runner.os == 'Windows'
+      shell: C:/msys64/usr/bin/bash.exe -e {0}
+      run: |
+        echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
+        echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1"   >> $GITHUB_ENV
+        ghcup run -m -- pacman --noconfirm -S mingw-w64-x86_64-pkg-config
+        echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+
+    - name: Setup Botan
+      uses: haskell-cryptography/botan/.github/actions/setup-botan@main
+      with:
+        botan-version: "3.10.0"
+
     - name: Cabal cache
       uses: actions/cache@v4
       env:
@@ -62,6 +80,13 @@ jobs:
           ${{ runner.os }}-build-${{ env.cache-name }}-
     - name: Cabal update
       run: cabal update
+    - name: Configure
+      run: |
+        cabal configure \
+          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
+          ${{ runner.os == 'Windows' && '--extra-include-dirs=C:/msys64/mingw64/include' || '' }} \
+          ${{ runner.os == 'Windows' && '--extra-lib-dirs=C:/msys64/mingw64/lib' || '' }} \
+          --constraint="botan-bindings +pkg-config"
     - name: Build using cabal
       run: cabal build all
     - name: Test

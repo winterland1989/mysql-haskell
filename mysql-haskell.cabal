@@ -177,6 +177,7 @@ test-suite integration
     SelectOne
     TextRow
     TextRowNew
+    TLSConnection
     UnixSocket
 
   hs-source-dirs:     test
