@@ -81,6 +81,7 @@ jobs:
     - name: Cabal update
       run: cabal update
     - name: Configure
+      shell: bash
       run: |
         cabal configure \
           ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }} \
