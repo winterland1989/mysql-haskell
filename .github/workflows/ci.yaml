@@ -86,16 +86,18 @@ jobs:
           ${{ runner.os }}-build-${{ env.cache-name }}-
     - name: Cabal update
       run: cabal update
-    - name: Configure
+    - name: Build using cabal
       run: |
-        cabal configure \
+        cabal build all \
           --extra-include-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/include' || '/usr/local/include' }} \
           --extra-lib-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/lib' || '/usr/local/lib' }} \
           ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }}
-    - name: Build using cabal
-      run: cabal build all
     - name: Test
-      run: cabal test test
+      run: |
+        cabal test test \
+          --extra-include-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/include' || '/usr/local/include' }} \
+          --extra-lib-dirs=${{ runner.os == 'Windows' && 'C:/msys64/mingw64/lib' || '/usr/local/lib' }} \
+          ${{ runner.os == 'Windows' && '--extra-prog-path=C:/msys64/mingw64/bin' || '' }}
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true
