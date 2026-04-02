@@ -67,7 +67,6 @@ jobs:
       run: |
         echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1" >> $GITHUB_ENV
         echo "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1"   >> $GITHUB_ENV
-        echo "MSYS2_ARG_CONV_EXCL=*"            >> $GITHUB_ENV
         ghcup run -m -- pacman --noconfirm -S mingw-w64-x86_64-pkg-config
         echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
@@ -81,6 +80,10 @@ jobs:
         which pkg-config || echo "pkg-config not found"
         pkg-config --modversion botan-3 || echo "pkg-config can't find botan-3"
         pkg-config --libs botan-3 || echo "pkg-config --libs failed"
+        pkg-config --cflags botan-3 || echo "pkg-config --cflags failed"
+    - name: Show botan pc file (Windows debug)
+      if: runner.os == 'Windows'
+      run: cat /mingw64/lib/pkgconfig/botan-3.pc || echo "pc file not found"
 
     - name: Cabal cache
       uses: actions/cache@v4
