@@ -1,10 +1,17 @@
 module Sha1Scramble (tests) where
 
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Base16 as B16
+import           Data.Word (Word8)
+import           Data.Char (digitToInt)
 import           Database.MySQL.Connection (scrambleSHA1)
 import           Test.Tasty
 import           Test.Tasty.HUnit
+
+-- | Decode a hex string to bytes (test helper to avoid base16-bytestring dep).
+hexToBytes :: String -> B.ByteString
+hexToBytes [] = B.empty
+hexToBytes (hi:lo:rest) = B.cons (fromIntegral $ digitToInt hi * 16 + digitToInt lo :: Word8) (hexToBytes rest)
+hexToBytes [_] = error "hexToBytes: odd-length hex string"
 
 tests :: TestTree
 tests = testGroup "SHA1 Scramble"
@@ -35,11 +42,11 @@ tests = testGroup "SHA1 Scramble"
 
     , testCase "golden: salt=12345678901234567890 pass=password" $ do
         let result = scrambleSHA1 "12345678901234567890" "password"
-            expected = either error id $ B16.decode "1957dce2724282e018f40d905824cb6361f88d41"
+            expected = hexToBytes "1957dce2724282e018f40d905824cb6361f88d41"
         assertEqual "golden vector 1" expected result
 
     , testCase "golden: salt=ABCDEFGHIJKLMNOPQRST pass=secret" $ do
         let result = scrambleSHA1 "ABCDEFGHIJKLMNOPQRST" "secret"
-            expected = either error id $ B16.decode "28441590674285e7d03cae7af237504797f70e91"
+            expected = hexToBytes "28441590674285e7d03cae7af237504797f70e91"
         assertEqual "golden vector 2" expected result
     ]
