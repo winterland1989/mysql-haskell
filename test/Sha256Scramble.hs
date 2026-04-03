@@ -1,6 +1,7 @@
 module Sha256Scramble (tests) where
 
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Base16 as B16
 import           Database.MySQL.Connection (scrambleSHA256)
 import           Test.Tasty
 import           Test.Tasty.HUnit
@@ -31,4 +32,14 @@ tests = testGroup "SHA256 Scramble"
             r1 = scrambleSHA256 salt "testPassword123"
             r2 = scrambleSHA256 salt "testPassword123"
         assertEqual "same inputs produce same output" r1 r2
+
+    , testCase "golden: salt=12345678901234567890 pass=password" $ do
+        let result = scrambleSHA256 "12345678901234567890" "password"
+            expected = either error id $ B16.decode "718d80fb92b693f7ee1fcad95bfe7a2be1f332ac2c3ec6cdc85893b65b240650"
+        assertEqual "golden vector 1" expected result
+
+    , testCase "golden: salt=ABCDEFGHIJKLMNOPQRST pass=secret" $ do
+        let result = scrambleSHA256 "ABCDEFGHIJKLMNOPQRST" "secret"
+            expected = either error id $ B16.decode "d721e183c1f036a196c1389201b8d53f38064a16f1d0923683ab886763152d75"
+        assertEqual "golden vector 2" expected result
     ]
