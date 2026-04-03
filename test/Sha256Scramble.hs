@@ -1,17 +1,14 @@
 module Sha256Scramble (tests) where
 
 import qualified Data.ByteString as B
-import           Data.Word (Word8)
-import           Data.Char (digitToInt)
+import qualified Data.ByteString.Base16 as Base16
+import           Data.ByteString.Char8 (pack)
 import           Database.MySQL.Connection (scrambleSHA256)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
--- | Decode a hex string to bytes (test helper to avoid base16-bytestring dep).
 hexToBytes :: String -> B.ByteString
-hexToBytes [] = B.empty
-hexToBytes (hi:lo:rest) = B.cons (fromIntegral $ digitToInt hi * 16 + digitToInt lo :: Word8) (hexToBytes rest)
-hexToBytes [_] = error "hexToBytes: odd-length hex string"
+hexToBytes = Base16.decodeLenient . pack
 
 tests :: TestTree
 tests = testGroup "SHA256 Scramble"
