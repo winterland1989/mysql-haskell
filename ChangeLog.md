@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.2.3 -- 2026.04.12 
++ Support caching_sha2_password full auth via RSA on non-TLS connections#81 thanks @ikaro1192
+
 ## 1.2.2 -- 2026.03.25
 + Widen tls upper bound to allow tls 2.4.x
 + Fix unsafe ByteString operations (`unsafeDrop`, `unsafeTail`, `unsafeIndex`)
