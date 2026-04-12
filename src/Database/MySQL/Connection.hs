@@ -22,6 +22,14 @@ import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
+import           Crypto.Hash.Algorithms          (SHA1(..))
+import qualified Crypto.Number.Serialize         as Serialize
+import qualified Crypto.PubKey.RSA               as RSA
+import qualified Crypto.PubKey.RSA.OAEP          as OAEP
+import qualified Data.ASN1.BinaryEncoding        as ASN1B
+import qualified Data.ASN1.BitArray              as ASN1BA
+import qualified Data.ASN1.Encoding              as ASN1E
+import qualified Data.ASN1.Types                 as ASN1
 import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
@@ -36,6 +44,7 @@ import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Unsafe          as B
 import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
+import qualified Data.PEM                        as PEM
 import           Data.Typeable
 import           Data.Word
 import           Database.MySQL.Protocol.Auth
@@ -124,10 +133,11 @@ connectDetail (ConnectInfo host port db user pass charset)
         is' <- decodeInputStream is
         p <- readPacket is'
         greet <- decodeFromPacket p
-        let auth = mkAuth db user pass charset greet
+        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
+            auth = mkAuth db user pass charset greet
         write c $ encodeToPacket 1 auth
         q <- readPacket is'
-        completeAuth is' (write c) pass q plainFullAuth
+        completeAuth is' (write c) pass q (plainFullAuth salt)
         consumed <- newIORef True
         let waitNotMandatoryOK = catch
                 (void (waitCommandReply is'))           -- server will either reply an OK packet
@@ -165,10 +175,11 @@ connectUnixSocketDetail socketPath (ConnectInfo _host _port db user pass charset
         is' <- decodeInputStream is
         p <- readPacket is'
         greet <- decodeFromPacket p
-        let auth = mkAuth db user pass charset greet
+        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
+            auth = mkAuth db user pass charset greet
         write c $ encodeToPacket 1 auth
         q <- readPacket is'
-        completeAuth is' (write c) pass q plainFullAuth
+        completeAuth is' (write c) pass q (plainFullAuth salt)
         consumed <- newIORef True
         let waitNotMandatoryOK = catch
                 (void (waitCommandReply is'))           -- server will either reply an OK packet
@@ -260,11 +271,77 @@ completeAuth is writePacket pass p fullAuth
         completeAuth is writePacket pass q fullAuth
     | otherwise = throwIO (UnexpectedPacket p)
 
--- | Full auth handler for plain TCP connections: throws an error because
--- caching_sha2_password full authentication requires a secure connection.
-plainFullAuth :: Word8 -> ByteString -> (Packet -> IO ()) -> InputStream Packet -> IO ()
-plainFullAuth _ _ _ _ =
-    throwIO $ AuthException "caching_sha2_password full authentication requires a TLS connection. Use Database.MySQL.TLS to connect, or ensure the password verifier is cached (fast auth path)."
+-- | Full auth handler for plain TCP connections using RSA encryption.
+--
+-- The nonce is captured via partial application at the call site:
+-- @completeAuth is writePacket pass q (plainFullAuth salt)@
+plainFullAuth :: ByteString -> Word8 -> ByteString -> (Packet -> IO ()) -> InputStream Packet -> IO ()
+plainFullAuth nonce seqN pass writePacket is = do
+    -- Request server's RSA public key
+    writePacket (putToPacket seqN (Binary.putWord8 0x02))
+    keyPkt <- readPacket is
+    -- Key packet body: 0x01 <PEM bytes>
+    let pemKey = L.toStrict (L.drop 1 (pBody keyPkt))
+    doRSAAuth writePacket (pSeqN keyPkt + 1) pass nonce pemKey
+    q <- readPacket is
+    if isOK q then pure ()
+              else decodeFromPacket q >>= throwIO . ERRException
+
+-- | Parse a PEM-encoded SubjectPublicKeyInfo RSA public key (PKCS#8 / RFC 5480).
+parseRSAPublicKey :: ByteString -> Either String RSA.PublicKey
+parseRSAPublicKey pemBytes =
+    either (Left . show) Right (PEM.pemParseBS pemBytes)
+    >>= firstPEM
+    >>= decodeDER
+    >>= spkiBitString
+    >>= decodeDER
+    >>= rsaKey
+  where
+    firstPEM []    = Left "empty PEM"
+    firstPEM (x:_) = Right (PEM.pemContent x)
+
+    decodeDER bs = either (Left . show) Right (ASN1E.decodeASN1' ASN1B.DER bs)
+
+    spkiBitString (ASN1.Start ASN1.Sequence
+                   : ASN1.Start ASN1.Sequence
+                   : ASN1.OID _
+                   : ASN1.Null
+                   : ASN1.End ASN1.Sequence
+                   : ASN1.BitString bs
+                   : ASN1.End ASN1.Sequence
+                   : [])
+        = Right (ASN1BA.bitArrayGetData bs)
+    spkiBitString xs = Left ("unexpected SPKI ASN1: " ++ show xs)
+
+    rsaKey (ASN1.Start ASN1.Sequence
+            : ASN1.IntVal n
+            : ASN1.IntVal e
+            : ASN1.End ASN1.Sequence
+            : [])
+        = Right RSA.PublicKey
+            { RSA.public_size = B.length (Serialize.i2osp n :: ByteString)
+            , RSA.public_n    = n
+            , RSA.public_e    = e
+            }
+    rsaKey xs = Left ("unexpected RSA key ASN1: " ++ show xs)
+
+-- | XOR @(password ++ NUL)@ with a cyclically-extended nonce.
+xorPasswordNonce :: ByteString -> ByteString -> ByteString
+xorPasswordNonce pass nonce =
+    let msg      = pass `B.snoc` 0x00
+        nonceLen = B.length nonce
+        cycled   = B.pack [nonce `B.index` (i `mod` nonceLen) | i <- [0 .. B.length msg - 1]]
+    in B.pack (B.zipWith xor msg cycled)
+
+-- | Encrypt password with the server's RSA public key and send it.
+doRSAAuth :: (Packet -> IO ()) -> Word8 -> ByteString -> ByteString -> ByteString -> IO ()
+doRSAAuth writePacket seqN pass nonce pemKey = do
+    pubKey <- either (\e -> throwIO (userError ("RSA key parse: " ++ e))) pure
+                     (parseRSAPublicKey pemKey)
+    result <- OAEP.encrypt (OAEP.defaultOAEPParams SHA1) pubKey
+                           (xorPasswordNonce pass nonce)
+    ct <- either (\e -> throwIO (userError ("RSA encrypt: " ++ show e))) pure result
+    writePacket (putToPacket seqN (Binary.putByteString ct))
 
 data AuthException = AuthException String deriving (Typeable, Show)
 instance Exception AuthException

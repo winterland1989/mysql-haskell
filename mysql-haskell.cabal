@@ -90,6 +90,8 @@ library
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
+    asn1-encoding >=0.9 && <0.10,
+    asn1-types >=0.3 && <0.4,
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
     bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
