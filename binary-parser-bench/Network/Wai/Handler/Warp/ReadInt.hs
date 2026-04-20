@@ -16,8 +16,7 @@ module Network.Wai.Handler.Warp.ReadInt (
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as S
 import Data.Int (Int64)
-import GHC.Prim
-import GHC.Types
+import GHC.Exts (Addr#, Int(..), indexWord8OffAddr#, word2Int#, word8ToWord#)
 import GHC.Word
 
 {-# INLINE readInt #-}
@@ -41,7 +40,7 @@ data Table = Table !Addr#
 
 {-# NOINLINE mhDigitToInt #-}
 mhDigitToInt :: Word8 -> Int
-mhDigitToInt (W8# i) = I# (word2Int# (indexWord8OffAddr# addr (word2Int# i)))
+mhDigitToInt (W8# i) = I# (word2Int# (word8ToWord# (indexWord8OffAddr# addr (word2Int# (word8ToWord# i)))))
   where
     !(Table addr) = table
     table :: Table

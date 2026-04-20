@@ -1,6 +1,14 @@
 # Revision history for mysql-haskell
 
-## 1.2.3 -- 2026.04.12 
+## 1.2.4 -- 2026.04.20
++ Fix benchmark compilation failures (#82):
+  + Replace deleted `Data.Binary.Parser.Char8` import in benchmark with
+    `Word8`-based combinators from `Data.Binary.Parser`
+  + Replace `GHC.Prim`/`GHC.Types` imports with `GHC.Exts` from `base`
+  + Fix `Word8#` vs `Word#` type mismatch in `mhDigitToInt`
+  + Remove stale haddock reference to deleted `Char8` module
+
+## 1.2.3 -- 2026.04.12
 + Support caching_sha2_password full auth via RSA on non-TLS connections#81 thanks @ikaro1192
 
 ## 1.2.2 -- 2026.03.25
