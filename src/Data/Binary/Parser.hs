@@ -11,8 +11,7 @@
 -- This library provide parsec\/attoparsec style parsing combinators for
 -- <http://hackage.haskell.org/package/binary binary>
 -- package. By default, this module export combinators in "Data.Binary.Get",
--- "Data.Binary.Parser.Word8" and "Data.Binary.Parser.Numeric", for additional ASCII char parser,
--- please check "Data.Binary.Parser.Char8" module.
+-- "Data.Binary.Parser.Word8" and "Data.Binary.Parser.Numeric".
 --
 -- The behaviour of parsers here is different to that of the
 -- similarly-named parser in Parsec, as this one is all-or-nothing.
