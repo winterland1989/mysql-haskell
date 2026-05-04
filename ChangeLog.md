@@ -1,5 +1,8 @@
 # Revision history for mysql-haskell
 
+## 1.2.5 -- 2026.05.04
++ Replace abandoned `pem` dependency with `crypton-pem` (#84)
+
 ## 1.2.4 -- 2026.04.20
 + Fix benchmark compilation failures (#82):
   + Replace deleted `Data.Binary.Parser.Char8` import in benchmark with
