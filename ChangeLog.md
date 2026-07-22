@@ -1,6 +1,6 @@
 # Revision history for mysql-haskell
 
-## 1.3.0 -- unreleased
+## 1.3.0 -- 2026.07.22
 + Add `Database.MySQL.Field` with a `Field` typeclass for converting
   individual Haskell values to and from `MySQLValue` (#86). One combined
   class in the style of persistent's `PersistField`, with a `DecodeError`
