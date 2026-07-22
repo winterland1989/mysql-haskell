@@ -9,6 +9,7 @@ import qualified Sha256Scramble
 import qualified Word24
 import qualified TCPStreams
 import qualified BoundsCheck
+import qualified FieldRoundtrip
 
 main :: IO ()
 main = do
@@ -28,4 +29,5 @@ main = do
       , Sha1Scramble.tests
       , Sha256Scramble.tests
       , BoundsCheck.tests
+      , FieldRoundtrip.tests
       ]

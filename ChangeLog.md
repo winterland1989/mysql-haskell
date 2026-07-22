@@ -1,5 +1,12 @@
 # Revision history for mysql-haskell
 
+## 1.3.0 -- unreleased
++ Add `Database.MySQL.Field` with a `Field` typeclass for converting
+  individual Haskell values to and from `MySQLValue` (#86). One combined
+  class in the style of persistent's `PersistField`, with a `DecodeError`
+  sum type for decode failures and named top-level encode/decode functions
+  backing every instance.
+
 ## 1.2.5 -- 2026.05.04
 + Replace abandoned `pem` dependency with `crypton-pem` (#84)
 

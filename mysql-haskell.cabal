@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               mysql-haskell
-version:            1.2.5
+version:            1.3.0
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -75,6 +75,7 @@ library
     Database.MySQL.BinLogProtocol.BinLogMeta
     Database.MySQL.BinLogProtocol.BinLogValue
     Database.MySQL.Connection
+    Database.MySQL.Field
     Database.MySQL.Protocol.Auth
     Database.MySQL.Protocol.ColumnDef
     Database.MySQL.Protocol.Command
@@ -136,6 +137,7 @@ test-suite test
     Aeson
     AesonBP
     BoundsCheck
+    FieldRoundtrip
     JSON
     QC.ByteString
     QC.Combinator
