@@ -72,3 +72,46 @@ jobs:
       run: gh run cancel ${{ github.run_id }}
       env:
         GH_TOKEN: ${{ github.token }}
+
+  # The cabal job resolves the newest crypton and the nix job the pinned one,
+  # so every series the cabal file admits gets its own build here.
+  crypton:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        crypton:
+          - '^>=2.1'
+          - '^>=2.0'
+          - '^>=1.1'
+          - '^>=1.0'
+          - '==0.34'
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: haskell-actions/setup@v2
+      with:
+        ghc-version: '9.10'
+
+    - name: Cabal cache
+      uses: actions/cache@v4
+      env:
+        cache-name: cache-cabal-crypton
+      with:
+        path: ~/.cabal
+        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ matrix.crypton }}-${{ hashFiles('**/*.cabal') }}
+        restore-keys: |
+          ${{ runner.os }}-build-${{ env.cache-name }}-${{ matrix.crypton }}-
+    - name: Cabal update
+      run: cabal update
+    - name: Build against crypton ${{ matrix.crypton }}
+      run: cabal build lib:mysql-haskell test:test --enable-tests --constraint='crypton ${{ matrix.crypton }}'
+    - name: Test
+      run: cabal test test --enable-tests --constraint='crypton ${{ matrix.crypton }}'
+    - name: Cancel workflow on failure
+      if: failure()
+      continue-on-error: true
+      run: gh run cancel ${{ github.run_id }}
+      env:
+        GH_TOKEN: ${{ github.token }}

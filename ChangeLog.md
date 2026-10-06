@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 1.3.1 -- 2026.10.06
++ Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library
+  code needed no change; CI now builds and tests against every crypton
+  series the bounds admit (0.34, 1.0, 1.1, 2.0 and 2.1).
+
 ## 1.3.0 -- 2026.07.22
 + Add `Database.MySQL.Field` with a `Field` typeclass for converting
   individual Haskell values to and from `MySQLValue` (#86). One combined
