@@ -62,10 +62,13 @@ jobs:
           ${{ runner.os }}-build-${{ env.cache-name }}-
     - name: Cabal update
       run: cabal update
+    # Without --enable-tests the solver may leave the test suite out of the
+    # plan, and `cabal test` then refuses to run it (Cabal-7043, seen with
+    # cabal 3.16 and 3.18).
     - name: Build using cabal
-      run: cabal build all
+      run: cabal build all --enable-tests
     - name: Test
-      run: cabal test test
+      run: cabal test test --enable-tests
     - name: Cancel workflow on failure
       if: failure()
       continue-on-error: true
