@@ -1,6 +1,15 @@
 # Revision history for mysql-haskell
 
-## 1.3.2 -- 2026.10.07
+## 1.4.0 -- 2026.10.07
++ Breaking: require crypton 2.0 or newer, and with it `ram` instead of
+  `memory`; the `crypton-1-1` flag is gone. crypton 2.0 is the first release
+  with its side-channel fixes, none of them backported to 1.x. Any TLS
+  connection can reach them: when the server picks P-384, P-521 or an FFDHE
+  group, the client computes the key exchange with its ephemeral secret, and
+  before 2.0 that point multiplication and modular exponentiation took time
+  that followed the secret (crypton #136, #141). A client certificate
+  supplied through tls's `onCertificateRequest` adds RSA and P-384/P-521 ECDSA
+  signing with the long-term key, which leaked as well (#136, #138, #144).
 + `query_`, `query`, `queryVector_`, `queryVector`, `queryStmt` and
   `queryStmtVector` now return an empty result set (no columns, no rows) when
   given a statement without one, such as an INSERT (#47). They used to block

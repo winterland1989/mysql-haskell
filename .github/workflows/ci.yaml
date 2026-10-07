@@ -87,9 +87,6 @@ jobs:
         crypton:
           - '^>=2.1'
           - '^>=2.0'
-          - '^>=1.1'
-          - '^>=1.0'
-          - '==0.34'
 
     steps:
     - uses: actions/checkout@v4
