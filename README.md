@@ -10,16 +10,26 @@ mysql-haskell
 Is it fast?
 ----------
 
-In short, `select`(decode) is about 1.5 times slower than pure c/c++ but 5 times faster than `mysql-simple`, `insert` (encode) is about 1.5 times slower than pure c/c++, there're many factors involved(tls, prepared statment, batch using multiple statement):
+In short, reading is as fast as the C client (`libmysqlclient`) on one connection and up to 1.7 times slower with ten connections in parallel, and 5 to 8 times faster than `mysql-simple`. Writing one statement at a time is 1.2 to 1.4 times slower than C, and on par with C through `executeMany`.
 
-<img src="https://github.com/jappeace/mysql-pure/blob/master/benchmark/result.png?raw=true" width="100%">
+Median wall time in milliseconds over 10 runs, for 1 to 10 threads that each use their own connection:
 
-Above figures showed the time to:
+| threads                                   |   1 |   2 |   3 |   4 |   10 |
+|-------------------------------------------|----:|----:|----:|----:|-----:|
+| libmysqlclient select                     |  76 |  80 |  88 | 108 |  178 |
+| mysql-haskell select                      |  80 |  95 | 106 | 130 |  309 |
+| mysql-haskell select over TLS (`tls`)     | 120 | 130 | 148 | 172 |  436 |
+| libmysqlclient select, prepared           |  82 |  86 |  94 | 120 |  179 |
+| mysql-haskell select, prepared            |  77 |  88 | 102 | 124 |  275 |
+| mysql-simple select                       | 462 | 504 | 578 | 698 | 2399 |
+| libmysqlclient insert                     |  29 |  30 |  36 |  38 |   62 |
+| mysql-haskell insert                      |  40 |  40 |  45 |  46 |   76 |
+| mysql-haskell insert, `executeMany`       |  27 |  29 |  36 |  37 |   63 |
+| mysql-haskell insert, prepared            |  38 |  38 |  45 |  46 |   82 |
 
-* perform a "select * from employees" from a [sample table](https://github.com/datacharmer/test_db)
-* insert 1000 rows into a 29-columns table per thread with auto-commit off.
+Each thread either reads all 300,024 rows of the [sample employees table](https://github.com/datacharmer/test_db) with `select * from employees`, or inserts 1000 rows into a 29-column table with auto-commit off. The programs are the ones in `benchmark/`. They ran on mysql-haskell 1.3.3 with GHC 9.10.3 and `+RTS -N4`, against MySQL 8.0.45 and its own client library (mysql-simple goes through MariaDB Connector/C 3.3.5), with TLS off unless stated, on an AMD Ryzen AI 7 350 (October 2026). The server kept its data in RAM, so the inserts measure the clients rather than the disk.
 
-The benchmarks are run by my MacBook Pro 13' 2015.
+Leave the allocation area (`-A`) at its default when running with several capabilities: `-A128M` with `-N4` makes the runtime fault in a 128 MB allocation area for each capability it touches, which costs 35 to 280 ms per run in these benchmarks on every GHC version tried. Since GHC 8.2 it touches all four even when one thread does the work, where GHC 8.0, used for the 2016 figures this README showed until 2026, touched one or two. Without the flag, mysql-haskell 0.6.0.0 and 1.3.3 run plain and prepared selects equally fast, and 1.3.3 is 1.4 to 1.6 times faster over TLS.
 
 Motivation
 ----------
@@ -135,9 +145,11 @@ Enter benchmark directory and run `./bench.sh` to benchmark 1) c++ version 2) my
 + Modify `bench.sh`(change the include path) to get c++ version compiled.
 + Modify `mysql-pure-bench.cabal`(change the openssl's lib path) to get haskell version compiled.
 + Setup MySQL's TLS support, modify `MySQLHaskellOpenSSL.hs/MySQLHaskellTLS.hs` to change the CA file's path, and certificate's subject name.
-+ Adjust rts options `-N` to get best results.
++ Adjust rts options `-N` to get best results, and leave `-A` at its default (see "Is it fast?").
 
 With `-N10` on my company's 24-core machine, binary protocol performs almost identical to c version!
+
+The `.cabal` files in `benchmark/` date from 2016 and no longer build; the figures in "Is it fast?" came from the same programs compiled against the current library.
 
 Reference
 ---------

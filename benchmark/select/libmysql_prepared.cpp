@@ -2,6 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <mysql/mysql.h>
+#if !defined(LIBMARIADB) && MYSQL_VERSION_ID >= 80000
+typedef bool my_bool; // removed from MySQL's 8.0 client API; MariaDB's still has it
+#endif
 #include <pthread.h>
 #include <unistd.h>
 
@@ -51,6 +54,12 @@ void *func(void *arg)
     }
 
     mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
+    // MySQL's client prefers TLS by default (5.7.11+); the Haskell benchmarks use none.
+    // MariaDB Connector/C 3.3 stays plaintext; 3.4+ turns TLS on and needs its own setting.
+#ifndef LIBMARIADB
+    unsigned int ssl_mode = SSL_MODE_DISABLED;
+    mysql_options(mysql, MYSQL_OPT_SSL_MODE, &ssl_mode);
+#endif
 
     if (mysql_real_connect(mysql, DBHOST, DBUSER, DBPASS, DBNAME, DBPORT, DBSOCK, DBPCNT) == NULL)
     {
