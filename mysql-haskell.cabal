@@ -109,11 +109,10 @@ library
     word-compat >=0.0 && <0.1
 
   -- Decision: require crypton 2.0, the first release with its side-channel
-  -- fixes (none backported to 1.x): before it, RSA signing leaked the private
-  -- exponent through table lookups and P-384/P-521 ECDSA inverted the nonce in
-  -- variable time. tls signs with such a key when a caller's onCertificateRequest
-  -- hook supplies a client certificate (makeClientParams' does not set that hook).
-  -- Not the latest 2.1.x, because Stackage nightly is moving to crypton 2.0.1.
+  -- fixes (none backported to 1.x). Before it, P-384/P-521 point multiplication
+  -- and DH exponentiation took time that followed the secret, and tls runs them
+  -- on the client's ephemeral key whenever the server picks such a group. Not
+  -- the latest 2.1.x, because Stackage nightly is moving to crypton 2.0.1.
   build-depends:
     crypton ^>=2.0.0 || ^>=2.1.0,
     ram >=0.20 && <0.23

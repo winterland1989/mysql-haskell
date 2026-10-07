@@ -3,14 +3,13 @@
 ## 1.4.0 -- 2026.10.07
 + Breaking: require crypton 2.0 or newer, and with it `ram` instead of
   `memory`; the `crypton-1-1` flag is gone. crypton 2.0 is the first release
-  with its side-channel fixes, none of them backported to 1.x: RSA private-key
-  operations no longer index a table by the exponent's bits (crypton #136,
-  #144), and P-384/P-521 ECDSA no longer handles the nonce in variable time
-  (#138, #141). Those run when a caller's tls `onCertificateRequest` hook
-  supplies a client certificate for a `Database.MySQL.TLS` connection, since
-  tls then signs the handshake with that key. `makeClientParams'` does not set
-  that hook (it fills `sharedCredentials`, which tls reads only on the server
-  side), so it never sends its certificate.
+  with its side-channel fixes, none of them backported to 1.x. Any TLS
+  connection can reach them: when the server picks P-384, P-521 or an FFDHE
+  group, the client computes the key exchange with its ephemeral secret, and
+  before 2.0 that point multiplication and modular exponentiation took time
+  that followed the secret (crypton #136, #140, #141). A client certificate
+  supplied through tls's `onCertificateRequest` adds RSA and P-384/P-521 ECDSA
+  signing with the long-term key, which leaked as well (#136, #138, #144).
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library
