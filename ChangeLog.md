@@ -1,5 +1,17 @@
 # Revision history for mysql-haskell
 
+## 1.3.3 -- 2026.10.07
+
+New functions, and one error that now arrives differently. `queryMulti_` and
+`queryMulti` return every result of a CALL or a multi-statement query in order:
+each result set with its columns and rows, and each statement's `OK`.
+`executeMany` and `executeMany_` given a statement that returns rows raise
+`ExtraResultSets` and leave the connection usable, where 1.3.2 threw
+`UnexpectedPacket` and left the rows on the connection.
+
++ Every result set of a CALL or multi-statement query through `queryMulti_`
+  [#94](https://github.com/winterland1989/mysql-haskell/pull/94)
+
 ## 1.3.2 -- 2026.10.07
 
 Requires crypton 2.0 or newer, the first crypton with the timing side-channel
