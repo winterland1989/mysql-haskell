@@ -468,7 +468,7 @@ instance Exception UnexpectedPacket
 -- return: @execute@ and @executeStmt@ return none, the query functions only the
 -- first. It was read and discarded, so the connection is still usable.
 --
--- @since 1.4.0
+-- @since 1.3.2
 data ExtraResultSets = ExtraResultSets deriving (Typeable, Show)
 instance Exception ExtraResultSets where
     displayException ExtraResultSets =
