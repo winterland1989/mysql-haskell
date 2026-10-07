@@ -94,6 +94,16 @@ tests = testGroup "statements with several results"
     , testCase "executeMany with a SELECT" $ withTable $ \c ->
         assertExtraResultSets c
             (executeMany c "SELECT COUNT(*) + ? FROM several_results" [[MySQLInt32 1]])
+    , testCase "executeMany with two statements per parameter set" $ withTable $ \c -> do
+        oks <- executeMany c
+            "INSERT INTO several_results VALUES (?); INSERT INTO several_results VALUES (?)"
+            [[MySQLInt32 1, MySQLInt32 2], [MySQLInt32 3, MySQLInt32 4]]
+        assertEqual "one OK per statement" [1, 1, 1, 1] (map okAffectedRows oks)
+        assertRowCount c 4
+    , testCase "executeMany with no parameter sets" $ withTable $ \c -> do
+        oks <- executeMany c "INSERT INTO several_results VALUES (?)" ([] :: [[MySQLValue]])
+        assertEqual "no OKs" [] (map okAffectedRows oks)
+        assertRowCount c 0
     ]
 
 -- | The affected rows of an 'OK', or the rows of a result set.

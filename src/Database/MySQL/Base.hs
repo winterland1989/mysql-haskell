@@ -120,17 +120,23 @@ execute conn qry params = execute_ conn (renderParams qry params)
 -- you may want to use 'withTransaction' to make sure it's atomic, and
 -- use @sum . map okAffectedRows@ to get all affected rows count.
 --
--- A statement that returns rows raises 'ExtraResultSets' once the whole reply
--- has been read; 'queryMulti' returns those.
+-- The result holds one 'OK' per statement, so a query with several statements
+-- gives several per parameter set. A statement that returns rows raises
+-- 'ExtraResultSets' once the whole reply has been read; 'queryMulti' returns
+-- those. No parameter sets gives @[]@ without contacting the server.
 --
 -- @since 0.2.0.0
 --
 executeMany :: QueryParam p => MySQLConn -> Query -> [[p]] -> IO [OK]
 executeMany conn@(MySQLConn is os _ _) qry paramsList = do
     guardUnconsumed conn
-    let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
-    writeCommand (COM_QUERY qry') os
-    readStatementResults is >>= onlyOKs
+    case paramsList of
+        -- Joining no statements would send an empty query, which the server refuses.
+        [] -> pure []
+        _ : _ -> do
+            let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
+            writeCommand (COM_QUERY qry') os
+            readStatementResults is >>= onlyOKs
 
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[MySQLValue]] -> IO [OK] #-}
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[Param]]      -> IO [OK] #-}
