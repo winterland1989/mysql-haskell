@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE PackageImports #-}
 
 {-|
 Module      : Database.MySQL.Connection
@@ -33,11 +31,7 @@ import qualified Data.ASN1.Types                 as ASN1
 import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-#if MIN_VERSION_crypton(1,1,0)
-import qualified "ram" Data.ByteArray             as BA
-#else
-import qualified "memory" Data.ByteArray          as BA
-#endif
+import qualified Data.ByteArray                  as BA
 import           Data.ByteString                 (ByteString)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as L

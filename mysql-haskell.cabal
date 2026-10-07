@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               mysql-haskell
-version:            1.3.1
+version:            1.4.0
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -41,11 +41,6 @@ bug-reports:        https://github.com/winterland1989/mysql-haskell/issues
 source-repository head
   type:     git
   location: https://github.com/winterland1989/mysql-haskell
-
-flag crypton-1-1
-  description: Build with crypton >= 1.1.0, including the 2.x series (uses ram instead of memory for ByteArrayAccess)
-  default: True
-  manual: False
 
 common common-options
   ghc-options:
@@ -113,14 +108,14 @@ library
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
 
-  if flag(crypton-1-1)
-    build-depends:
-      crypton ^>=1.1.0 || ^>=2.0.0 || ^>=2.1.0,
-      ram >=0.20 && <0.23
-  else
-    build-depends:
-      crypton >=0.31 && <0.40 || ^>=1.0.0,
-      memory >=0.14.4 && <0.19
+  -- Decision: require crypton 2.0, the first release with its side-channel
+  -- fixes (none backported to 1.x): before it, RSA signing leaked the private
+  -- exponent through table lookups and P-384/P-521 ECDSA inverted the nonce in
+  -- variable time, both reachable through a TLS client certificate. Not the
+  -- latest 2.1.x, because Stackage nightly is moving to crypton 2.0.1.
+  build-depends:
+    crypton ^>=2.0.0 || ^>=2.1.0,
+    ram >=0.20 && <0.23
 
   default-extensions:
     DeriveDataTypeable
