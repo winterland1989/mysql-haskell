@@ -54,7 +54,7 @@ go n = void . flip mapConcurrently [1..n] $ \ _ -> do
                    \ '韩冬真赞'                             ,\
                    \ 'foo'                                  ,\
                    \ 'foo,bar')"
-                   (replicate 1000 [])
+                   (replicate 1000 ([] :: [MySQLValue]))
 
     execute_ c "COMMIT"
     return ()

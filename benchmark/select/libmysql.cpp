@@ -40,6 +40,9 @@ void *func(void *arg)
     }
 
     mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
+    // The client prefers TLS by default (5.7.11+); the Haskell benchmarks use none.
+    unsigned int ssl_mode = SSL_MODE_DISABLED;
+    mysql_options(mysql, MYSQL_OPT_SSL_MODE, &ssl_mode);
 
     if (mysql_real_connect(mysql, DBHOST, DBUSER, DBPASS, DBNAME, DBPORT, DBSOCK, DBPCNT) == NULL)
     {

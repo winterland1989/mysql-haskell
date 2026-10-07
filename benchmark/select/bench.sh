@@ -30,43 +30,45 @@ rm ./libmysql_prepared
 echo "=============== benchmark c++ client prepared end ================"
 
 cabal build
+# Decision: no -A128M. Since GHC 8.2, -A128M with -N4 faults in all four 128 MB
+# allocation areas, which added up to 280 ms per run and hid the library's speed.
 echo "=============== start benchmark haskell client ============="
-time ./dist/build/bench/bench 1          +RTS -N4 -A128M -RTS
-time ./dist/build/bench/bench 2          +RTS -N4 -A128M -RTS
-time ./dist/build/bench/bench 3          +RTS -N4 -A128M -RTS
-time ./dist/build/bench/bench 4          +RTS -N4 -A128M -RTS
-time ./dist/build/bench/bench 10         +RTS -N4 -A128M -RTS
+time ./dist/build/bench/bench 1          +RTS -N4 -RTS
+time ./dist/build/bench/bench 2          +RTS -N4 -RTS
+time ./dist/build/bench/bench 3          +RTS -N4 -RTS
+time ./dist/build/bench/bench 4          +RTS -N4 -RTS
+time ./dist/build/bench/bench 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end ================"
 
 echo "=============== start benchmark haskell client openssl ============="
-time ./dist/build/bench-openssl/bench-openssl 1          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-openssl/bench-openssl 2          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-openssl/bench-openssl 3          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-openssl/bench-openssl 4          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-openssl/bench-openssl 10         +RTS -N4 -A128M -RTS
+time ./dist/build/bench-openssl/bench-openssl 1          +RTS -N4 -RTS
+time ./dist/build/bench-openssl/bench-openssl 2          +RTS -N4 -RTS
+time ./dist/build/bench-openssl/bench-openssl 3          +RTS -N4 -RTS
+time ./dist/build/bench-openssl/bench-openssl 4          +RTS -N4 -RTS
+time ./dist/build/bench-openssl/bench-openssl 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end openssl ================"
 
 echo "=============== start benchmark haskell client tls ============="
-time ./dist/build/bench-tls/bench-tls 1          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 2          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 3          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 4          +RTS -N4 -A128M -RTS
-time ./dist/build/bench-tls/bench-tls 10         +RTS -N4 -A128M -RTS
+time ./dist/build/bench-tls/bench-tls 1          +RTS -N4 -RTS
+time ./dist/build/bench-tls/bench-tls 2          +RTS -N4 -RTS
+time ./dist/build/bench-tls/bench-tls 3          +RTS -N4 -RTS
+time ./dist/build/bench-tls/bench-tls 4          +RTS -N4 -RTS
+time ./dist/build/bench-tls/bench-tls 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end tls ================"
 
 echo "=============== start benchmark haskell client FFI ============="
-time ./dist/build/benchFFI/benchFFI 1          +RTS -N4 -A128M -RTS
-time ./dist/build/benchFFI/benchFFI 2          +RTS -N4 -A128M -RTS
-time ./dist/build/benchFFI/benchFFI 3          +RTS -N4 -A128M -RTS
-time ./dist/build/benchFFI/benchFFI 4          +RTS -N4 -A128M -RTS
-time ./dist/build/benchFFI/benchFFI 10         +RTS -N4 -A128M -RTS
+time ./dist/build/benchFFI/benchFFI 1          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 2          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 3          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 4          +RTS -N4 -RTS
+time ./dist/build/benchFFI/benchFFI 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client FFI end ================"
 
 echo "=============== start benchmark haskell client prepared ============="
-time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -A128M -RTS
-time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -A128M -RTS
-time ./dist/build/benchPrepared/benchPrepared 3          +RTS -N4 -A128M -RTS
-time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -A128M -RTS
-time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -A128M -RTS
+time ./dist/build/benchPrepared/benchPrepared 1          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 2          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 3          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 4          +RTS -N4 -RTS
+time ./dist/build/benchPrepared/benchPrepared 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client prepared end ================"
 

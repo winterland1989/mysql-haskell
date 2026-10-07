@@ -20,6 +20,8 @@ go :: Int -> IO ()
 go n = void . flip mapConcurrently [1..n] $ \ _ -> do
     c <- connect defaultConnectInfo { connectUser = "testMySQLHaskell"
                                     , connectDatabase = "testMySQLHaskell"
+                                    -- TCP like mysql-haskell; "localhost" means the socket
+                                    , connectHost = "127.0.0.1"
                                     }
 
     putStr "total rows: "
