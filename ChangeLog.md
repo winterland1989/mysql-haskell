@@ -9,13 +9,17 @@ The query functions now return an empty result for an INSERT, UPDATE or DELETE
 instead of hanging, and a CALL or a multi-statement query no longer leaves
 results behind for the next command to take as its own.
 
-Code that catches errors sees two differences. `execute_` and `executeStmt` on
-a statement that returns rows raise `ExtraResultSets` instead of
-`UnexpectedPacket`, and the connection stays usable. `query_`, `queryStmt` and
-their variants raise `ExtraResultSets` after the first result set's rows when
-the statement produced a second one. Stack users who set the removed
-`crypton-1-1` flag must delete it from `stack.yaml`, since Stack rejects flags a
-package does not define.
+Errors change only for statements that produce several results or rows where
+none were expected, and each call now leaves the connection usable.
+`execute_` and `executeStmt` raise `ExtraResultSets` for any result set: 1.3.1
+threw `UnexpectedPacket` when it came first and returned the `OK` when it came
+later. `query_`, `queryStmt` and their variants raise `ExtraResultSets` after
+the first result set's rows when a second one follows, which 1.3.1 left for the
+next command. An error from a later statement of a multi-statement query is
+raised by that call or its row stream, where 1.3.1 raised it on the next
+command. Stack
+users who set the removed `crypton-1-1` flag must delete it from `stack.yaml`,
+since Stack rejects flags a package does not define.
 
 + Query functions no longer hang on statements without a result set,
   multi-result replies are read to the end, and crypton 2 is required
