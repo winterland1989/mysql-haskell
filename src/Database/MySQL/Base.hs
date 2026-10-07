@@ -380,7 +380,8 @@ executeStmt conn stid params =
 
 -- | Send a statement that should answer with an 'OK' and read its whole reply,
 -- see 'skipFurtherResults'. A result-set, also as the first reply (a SELECT or
--- a CALL running one), is read off the connection and raises 'ExtraResultSets'.
+-- a CALL running one), is read off the connection and raises 'ExtraResultSets',
+-- unless a later statement fails: its 'ERRException' is raised instead.
 executeCommand :: MySQLConn -> Command -> IO OK
 executeCommand conn@(MySQLConn is os _ _) cmd = do
     guardUnconsumed conn

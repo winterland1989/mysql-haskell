@@ -54,6 +54,13 @@ tests = testGroup "statements with several results"
         again <- Stream.read rows
         assertEqual "reading the finished rows again" Nothing again
         assertRowCount c 0
+    , testCase "query_ with a failing statement after a SELECT" $ withTable $ \c -> do
+        (_, rows) <- query_ c
+            "SELECT COUNT(*) FROM several_results; SELECT * FROM no_such_table"
+        assertERRException c (Stream.toList rows)
+    , testCase "execute_ with a failing statement after a SELECT" $ withTable $ \c ->
+        assertERRException c
+            (execute_ c "SELECT COUNT(*) FROM several_results; SELECT * FROM no_such_table")
     ]
 
 -- | Generous for a few statements on an empty temporary table, and short enough
@@ -81,6 +88,15 @@ assertExtraResultSets c runStatement = do
     case outcome of
         Left ExtraResultSets -> pure ()
         Right _ -> assertFailure "the result set went unreported"
+    assertRowCount c 0
+
+-- | The failing statement's error must come from this call, not the next one.
+assertERRException :: MySQLConn -> IO a -> Assertion
+assertERRException c runStatement = do
+    outcome <- try runStatement
+    case outcome of
+        Left (ERRException _) -> pure ()
+        Right _ -> assertFailure "the failing statement's error went unreported"
     assertRowCount c 0
 
 -- | The connection must be back in step: a fresh query gets its own rows.
