@@ -18,8 +18,7 @@ module Database.MySQL.Connection
     ( module Database.MySQL.Connection
     ) where
 
-import           Control.Exception               (Exception (displayException),
-                                                  bracketOnError,
+import           Control.Exception               (Exception, bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
@@ -469,16 +468,4 @@ instance Exception ERRException
 
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
-
--- | A function expecting a result set got the 'OK' reply of a statement that
--- has none, such as an INSERT. The statement has already run on the server.
---
--- @since 1.4.0
-data NoResultSet = NoResultSet OK deriving (Typeable, Show)
-instance Exception NoResultSet where
-    displayException (NoResultSet ok) =
-        "mysql-haskell: expected a result set, but the server replied with an OK "
-        ++ "packet (affected rows: " ++ show (okAffectedRows ok) ++ "). The statement "
-        ++ "returns no rows and has already been executed. Use execute, execute_ or "
-        ++ "executeStmt for INSERT, UPDATE, DELETE and other statements without a result set."
 

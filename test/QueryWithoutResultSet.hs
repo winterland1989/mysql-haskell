@@ -4,8 +4,8 @@
 -- definitions that never come (issue #47).
 module QueryWithoutResultSet (tests) where
 
-import           Control.Exception (try)
 import           Database.MySQL.Base
+import qualified Data.Vector       as V
 import qualified System.IO.Streams as Stream
 import           System.Timeout    (timeout)
 import           Test.Tasty
@@ -13,16 +13,24 @@ import           Test.Tasty.HUnit
 
 tests :: TestTree
 tests = testGroup "query functions given an INSERT"
-    [ testCase "query_" $ assertNoResultSet $ \c ->
-        () <$ query_ c "INSERT INTO without_result_set VALUES (1)"
-    , testCase "queryVector_" $ assertNoResultSet $ \c ->
-        () <$ queryVector_ c "INSERT INTO without_result_set VALUES (1)"
-    , testCase "queryStmt" $ assertNoResultSet $ \c -> do
+    [ testCase "query_" $ assertEmptyResultSet $ \c -> do
+        (columns, rows) <- query_ c "INSERT INTO without_result_set VALUES (1)"
+        rowList <- Stream.toList rows
+        pure (length columns, length rowList)
+    , testCase "queryVector_" $ assertEmptyResultSet $ \c -> do
+        (columns, rows) <- queryVector_ c "INSERT INTO without_result_set VALUES (1)"
+        rowList <- Stream.toList rows
+        pure (V.length columns, length rowList)
+    , testCase "queryStmt" $ assertEmptyResultSet $ \c -> do
         stmt <- prepareStmt c "INSERT INTO without_result_set VALUES (?)"
-        () <$ queryStmt c stmt [MySQLInt32 1]
-    , testCase "queryStmtVector" $ assertNoResultSet $ \c -> do
+        (columns, rows) <- queryStmt c stmt [MySQLInt32 1]
+        rowList <- Stream.toList rows
+        pure (length columns, length rowList)
+    , testCase "queryStmtVector" $ assertEmptyResultSet $ \c -> do
         stmt <- prepareStmt c "INSERT INTO without_result_set VALUES (?)"
-        () <$ queryStmtVector c stmt [MySQLInt32 1]
+        (columns, rows) <- queryStmtVector c stmt [MySQLInt32 1]
+        rowList <- Stream.toList rows
+        pure (V.length columns, length rowList)
     ]
 
 -- | Generous for one INSERT into an empty temporary table, and short enough
@@ -30,23 +38,22 @@ tests = testGroup "query functions given an INSERT"
 replyTimeLimitMicroseconds :: Int
 replyTimeLimitMicroseconds = 10000000
 
--- | Runs the insert on a fresh connection. It must throw 'NoResultSet' carrying
--- the server's OK, and the connection must stay usable afterwards.
-assertNoResultSet :: (MySQLConn -> IO ()) -> Assertion
-assertNoResultSet runInsert = do
+-- | Runs the insert on a fresh connection; it reports the column and row counts
+-- of the result set it got back. Both must be zero, the row must be inserted
+-- exactly once, and the connection must stay usable afterwards.
+assertEmptyResultSet :: (MySQLConn -> IO (Int, Int)) -> Assertion
+assertEmptyResultSet runInsert = do
     (_, c) <- connectDetail defaultConnectInfo
         { ciUser = "testMySQLHaskell"
         , ciDatabase = "testMySQLHaskell"
         }
     _ <- execute_ c "CREATE TEMPORARY TABLE without_result_set (__id INT)"
-    outcome <- timeout replyTimeLimitMicroseconds (try (runInsert c))
+    outcome <- timeout replyTimeLimitMicroseconds (runInsert c)
     case outcome of
         Nothing -> assertFailure
             "blocked for 10 s waiting for a result set the server never sends"
-        Just (Right ()) -> assertFailure
-            "returned a result set for an INSERT instead of throwing NoResultSet"
-        Just (Left (NoResultSet ok)) -> do
-            assertEqual "affected rows reported by the OK" 1 (okAffectedRows ok)
+        Just columnsAndRows -> do
+            assertEqual "columns and rows returned" (0, 0) columnsAndRows
             (_, rows) <- query_ c "SELECT COUNT(*) FROM without_result_set"
             counts <- Stream.toList rows
             assertEqual "the row was inserted once" [[MySQLInt64 1]] counts

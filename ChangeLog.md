@@ -1,13 +1,12 @@
 # Revision history for mysql-haskell
 
-## 1.4.0 -- 2026.10.07
-+ Breaking: `query_`, `query`, `queryVector_`, `queryVector`, `queryStmt` and
-  `queryStmtVector` now throw the new `NoResultSet` exception when given a
-  statement without a result set, such as an INSERT (#47). They used to block
+## 1.3.2 -- 2026.10.07
++ `query_`, `query`, `queryVector_`, `queryVector`, `queryStmt` and
+  `queryStmtVector` now return an empty result set (no columns, no rows) when
+  given a statement without one, such as an INSERT (#47). They used to block
   forever waiting for a result set the server never sends, after the
-  statement had already run. Code that worked around the hang (for example
-  with a timeout) now gets the exception instead. Use `execute_`, `execute`
-  or `executeStmt` for those statements.
+  statement had already run. Use `execute_`, `execute` or `executeStmt` to get
+  the statement's `OK` with its affected-rows count.
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library
