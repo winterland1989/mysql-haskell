@@ -7,7 +7,7 @@
   connection can reach them: when the server picks P-384, P-521 or an FFDHE
   group, the client computes the key exchange with its ephemeral secret, and
   before 2.0 that point multiplication and modular exponentiation took time
-  that followed the secret (crypton #136, #140, #141). A client certificate
+  that followed the secret (crypton #136, #141). A client certificate
   supplied through tls's `onCertificateRequest` adds RSA and P-384/P-521 ECDSA
   signing with the long-term key, which leaked as well (#136, #138, #144).
 
