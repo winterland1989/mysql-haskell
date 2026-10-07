@@ -29,7 +29,7 @@ Median wall time in milliseconds over 10 runs, for 1 to 10 threads that each use
 
 Each thread either reads all 300,024 rows of the [sample employees table](https://github.com/datacharmer/test_db) with `select * from employees`, or inserts 1000 rows into a 29-column table with auto-commit off. The programs are the ones in `benchmark/`. They ran on mysql-haskell 1.3.3 with GHC 9.10.3 and `+RTS -N4`, against MySQL 8.0.45 and its own client library (mysql-simple goes through MariaDB Connector/C 3.3.5), with TLS off unless stated, on an AMD Ryzen AI 7 350 (October 2026). The server kept its data in RAM, so the inserts measure the clients rather than the disk.
 
-Leave the allocation area (`-A`) at its default when running with several capabilities: `-A128M` with `-N4` makes the runtime fault in every capability's 128 MB allocation area, which costs up to 280 ms per run in these benchmarks. On GHC 8.0, used for the 2016 figures this README showed until 2026, that only happened once several threads allocated; since GHC 8.2 it happens with a single thread too. mysql-haskell 0.6.0.0 and 1.3.3 read equally fast when both run without the flag.
+Leave the allocation area (`-A`) at its default when running with several capabilities: `-A128M` with `-N4` makes the runtime fault in a 128 MB allocation area for each capability it touches, which costs 35 to 280 ms per run in these benchmarks on every GHC version tried. Since GHC 8.2 it touches all four even when one thread does the work, where GHC 8.0, used for the 2016 figures this README showed until 2026, touched one or two. Without the flag, mysql-haskell 0.6.0.0 and 1.3.3 run plain and prepared selects equally fast, and 1.3.3 is 1.4 to 1.6 times faster over TLS.
 
 Motivation
 ----------

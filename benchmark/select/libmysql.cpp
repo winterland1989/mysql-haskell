@@ -40,8 +40,9 @@ void *func(void *arg)
     }
 
     mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
-#ifndef LIBMARIADB
     // MySQL's client prefers TLS by default (5.7.11+); the Haskell benchmarks use none.
+    // MariaDB Connector/C 3.3 stays plaintext; 3.4+ turns TLS on and needs its own setting.
+#ifndef LIBMARIADB
     unsigned int ssl_mode = SSL_MODE_DISABLED;
     mysql_options(mysql, MYSQL_OPT_SSL_MODE, &ssl_mode);
 #endif
