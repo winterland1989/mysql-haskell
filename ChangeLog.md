@@ -19,10 +19,13 @@
 + Statements that produce several results (a multi-statement query, or a
   CALL) no longer leave the later ones on the connection, where the next
   command took them as its own reply and every later query's results shifted
-  by one. `execute_`, `executeStmt` and the query functions now read them all:
-  `execute_` returns the first statement's `OK`, a CALL through `query_`
-  returns its result set, and result sets a function cannot return raise the
-  new `ExtraResultSets` once they have been read.
+  by one. `execute_`, `executeStmt` and the query functions now read them all.
+  `execute_` returns the first statement's `OK`. The query functions return
+  the first result set, skipping statements before it that only answer OK
+  (`SET @x := 1; SELECT @x` gives the SELECT's rows), so a CALL returns its
+  result set. A result set a function cannot return (any for `execute_`, any
+  after the first for the query functions) raises the new `ExtraResultSets`
+  once it has been read.
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library

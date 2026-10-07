@@ -464,16 +464,16 @@ instance Exception ERRException
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
 
--- | A statement produced result sets the function running it cannot return, as
--- @SELECT 1; SELECT 2@ through 'query_' does. They were read and discarded, so
--- the connection is still usable.
+-- | A statement produced a result set the function running it could not
+-- return: @execute@ and @executeStmt@ return none, the query functions only the
+-- first. It was read and discarded, so the connection is still usable.
 --
 -- @since 1.4.0
 data ExtraResultSets = ExtraResultSets deriving (Typeable, Show)
 instance Exception ExtraResultSets where
     displayException ExtraResultSets =
-        "mysql-haskell: the statement produced more result sets than this function "
-        ++ "returns (a multi-statement query, or a CALL returning several). The extra "
-        ++ "ones were read and discarded, so the connection is still usable. Send one "
-        ++ "SELECT per query."
+        "mysql-haskell: the statement produced a result set this function could not "
+        ++ "return (execute_ and executeStmt return none, query_ and queryStmt only the "
+        ++ "first). It was read and discarded, so the connection is still usable. Run "
+        ++ "statements that return rows through a query function, one result set per call."
 

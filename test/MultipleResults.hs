@@ -29,6 +29,12 @@ tests = testGroup "statements with several results"
         counts <- Stream.toList rows
         assertEqual "rows of the procedure's SELECT" [[MySQLInt64 0]] counts
         assertRowCount c 0
+    , testCase "query_ with an INSERT before a SELECT" $ withTable $ \c -> do
+        (_, rows) <- query_ c
+            "INSERT INTO several_results VALUES (1); SELECT COUNT(*) FROM several_results"
+        counts <- Stream.toList rows
+        assertEqual "rows of the SELECT" [[MySQLInt64 1]] counts
+        assertRowCount c 1
     , testCase "query_ with two SELECTs" $ withTable $ \c -> do
         (_, rows) <- query_ c
             "SELECT COUNT(*) FROM several_results; SELECT COUNT(*) FROM several_results"
@@ -36,6 +42,8 @@ tests = testGroup "statements with several results"
         case outcome of
             Left ExtraResultSets -> pure ()
             Right _ -> assertFailure "the second SELECT's result set went unreported"
+        again <- Stream.read rows
+        assertEqual "reading the finished rows again" Nothing again
         assertRowCount c 0
     ]
 
