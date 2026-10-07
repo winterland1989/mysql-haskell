@@ -16,7 +16,8 @@ module Database.MySQL.Connection
     ( module Database.MySQL.Connection
     ) where
 
-import           Control.Exception               (Exception, bracketOnError,
+import           Control.Exception               (Exception (displayException),
+                                                  bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
@@ -462,4 +463,17 @@ instance Exception ERRException
 
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
+
+-- | A statement produced result sets the function running it cannot return, as
+-- @SELECT 1; SELECT 2@ through 'query_' does. They were read and discarded, so
+-- the connection is still usable.
+--
+-- @since 1.4.0
+data ExtraResultSets = ExtraResultSets deriving (Typeable, Show)
+instance Exception ExtraResultSets where
+    displayException ExtraResultSets =
+        "mysql-haskell: the statement produced more result sets than this function "
+        ++ "returns (a multi-statement query, or a CALL returning several). The extra "
+        ++ "ones were read and discarded, so the connection is still usable. Send one "
+        ++ "SELECT per query."
 

@@ -16,6 +16,13 @@
   forever waiting for a result set the server never sends, after the
   statement had already run. Use `execute_`, `execute` or `executeStmt` to get
   the statement's `OK` with its affected-rows count.
++ Statements that produce several results (a multi-statement query, or a
+  CALL) no longer leave the later ones on the connection, where the next
+  command took them as its own reply and every later query's results shifted
+  by one. `execute_`, `executeStmt` and the query functions now read them all:
+  `execute_` returns the first statement's `OK`, a CALL through `query_`
+  returns its result set, and result sets a function cannot return raise the
+  new `ExtraResultSets` once they have been read.
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library

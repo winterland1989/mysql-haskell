@@ -184,6 +184,7 @@ test-suite integration
     BinLogNew
     CachingSha2
     ExecuteMany
+    MultipleResults
     MysqlTests
     QueryWithoutResultSet
     RoundtripBit
