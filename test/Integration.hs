@@ -6,6 +6,7 @@ import           System.Environment (lookupEnv)
 import           Test.Tasty (defaultMain, testGroup)
 import qualified CachingSha2
 import qualified MysqlTests
+import qualified QueryWithoutResultSet
 import qualified RoundtripBit
 import qualified RoundtripYear
 import qualified SelectOne
@@ -32,6 +33,7 @@ main = do
         , RoundtripBit.tests
         , RoundtripYear.tests
         , MysqlTests.tests
+        , QueryWithoutResultSet.tests
         ]
         -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
         -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
