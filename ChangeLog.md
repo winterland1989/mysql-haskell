@@ -6,9 +6,11 @@
   with its side-channel fixes, none of them backported to 1.x: RSA private-key
   operations no longer index a table by the exponent's bits (crypton #136,
   #144), and P-384/P-521 ECDSA no longer handles the nonce in variable time
-  (#138, #141). mysql-haskell reaches both when a TLS client certificate is
-  configured (`makeClientParams'`), because tls signs every handshake with
-  that key.
+  (#138, #141). Those run when a caller's tls `onCertificateRequest` hook
+  supplies a client certificate for a `Database.MySQL.TLS` connection, since
+  tls then signs the handshake with that key. `makeClientParams'` does not set
+  that hook (it fills `sharedCredentials`, which tls reads only on the server
+  side), so it never sends its certificate.
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library

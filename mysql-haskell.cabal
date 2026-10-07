@@ -111,8 +111,9 @@ library
   -- Decision: require crypton 2.0, the first release with its side-channel
   -- fixes (none backported to 1.x): before it, RSA signing leaked the private
   -- exponent through table lookups and P-384/P-521 ECDSA inverted the nonce in
-  -- variable time, both reachable through a TLS client certificate. Not the
-  -- latest 2.1.x, because Stackage nightly is moving to crypton 2.0.1.
+  -- variable time. tls signs with such a key when a caller's onCertificateRequest
+  -- hook supplies a client certificate (makeClientParams' does not set that hook).
+  -- Not the latest 2.1.x, because Stackage nightly is moving to crypton 2.0.1.
   build-depends:
     crypton ^>=2.0.0 || ^>=2.1.0,
     ram >=0.20 && <0.23
