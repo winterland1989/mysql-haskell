@@ -292,13 +292,19 @@ skipFurtherResults seen is = do
             ok <- decodeFromPacket p
             if isThereMore ok then skipFurtherResults seen is else pure seen
         | otherwise -> do
-            columnCount <- getFromPacket getLenEncInt p
-            replicateM_ columnCount (readPacket is)
-            _ <- readPacket is -- eof packet after the column definitions
-            eof <- skipRows is
+            eof <- skipResultSet is p
             if isThereMoreAfterEOF eof
             then skipFurtherResults SomeResultSet is
             else pure SomeResultSet
+
+-- | Read the result-set this column-count packet starts, returning its closing
+-- EOF packet.
+skipResultSet :: InputStream Packet -> Packet -> IO EOF
+skipResultSet is columnCountPacket = do
+    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    replicateM_ columnCount (readPacket is)
+    _ <- readPacket is -- eof packet after the column definitions
+    skipRows is
 
 -- | Read a result-set's rows up to and including the EOF packet that ends them.
 skipRows :: InputStream Packet -> IO EOF
@@ -372,13 +378,23 @@ executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
 executeStmt conn stid params =
   executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params))
 
--- | 'command', then read whatever further results its 'OK' announces, see
--- 'skipFurtherResults'.
+-- | Send a statement that should answer with an 'OK' and read its whole reply,
+-- see 'skipFurtherResults'. A result-set, also as the first reply (a SELECT or
+-- a CALL running one), is read off the connection and raises 'ExtraResultSets'.
 executeCommand :: MySQLConn -> Command -> IO OK
-executeCommand conn@(MySQLConn is _ _ _) cmd = do
-    ok <- command conn cmd
-    finishAfterOK is ok
-    pure ok
+executeCommand conn@(MySQLConn is os _ _) cmd = do
+    guardUnconsumed conn
+    writeCommand cmd os
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do
+            ok <- decodeFromPacket p
+            finishAfterOK is ok
+            pure ok
+        | otherwise -> do
+            eof <- skipResultSet is p
+            when (isThereMoreAfterEOF eof) (void (skipFurtherResults SomeResultSet is))
+            throwIO ExtraResultSets
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --

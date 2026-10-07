@@ -1,32 +1,27 @@
 # Revision history for mysql-haskell
 
 ## 1.3.2 -- 2026.10.07
-+ Require crypton 2.0 or newer, and with it `ram` instead of `memory`; the
-  `crypton-1-1` flag is gone. The cabal solver keeps a project that needs
-  crypton 1.x on 1.3.1. crypton 2.0 is the first release with its
-  side-channel fixes, none of them backported to 1.x. Any TLS connection can
-  reach them: when the server picks P-384, P-521 or an FFDHE
-  group, the client computes the key exchange with its ephemeral secret, and
-  before 2.0 that point multiplication and modular exponentiation took time
-  that followed the secret (crypton #136, #141). A client certificate
-  supplied through tls's `onCertificateRequest` adds RSA and P-384/P-521 ECDSA
-  signing with the long-term key, which leaked as well (#136, #138, #144).
-+ `query_`, `query`, `queryVector_`, `queryVector`, `queryStmt` and
-  `queryStmtVector` now return an empty result set (no columns, no rows) when
-  given a statement without one, such as an INSERT (#47). They used to block
-  forever waiting for a result set the server never sends, after the
-  statement had already run. Use `execute_`, `execute` or `executeStmt` to get
-  the statement's `OK` with its affected-rows count.
-+ Statements that produce several results (a multi-statement query, or a
-  CALL) no longer leave the later ones on the connection, where the next
-  command took them as its own reply and every later query's results shifted
-  by one. `execute_`, `executeStmt` and the query functions now read them all.
-  `execute_` returns the first statement's `OK`. The query functions return
-  the first result set, skipping statements before it that only answer OK
-  (`SET @x := 1; SELECT @x` gives the SELECT's rows), so a CALL returns its
-  result set. A result set a function cannot return (any for `execute_`, any
-  after the first for the query functions) raises the new `ExtraResultSets`
-  once it has been read.
+
+Requires crypton 2.0 or newer, the first crypton with the timing side-channel
+fixes that TLS connections reach; a project held to crypton 1.x keeps
+resolving to 1.3.1. The only API addition is the `ExtraResultSets` exception.
+The query functions now return an empty result for an INSERT, UPDATE or DELETE
+instead of hanging, and a CALL or a multi-statement query no longer leaves
+results behind for the next command to take as its own.
+
+Code that catches errors sees two differences. `execute_` and `executeStmt` on
+a statement that returns rows raise `ExtraResultSets` instead of
+`UnexpectedPacket`, and the connection stays usable. `query_`, `queryStmt` and
+their variants raise `ExtraResultSets` after the first result set's rows when
+the statement produced a second one. Stack users who set the removed
+`crypton-1-1` flag must delete it from `stack.yaml`, since Stack rejects flags a
+package does not define.
+
++ Query functions no longer hang on statements without a result set,
+  multi-result replies are read to the end, and crypton 2 is required
+  [#91](https://github.com/winterland1989/mysql-haskell/pull/91)
++ CI: the cabal job builds and runs the test suite
+  [#90](https://github.com/winterland1989/mysql-haskell/pull/90)
 
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library

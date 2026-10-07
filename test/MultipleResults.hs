@@ -22,6 +22,15 @@ tests = testGroup "statements with several results"
         _ <- execute_ c
             "INSERT INTO several_results VALUES (1); INSERT INTO several_results VALUES (2)"
         assertRowCount c 2
+    , testCase "execute_ with a SELECT" $ withTable $ \c ->
+        assertExtraResultSets c (execute_ c "SELECT COUNT(*) FROM several_results")
+    , testCase "executeStmt with a SELECT" $ withTable $ \c -> do
+        stmt <- prepareStmt c "SELECT COUNT(*) FROM several_results"
+        assertExtraResultSets c (executeStmt c stmt [])
+    , testCase "execute_ with a CALL returning one result set" $ withTable $ \c -> do
+        _ <- execute_ c "DROP PROCEDURE IF EXISTS one_result_set"
+        _ <- execute_ c "CREATE PROCEDURE one_result_set() SELECT COUNT(*) FROM several_results"
+        assertExtraResultSets c (execute_ c "CALL one_result_set()")
     , testCase "query_ with a CALL returning one result set" $ withTable $ \c -> do
         _ <- execute_ c "DROP PROCEDURE IF EXISTS one_result_set"
         _ <- execute_ c "CREATE PROCEDURE one_result_set() SELECT COUNT(*) FROM several_results"
@@ -64,6 +73,15 @@ withTable body = do
     case finished of
         Nothing -> assertFailure "blocked for 10 s waiting for a reply"
         Just () -> close c
+
+-- | The statement must raise 'ExtraResultSets' and leave the connection in step.
+assertExtraResultSets :: MySQLConn -> IO OK -> Assertion
+assertExtraResultSets c runStatement = do
+    outcome <- try runStatement
+    case outcome of
+        Left ExtraResultSets -> pure ()
+        Right _ -> assertFailure "the result set went unreported"
+    assertRowCount c 0
 
 -- | The connection must be back in step: a fresh query gets its own rows.
 assertRowCount :: MySQLConn -> Int64 -> Assertion
