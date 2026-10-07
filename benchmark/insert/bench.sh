@@ -51,8 +51,8 @@ mysql -utestMySQLHaskell -DtestMySQLHaskell -e "select count(*) from insert_test
 mysql -utestMySQLHaskell -DtestMySQLHaskell -e "DELETE FROM insert_test"
 
 cabal build
-# Decision: no -A128M. Since GHC 8.2, -A128M with -N4 faults in all four 128 MB
-# allocation areas, which added up to 280 ms per run and hid the library's speed.
+# Decision: no -A128M. With -N4 it faults in every capability's 128 MB allocation
+# area (since GHC 8.2 even single-threaded), up to 280 ms per run here.
 echo "=============== start benchmark haskell client ============="
 time ./dist/build/bench/bench 1          +RTS -N4 -RTS
 time ./dist/build/bench/bench 2          +RTS -N4 -RTS
