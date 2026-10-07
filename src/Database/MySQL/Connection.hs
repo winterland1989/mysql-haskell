@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE PackageImports #-}
 
 {-|
 Module      : Database.MySQL.Connection
@@ -18,7 +16,8 @@ module Database.MySQL.Connection
     ( module Database.MySQL.Connection
     ) where
 
-import           Control.Exception               (Exception, bracketOnError,
+import           Control.Exception               (Exception (displayException),
+                                                  bracketOnError,
                                                   throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
@@ -33,11 +32,7 @@ import qualified Data.ASN1.Types                 as ASN1
 import qualified Data.Binary                     as Binary
 import qualified Data.Binary.Put                 as Binary
 import           Data.Bits
-#if MIN_VERSION_crypton(1,1,0)
-import qualified "ram" Data.ByteArray             as BA
-#else
-import qualified "memory" Data.ByteArray          as BA
-#endif
+import qualified Data.ByteArray                  as BA
 import           Data.ByteString                 (ByteString)
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as L
@@ -468,4 +463,17 @@ instance Exception ERRException
 
 data UnexpectedPacket = UnexpectedPacket Packet deriving (Typeable, Show)
 instance Exception UnexpectedPacket
+
+-- | A statement produced a result set the function running it could not
+-- return: @execute@ and @executeStmt@ return none, the query functions only the
+-- first. It was read and discarded, so the connection is still usable.
+--
+-- @since 1.3.2
+data ExtraResultSets = ExtraResultSets deriving (Typeable, Show)
+instance Exception ExtraResultSets where
+    displayException ExtraResultSets =
+        "mysql-haskell: the statement produced a result set this function could not "
+        ++ "return (execute_ and executeStmt return none, query_ and queryStmt only the "
+        ++ "first). It was read and discarded, so the connection is still usable. Run "
+        ++ "statements that return rows through a query function, one result set per call."
 

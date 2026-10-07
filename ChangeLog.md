@@ -1,5 +1,32 @@
 # Revision history for mysql-haskell
 
+## 1.3.2 -- 2026.10.07
+
+Requires crypton 2.0 or newer, the first crypton with the timing side-channel
+fixes that TLS connections reach; a project held to crypton 1.x keeps
+resolving to 1.3.1. The only API addition is the `ExtraResultSets` exception.
+The query functions now return an empty result for an INSERT, UPDATE or DELETE
+instead of hanging. `execute_`, `executeStmt` and the query functions read the
+whole reply of a CALL or a multi-statement query, so they no longer leave
+results behind for the next command; `executeMany` and `executeMany_` are
+unchanged (#93).
+
+Errors change only for statements that produce several results, or rows where
+`execute_` and `executeStmt` expect none. Those two raise `ExtraResultSets` for
+a result set (1.3.1 threw `UnexpectedPacket` when it came first and returned the
+`OK` when it came later); the query functions raise it after the first result
+set's rows when a second one follows, which 1.3.1 left on the connection. A
+later statement that fails raises its `ERRException` from that call or its row
+stream, also ahead of `ExtraResultSets`. Stack users who set the removed
+`crypton-1-1` flag must delete it from `stack.yaml`, since Stack rejects flags a
+package does not define.
+
++ Query functions no longer hang on statements without a result set,
+  multi-result replies are read to the end, and crypton 2 is required
+  [#91](https://github.com/winterland1989/mysql-haskell/pull/91)
++ CI: the cabal job builds and runs the test suite
+  [#90](https://github.com/winterland1989/mysql-haskell/pull/90)
+
 ## 1.3.1 -- 2026.10.06
 + Allow crypton 2.0 and 2.1 (commercialhaskell/stackage#8128). The library
   code needed no change; CI now builds and tests against every crypton

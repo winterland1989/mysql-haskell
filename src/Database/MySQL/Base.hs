@@ -20,6 +20,8 @@ By using this library you will meet:
     * 'UnexpectedPacket':  you receive a unexpected packet when you shouldn't.
     * 'DecodePacketException': there's a packet we can't decode.
     * 'WrongParamsCount': you're giving wrong number of params to 'renderParams'.
+    * 'ExtraResultSets': a statement produced a result-set the function running it
+      could not return.
 
 Both 'UnexpectedPacket' and 'DecodePacketException' may indicate a bug of this library rather your code, so please report!
 
@@ -68,6 +70,7 @@ module Database.MySQL.Base
     , UnexpectedPacket(..)
     , DecodePacketException(..)
     , WrongParamsCount(..)
+    , ExtraResultSets(..)
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command
@@ -78,8 +81,10 @@ module Database.MySQL.Base
 
 import           Control.Exception                  (mask, onException, throwIO)
 import           Control.Monad
+import           Data.Binary                        (Get)
+import           Data.Bits                          ((.&.))
 import qualified Data.ByteString.Lazy               as L
-import           Data.IORef                         (writeIORef)
+import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Database.MySQL.Connection
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
@@ -139,8 +144,11 @@ executeMany_ conn@(MySQLConn is os _ _) qry = do
 
 -- | Execute a MySQL query which don't return a result-set.
 --
+-- For a multi-statement query this is the first statement's 'OK'; the later
+-- ones are read and discarded ('executeMany_' returns them all).
+--
 execute_ :: MySQLConn -> Query -> IO OK
-execute_ conn (Query qry) = command conn (COM_QUERY qry)
+execute_ conn (Query qry) = executeCommand conn (COM_QUERY qry)
 
 -- | Execute a MySQL query which return a result-set with parameters.
 --
@@ -166,24 +174,22 @@ queryVector conn qry params = queryVector_ conn (renderParams qry params)
 
 -- | Execute a MySQL query which return a result-set.
 --
+-- A statement without a result-set, such as an INSERT, gives no columns and no
+-- rows; use 'execute_' to get its 'OK'.
+--
 query_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream [MySQLValue])
 query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
-    p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else do
-        len <- getFromPacket getLenEncInt p
-        fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
-        _ <- readPacket is -- eof packet, we don't verify this though
-        writeIORef consumed False
-        rows <- Stream.makeInputStream $ do
-            q <- readPacket is
-            if  | isEOF q  -> writeIORef consumed True >> return Nothing
-                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getTextRow fields) q
-        return (fields, rows)
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) [] <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (getFromPacket (getTextRow fields))
+            return (fields, rows)
 
 -- | 'V.Vector' version of 'query_'.
 --
@@ -193,20 +199,125 @@ queryVector_ :: MySQLConn -> Query -> IO (V.Vector ColumnDef, InputStream (V.Vec
 queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) V.empty <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (getFromPacket (getTextRowVector fields))
+            return (fields, rows)
+
+-- | How the server answered a statement sent through a query function.
+data QueryReply
+    = WithoutResultSet      -- ^ only OK packets, e.g. for an INSERT
+    | ResultSetColumns Int  -- ^ a result-set with this many columns follows
+
+-- | Read the reply to a query function's statement up to its first result-set.
+--
+-- An OK packet must be told apart here: its leading 0x00 also decodes as a
+-- column count of zero, which used to leave the caller waiting forever for an
+-- EOF packet the server never sends (issue #47). OKs flagged with more results
+-- are skipped, so @SET \@x := 1; SELECT \@x@ gives the SELECT's rows.
+--
+-- Decision: answer such a statement with an empty result-set rather than an
+-- exception, so code that worked around the hang keeps working and the fix is
+-- not a breaking change. The OK's affected-rows count is dropped; 'execute_'
+-- returns it.
+readQueryReply :: InputStream Packet -> IO QueryReply
+readQueryReply is = do
     p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else do
-        len <- getFromPacket getLenEncInt p
-        fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
-        _ <- readPacket is -- eof packet, we don't verify this though
-        writeIORef consumed False
-        rows <- Stream.makeInputStream $ do
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do
+            ok <- decodeFromPacket p
+            if isThereMore ok then readQueryReply is else pure WithoutResultSet
+        | otherwise -> ResultSetColumns <$> getFromPacket getLenEncInt p
+
+-- | The rows of a result-set, read as they are asked for, up to its EOF packet.
+--
+-- Once finished, also when 'finishAfterEOF' throws, further reads answer
+-- Nothing rather than wait on the socket for packets that will never come.
+resultSetRows :: InputStream Packet -> IORef Bool -> (Packet -> IO row) -> IO (InputStream row)
+resultSetRows is consumed decodeRow = do
+    finished <- newIORef False
+    Stream.makeInputStream $ do
+        alreadyFinished <- readIORef finished
+        if alreadyFinished then pure Nothing else do
             q <- readPacket is
-            if  | isEOF q  -> writeIORef consumed True >> return Nothing
-                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> Just <$> getFromPacket (getTextRowVector fields) q
-        return (fields, rows)
+            if  | isEOF q -> do
+                    writeIORef finished True
+                    writeIORef consumed True
+                    finishAfterEOF is q
+                    pure Nothing
+                | isERR q -> decodeFromPacket q >>= throwIO . ERRException
+                | otherwise -> Just <$> decodeRow q
+
+-- | A binary-protocol row, whose packets start with 0x00 like an OK packet.
+decodeBinaryRow :: Get row -> Packet -> IO row
+decodeBinaryRow getRow q =
+    if isOK q then getFromPacket getRow q else throwIO (UnexpectedPacket q)
+
+-- | What followed a reply flagged SERVER_MORE_RESULTS_EXISTS.
+data FurtherResults
+    = OnlyOKs        -- ^ e.g. the closing OK of a CALL, or more INSERTs' OKs
+    | SomeResultSet  -- ^ at least one result-set, which was discarded
+
+-- | Finish a reply that ended in this 'OK', see 'skipFurtherResults'.
+finishAfterOK :: InputStream Packet -> OK -> IO ()
+finishAfterOK is ok =
+    when (isThereMore ok) (skipFurtherResults OnlyOKs is >>= throwOnResultSet)
+
+-- | Finish a result-set at its EOF packet, see 'skipFurtherResults'.
+finishAfterEOF :: InputStream Packet -> Packet -> IO ()
+finishAfterEOF is eofPacket = do
+    eof <- decodeFromPacket eofPacket
+    when (isThereMoreAfterEOF eof) (skipFurtherResults OnlyOKs is >>= throwOnResultSet)
+
+-- | SERVER_MORE_RESULTS_EXISTS on a result-set's closing EOF packet.
+isThereMoreAfterEOF :: EOF -> Bool
+isThereMoreAfterEOF eof = eofStatus eof .&. 0x08 /= 0
+
+-- | Read every result that follows a reply flagged SERVER_MORE_RESULTS_EXISTS.
+--
+-- The client asks for multi-statements and multi-results, so a CALL or a query
+-- holding several statements gets one result per statement. Any left unread
+-- would be taken by the next command as its own reply, shifting every later
+-- query's results by one.
+skipFurtherResults :: FurtherResults -> InputStream Packet -> IO FurtherResults
+skipFurtherResults seen is = do
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do
+            ok <- decodeFromPacket p
+            if isThereMore ok then skipFurtherResults seen is else pure seen
+        | otherwise -> do
+            eof <- skipResultSet is p
+            if isThereMoreAfterEOF eof
+            then skipFurtherResults SomeResultSet is
+            else pure SomeResultSet
+
+-- | Read the result-set this column-count packet starts, returning its closing
+-- EOF packet.
+skipResultSet :: InputStream Packet -> Packet -> IO EOF
+skipResultSet is columnCountPacket = do
+    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    replicateM_ columnCount (readPacket is)
+    _ <- readPacket is -- eof packet after the column definitions
+    skipRows is
+
+-- | Read a result-set's rows up to and including the EOF packet that ends them.
+skipRows :: InputStream Packet -> IO EOF
+skipRows is = do
+    q <- readPacket is
+    if  | isEOF q -> decodeFromPacket q
+        | isERR q -> decodeFromPacket q >>= throwIO . ERRException
+        | otherwise -> skipRows is
+
+throwOnResultSet :: FurtherResults -> IO ()
+throwOnResultSet further = case further of
+    OnlyOKs -> pure ()
+    SomeResultSet -> throwIO ExtraResultSets
 
 -- | Ask MySQL to prepare a query statement.
 --
@@ -265,31 +376,45 @@ resetStmt (MySQLConn is os _ consumed) stid = do
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
 executeStmt conn stid params =
-  command conn (COM_STMT_EXECUTE stid params (makeNullMap params))
+  executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params))
+
+-- | Send a statement that should answer with an 'OK' and read its whole reply,
+-- see 'skipFurtherResults'. A result-set, also as the first reply (a SELECT or
+-- a CALL running one), is read off the connection and raises 'ExtraResultSets',
+-- unless a later statement fails: its 'ERRException' is raised instead.
+executeCommand :: MySQLConn -> Command -> IO OK
+executeCommand conn@(MySQLConn is os _ _) cmd = do
+    guardUnconsumed conn
+    writeCommand cmd os
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do
+            ok <- decodeFromPacket p
+            finishAfterOK is ok
+            pure ok
+        | otherwise -> do
+            eof <- skipResultSet is p
+            when (isThereMoreAfterEOF eof) (void (skipFurtherResults SomeResultSet is))
+            throwIO ExtraResultSets
 
 -- | Execute prepared query statement with parameters, expecting resultset.
 --
--- Rules about 'UnconsumedResultSet' applied here too.
+-- Rules about 'UnconsumedResultSet' applied here too. A statement without a
+-- result-set gives no columns and no rows; use 'executeStmt' to get its 'OK'.
 --
 queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmt conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
-    p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else do
-        len <- getFromPacket getLenEncInt p
-        fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
-        _ <- readPacket is -- eof packet, we don't verify this though
-        writeIORef consumed False
-        rows <- Stream.makeInputStream $ do
-            q <- readPacket is
-            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRow fields len) q
-                | isEOF q  -> writeIORef consumed True >> return Nothing
-                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> throwIO (UnexpectedPacket q)
-        return (fields, rows)
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) [] <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (decodeBinaryRow (getBinaryRow fields len))
+            return (fields, rows)
 
 -- | 'V.Vector' version of 'queryStmt'
 --
@@ -299,21 +424,15 @@ queryStmtVector :: MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef
 queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
-    p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else do
-        len <- getFromPacket getLenEncInt p
-        fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
-        _ <- readPacket is -- eof packet, we don't verify this though
-        writeIORef consumed False
-        rows <- Stream.makeInputStream $ do
-            q <- readPacket is
-            if  | isOK  q  -> Just <$> getFromPacket (getBinaryRowVector fields len) q
-                | isEOF q  -> writeIORef consumed True >> return Nothing
-                | isERR q  -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> throwIO (UnexpectedPacket q)
-        return (fields, rows)
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) V.empty <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (decodeBinaryRow (getBinaryRowVector fields len))
+            return (fields, rows)
 
 -- | Run querys inside a transaction, querys will be rolled back if exception arise.
 --
