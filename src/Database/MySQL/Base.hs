@@ -47,6 +47,9 @@ module Database.MySQL.Base
     , queryVector_
     , query
     , queryVector
+    , queryMulti_
+    , queryMulti
+    , StatementResult(..)
       -- * Prepared query statement
     , prepareStmt
     , prepareStmtDetail
@@ -117,6 +120,9 @@ execute conn qry params = execute_ conn (renderParams qry params)
 -- you may want to use 'withTransaction' to make sure it's atomic, and
 -- use @sum . map okAffectedRows@ to get all affected rows count.
 --
+-- A statement that returns rows raises 'ExtraResultSets' once the whole reply
+-- has been read; 'queryMulti' returns those.
+--
 -- @since 0.2.0.0
 --
 executeMany :: QueryParam p => MySQLConn -> Query -> [[p]] -> IO [OK]
@@ -124,7 +130,7 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList = do
     guardUnconsumed conn
     let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
     writeCommand (COM_QUERY qry') os
-    mapM (\ _ -> waitCommandReply is) paramsList
+    readStatementResults is >>= onlyOKs
 
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[MySQLValue]] -> IO [OK] #-}
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[Param]]      -> IO [OK] #-}
@@ -134,13 +140,16 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList = do
 -- This's useful when your want to execute multiple SQLs without params, e.g. from a
 -- SQL dump, or a table migration plan.
 --
+-- A statement that returns rows raises 'ExtraResultSets' once the whole reply
+-- has been read; 'queryMulti_' returns those.
+--
 -- @since 0.8.4.0
 --
 executeMany_ :: MySQLConn -> Query -> IO [OK]
 executeMany_ conn@(MySQLConn is os _ _) qry = do
     guardUnconsumed conn
     writeCommand (COM_QUERY (fromQuery qry)) os
-    waitCommandReplys is
+    readStatementResults is >>= onlyOKs
 
 -- | Execute a MySQL query which don't return a result-set.
 --
@@ -208,6 +217,83 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             writeIORef consumed False
             rows <- resultSetRows is consumed (getFromPacket (getTextRowVector fields))
             return (fields, rows)
+
+-- | One result of a statement run through 'queryMulti_'.
+--
+-- @since 1.3.3
+data StatementResult
+    = StatementOK OK                            -- ^ a statement without rows, e.g. an INSERT
+    | StatementRows [ColumnDef] [[MySQLValue]]  -- ^ a result-set
+    deriving (Show, Eq)
+
+-- | Execute a MySQL query and return every result it produces, in order: one per
+-- statement of a multi-statement query, and for a CALL one per result-set the
+-- procedure returns followed by the CALL's own 'OK'.
+--
+-- Unlike 'query_' the rows are read up front, as each result-set has to be read
+-- off the connection before the next one arrives. A failing statement raises its
+-- 'ERRException'; the server runs no statement after it.
+--
+-- @since 1.3.3
+queryMulti_ :: MySQLConn -> Query -> IO [StatementResult]
+queryMulti_ conn@(MySQLConn is os _ _) (Query qry) = do
+    guardUnconsumed conn
+    writeCommand (COM_QUERY qry) os
+    readStatementResults is
+
+-- | 'queryMulti_' with parameters, filled in as 'query' does.
+--
+-- @since 1.3.3
+queryMulti :: QueryParam p => MySQLConn -> Query -> [p] -> IO [StatementResult]
+queryMulti conn qry params = queryMulti_ conn (renderParams qry params)
+
+{-# SPECIALIZE queryMulti :: MySQLConn -> Query -> [MySQLValue] -> IO [StatementResult] #-}
+{-# SPECIALIZE queryMulti :: MySQLConn -> Query -> [Param]      -> IO [StatementResult] #-}
+
+-- | Read a reply's results until one comes without SERVER_MORE_RESULTS_EXISTS.
+readStatementResults :: InputStream Packet -> IO [StatementResult]
+readStatementResults is = do
+    p <- readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> do
+            ok <- decodeFromPacket p
+            if isThereMore ok
+            then (StatementOK ok :) <$> readStatementResults is
+            else pure [StatementOK ok]
+        | otherwise -> do
+            (result, eof) <- readResultSet is p
+            if isThereMoreAfterEOF eof
+            then (result :) <$> readStatementResults is
+            else pure [result]
+
+-- | Read the text-protocol result-set this column-count packet starts, with the
+-- EOF packet that closes it.
+readResultSet :: InputStream Packet -> Packet -> IO (StatementResult, EOF)
+readResultSet is columnCountPacket = do
+    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    fields <- replicateM columnCount ((decodeFromPacket <=< readPacket) is)
+    _ <- readPacket is -- eof packet after the column definitions
+    (rows, eof) <- readTextRows fields [] is
+    pure (StatementRows fields rows, eof)
+
+-- | Read text-protocol rows up to the EOF packet that ends them; the rows read
+-- so far are kept in reverse.
+readTextRows :: [ColumnDef] -> [[MySQLValue]] -> InputStream Packet -> IO ([[MySQLValue]], EOF)
+readTextRows fields earlierRows is = do
+    q <- readPacket is
+    if  | isEOF q -> (,) (reverse earlierRows) <$> decodeFromPacket q
+        | isERR q -> decodeFromPacket q >>= throwIO . ERRException
+        | otherwise -> do
+            row <- getFromPacket (getTextRow fields) q
+            readTextRows fields (row : earlierRows) is
+
+-- | The 'OK's of a reply that should hold nothing else; a result-set among them
+-- raises 'ExtraResultSets', after the whole reply has been read.
+onlyOKs :: [StatementResult] -> IO [OK]
+onlyOKs results = case results of
+    [] -> pure []
+    StatementOK ok : rest -> (ok :) <$> onlyOKs rest
+    StatementRows _ _ : _ -> throwIO ExtraResultSets
 
 -- | How the server answered a statement sent through a query function.
 data QueryReply

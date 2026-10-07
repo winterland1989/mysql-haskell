@@ -61,7 +61,46 @@ tests = testGroup "statements with several results"
     , testCase "execute_ with a failing statement after a SELECT" $ withTable $ \c ->
         assertERRException c
             (execute_ c "SELECT COUNT(*) FROM several_results; SELECT * FROM no_such_table")
+    , testCase "queryMulti_ with an INSERT and two SELECTs" $ withTable $ \c -> do
+        results <- queryMulti_ c
+            "INSERT INTO several_results VALUES (1); SELECT COUNT(*) FROM several_results; \
+            \SELECT __id FROM several_results"
+        assertEqual "every result, in order"
+            [Left 1, Right [[MySQLInt64 1]], Right [[MySQLInt32 1]]]
+            (map resultShape results)
+        assertRowCount c 1
+    , testCase "queryMulti_ with a CALL returning two result sets" $ withTable $ \c -> do
+        _ <- execute_ c "DROP PROCEDURE IF EXISTS two_result_sets"
+        _ <- execute_ c
+            "CREATE PROCEDURE two_result_sets() BEGIN \
+            \SELECT COUNT(*) FROM several_results; SELECT COUNT(*) + 1 FROM several_results; END"
+        results <- queryMulti_ c "CALL two_result_sets()"
+        assertEqual "both result sets, then the CALL's OK"
+            [Right [[MySQLInt64 0]], Right [[MySQLInt64 1]], Left 0]
+            (map resultShape results)
+        assertRowCount c 0
+    , testCase "queryMulti with a parameter" $ withTable $ \c -> do
+        results <- queryMulti c
+            "INSERT INTO several_results VALUES (?); SELECT __id FROM several_results"
+            [MySQLInt32 7]
+        assertEqual "every result, in order"
+            [Left 1, Right [[MySQLInt32 7]]]
+            (map resultShape results)
+    , testCase "queryMulti_ with a failing statement after a SELECT" $ withTable $ \c ->
+        assertERRException c
+            (queryMulti_ c "SELECT COUNT(*) FROM several_results; SELECT * FROM no_such_table")
+    , testCase "executeMany_ with a SELECT after a DO" $ withTable $ \c ->
+        assertExtraResultSets c (executeMany_ c "DO 1; SELECT COUNT(*) FROM several_results")
+    , testCase "executeMany with a SELECT" $ withTable $ \c ->
+        assertExtraResultSets c
+            (executeMany c "SELECT COUNT(*) + ? FROM several_results" [[MySQLInt32 1]])
     ]
+
+-- | The affected rows of an 'OK', or the rows of a result set.
+resultShape :: StatementResult -> Either Int [[MySQLValue]]
+resultShape result = case result of
+    StatementOK ok -> Left (okAffectedRows ok)
+    StatementRows _ rows -> Right rows
 
 -- | Generous for a few statements on an empty temporary table, and short enough
 -- that a hang fails the suite instead of stalling CI.
@@ -82,7 +121,7 @@ withTable body = do
         Just () -> close c
 
 -- | The statement must raise 'ExtraResultSets' and leave the connection in step.
-assertExtraResultSets :: MySQLConn -> IO OK -> Assertion
+assertExtraResultSets :: MySQLConn -> IO a -> Assertion
 assertExtraResultSets c runStatement = do
     outcome <- try runStatement
     case outcome of
