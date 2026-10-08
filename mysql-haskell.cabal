@@ -70,6 +70,7 @@ library
     Database.MySQL.BinLogProtocol.BinLogMeta
     Database.MySQL.BinLogProtocol.BinLogValue
     Database.MySQL.Connection
+    Database.MySQL.Decoder
     Database.MySQL.Field
     Database.MySQL.Protocol.Auth
     Database.MySQL.Protocol.ColumnDef
@@ -77,6 +78,7 @@ library
     Database.MySQL.Protocol.Escape
     Database.MySQL.Protocol.MySQLValue
     Database.MySQL.Protocol.Packet
+    Database.MySQL.Protocol.RawRow
     Database.MySQL.TLS
     System.IO.Streams.TCP
     System.IO.Streams.TLS
@@ -139,6 +141,7 @@ test-suite test
     Aeson
     AesonBP
     BoundsCheck
+    DirectDecoding
     FieldRoundtrip
     JSON
     QC.ByteString
@@ -195,6 +198,7 @@ test-suite integration
     MysqlTests
     QueryWithoutResultSet
     RoundtripBit
+    RowDecoderQueries
     RoundtripYear
     SelectOne
     TextRow
@@ -209,6 +213,7 @@ test-suite integration
     directory,
     io-streams,
     mysql-haskell,
+    scientific,
     tasty >=0.11 && <2.0,
     tasty-hunit < 1.0,
     text,

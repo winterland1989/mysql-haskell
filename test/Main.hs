@@ -11,6 +11,7 @@ import qualified TCPStreams
 import qualified BoundsCheck
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
+import qualified DirectDecoding
 
 main :: IO ()
 main = do
@@ -32,4 +33,5 @@ main = do
       , BoundsCheck.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
+      , DirectDecoding.tests
       ]

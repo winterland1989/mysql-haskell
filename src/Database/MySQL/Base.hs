@@ -58,6 +58,15 @@ module Database.MySQL.Base
     , queryStmtVector
     , closeStmt
     , resetStmt
+      -- * Decoding rows without 'MySQLValue'
+      -- | Rows decoded straight into Haskell values with the decoders of
+      -- "Database.MySQL.Decoder", or handed over raw for libraries that decode
+      -- by column number.
+    , queryRows_
+    , queryRows
+    , queryStmtRows
+    , queryRawRows_
+    , queryStmtRawRows
       -- * Helpers
     , withTransaction
     , QueryParam(..)
@@ -80,6 +89,7 @@ module Database.MySQL.Base
     , module  Database.MySQL.Protocol.ColumnDef
     , module  Database.MySQL.Protocol.Packet
     , module  Database.MySQL.Protocol.MySQLValue
+    , module  Database.MySQL.Protocol.RawRow
     ) where
 
 import           Control.Exception                  (mask, onException, throwIO)
@@ -91,11 +101,13 @@ import qualified Data.ByteString                    as B
 import qualified Data.ByteString.Lazy               as L
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Database.MySQL.Connection
+import qualified Database.MySQL.Decoder             as Decoder
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
+import           Database.MySQL.Protocol.RawRow
 
 import           Database.MySQL.Query
 import           System.IO.Streams                  (InputStream)
@@ -206,7 +218,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeTextRowPacket (map textColumn fields))
+            rows <- resultSetRows is consumed (decodeTextRowPacket (map columnKind fields))
             return (fields, rows)
 
 -- | 'V.Vector' version of 'query_'.
@@ -224,8 +236,102 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeTextRowVectorPacket (V.map textColumn fields))
+            rows <- resultSetRows is consumed (decodeTextRowVectorPacket (V.map columnKind fields))
             return (fields, rows)
+
+-- | 'query_' with each row decoded by a 'Decoder.RowDecoder' instead of into
+-- 'MySQLValue's. The decoder is checked against the column definitions before
+-- any row is read: a result set it does not fit raises 'Decoder.ColumnMismatch'.
+-- A field that does not decode raises 'Decoder.FieldError' when its row is read.
+-- Either way the remaining rows are skipped first, so the connection stays
+-- usable.
+--
+-- A statement without a result-set, such as an INSERT, gives no columns and no
+-- rows, as with 'query_'.
+--
+-- @since 1.3.4
+queryRows_ :: Decoder.RowDecoder a -> MySQLConn -> Query -> IO ([ColumnDef], InputStream a)
+queryRows_ decoder conn qry = queryRawRows_ conn qry >>= decodeRawRows decoder
+
+-- | 'queryRows_' with parameters, filled in as 'query' does.
+--
+-- @since 1.3.4
+queryRows :: QueryParam p => Decoder.RowDecoder a -> MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream a)
+queryRows decoder conn qry params = queryRows_ decoder conn (renderParams qry params)
+
+{-# SPECIALIZE queryRows :: Decoder.RowDecoder a -> MySQLConn -> Query -> [MySQLValue] -> IO ([ColumnDef], InputStream a) #-}
+{-# SPECIALIZE queryRows :: Decoder.RowDecoder a -> MySQLConn -> Query -> [Param]      -> IO ([ColumnDef], InputStream a) #-}
+
+-- | 'queryStmt' with each row decoded by a 'Decoder.RowDecoder', as
+-- 'queryRows_' does.
+--
+-- @since 1.3.4
+queryStmtRows :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream a)
+queryStmtRows decoder conn stid params = queryStmtRawRows conn stid params >>= decodeRawRows decoder
+
+decodeRawRows :: Decoder.RowProtocol protocol
+              => Decoder.RowDecoder a -> ([ColumnDef], InputStream (RawRow protocol))
+              -> IO ([ColumnDef], InputStream a)
+decodeRawRows decoder (fields, rawRows) = case fields of
+    [] -> (,) [] <$> Stream.nullInput
+    _  -> case Decoder.prepareRowDecoder decoder (V.fromList fields) of
+        Left mismatch  -> Stream.skipToEof rawRows >> throwIO mismatch
+        Right prepared -> (,) fields <$> Stream.mapM (decodePreparedRow prepared rawRows) rawRows
+
+decodePreparedRow :: Decoder.PreparedRow protocol a -> InputStream (RawRow protocol) -> RawRow protocol -> IO a
+decodePreparedRow prepared rawRows row = case Decoder.runPreparedRow prepared row of
+    Left fieldError -> Stream.skipToEof rawRows >> throwIO fieldError
+    Right value     -> pure value
+
+-- | 'query_' handing each row over as a 'RawRow', with the bounds of its
+-- fields, for libraries that decode by column number with
+-- 'Decoder.prepareFieldParser' and 'Decoder.runFieldParser'.
+--
+-- @since 1.3.4
+queryRawRows_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream (RawRow TextProtocol))
+queryRawRows_ conn@(MySQLConn is os _ consumed) (Query qry) = do
+    guardUnconsumed conn
+    writeCommand (COM_QUERY qry) os
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) [] <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (textRawRowPacket len)
+            return (fields, rows)
+
+-- | 'queryStmt' handing each row over as a 'RawRow', as 'queryRawRows_' does.
+--
+-- @since 1.3.4
+queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
+queryStmtRawRows conn@(MySQLConn is os _ consumed) stid params = do
+    guardUnconsumed conn
+    writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
+    reply <- readQueryReply is
+    case reply of
+        WithoutResultSet -> (,) [] <$> Stream.nullInput
+        ResultSetColumns len -> do
+            fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+            _ <- readPacket is -- eof packet, we don't verify this though
+            writeIORef consumed False
+            rows <- resultSetRows is consumed (binaryRawRowPacket (V.fromList (map binaryWidth fields)))
+            return (fields, rows)
+
+textRawRowPacket :: Int -> Packet -> IO (RawRow TextProtocol)
+textRawRowPacket columnCount packet = do
+    let row = L.toStrict (pBody packet)
+    either (throwRowError row) pure (textRawRow columnCount row)
+
+-- | A binary-protocol row, whose packets start with 0x00 like an OK packet.
+binaryRawRowPacket :: V.Vector BinaryWidth -> Packet -> IO (RawRow BinaryProtocol)
+binaryRawRowPacket widths packet =
+    if isOK packet
+    then do
+        let row = L.toStrict (pBody packet)
+        either (throwRowError row) pure (binaryRawRow widths row)
+    else throwIO (UnexpectedPacket packet)
 
 -- | One result of a statement run through 'queryMulti_'.
 --
@@ -282,12 +388,12 @@ readResultSet is columnCountPacket = do
     columnCount <- getFromPacket getLenEncInt columnCountPacket
     fields <- replicateM columnCount ((decodeFromPacket <=< readPacket) is)
     _ <- readPacket is -- eof packet after the column definitions
-    (rows, eof) <- readTextRows (map textColumn fields) [] is
+    (rows, eof) <- readTextRows (map columnKind fields) [] is
     pure (StatementRows fields rows, eof)
 
 -- | Read text-protocol rows up to the EOF packet that ends them; the rows read
 -- so far are kept in reverse.
-readTextRows :: [TextColumn] -> [[MySQLValue]] -> InputStream Packet -> IO ([[MySQLValue]], EOF)
+readTextRows :: [ColumnKind] -> [[MySQLValue]] -> InputStream Packet -> IO ([[MySQLValue]], EOF)
 readTextRows columns earlierRows is = do
     q <- readPacket is
     if  | isEOF q -> (,) (reverse earlierRows) <$> decodeFromPacket q
@@ -331,23 +437,23 @@ readQueryReply is = do
 
 -- | A text-protocol row packet decoded with 'decodeTextRow', raising
 -- 'DecodePacketFailed' as 'getFromPacket' does.
-decodeTextRowPacket :: [TextColumn] -> Packet -> IO [MySQLValue]
+decodeTextRowPacket :: [ColumnKind] -> Packet -> IO [MySQLValue]
 decodeTextRowPacket columns packet = do
     let row = L.toStrict (pBody packet)
-    either (throwTextRowError row) pure (decodeTextRow columns row)
+    either (throwRowError row) pure (decodeTextRow columns row)
 
 -- | 'V.Vector' version of 'decodeTextRowPacket'.
-decodeTextRowVectorPacket :: V.Vector TextColumn -> Packet -> IO (V.Vector MySQLValue)
+decodeTextRowVectorPacket :: V.Vector ColumnKind -> Packet -> IO (V.Vector MySQLValue)
 decodeTextRowVectorPacket columns packet = do
     let row = L.toStrict (pBody packet)
-    either (throwTextRowError row) pure (decodeTextRowVector columns row)
+    either (throwRowError row) pure (decodeTextRowVector columns row)
 
-throwTextRowError :: ByteString -> TextRowError -> IO a
-throwTextRowError row rowError =
+throwRowError :: ByteString -> RowError -> IO a
+throwRowError row rowError =
     throwIO (DecodePacketFailed (B.drop offset row) (Int.toInt64 offset)
-                                (describeTextRowError rowError))
+                                (describeRowError rowError))
   where
-    offset = textRowErrorOffset rowError
+    offset = rowErrorOffset rowError
 
 -- | The rows of a result-set, read as they are asked for, up to its EOF packet.
 --

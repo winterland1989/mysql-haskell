@@ -1,6 +1,19 @@
 -- | 'decodeTextRow', which the query functions decode text-protocol rows with,
 -- must give the values 'getTextRow' gives, and say where a row is malformed.
-module TextRowDecoding (tests) where
+module TextRowDecoding
+    ( tests
+      -- * Rows for other tests
+    , genRow
+    , genColumn
+    , genField
+    , encodeRow
+    , columnOf
+    , employeeColumns
+    , employeeRow
+    , utf8
+    , binary
+    , unsigned
+    ) where
 
 import           Data.Binary.Parser                 (parseOnly)
 import           Data.Binary.Put                    (Put, putByteString,
@@ -35,7 +48,7 @@ tests = testGroup "text rows"
                     , sameValues columns (B.take kept (encodeRow fields))
                     ]
     , testCase "an employees row" $
-        decodeTextRow (map textColumn employeeColumns) employeeRow
+        decodeTextRow (map columnKind employeeColumns) employeeRow
             @?= Right
                 [ MySQLInt32 10001
                 , MySQLDate (fromGregorian 1953 9 2)
@@ -45,25 +58,25 @@ tests = testGroup "text rows"
                 , MySQLDate (fromGregorian 1986 6 26)
                 ]
     , testCase "NULL fields" $
-        decodeTextRow (map textColumn (take 2 employeeColumns)) (B.pack [0xFB, 0xFB])
+        decodeTextRow (map columnKind (take 2 employeeColumns)) (B.pack [0xFB, 0xFB])
             @?= Right [MySQLNull, MySQLNull]
     , testCase "a row cut inside a field names that column and where it starts" $
-        decodeTextRow (map textColumn employeeColumns) (B.take 20 employeeRow)
-            @?= Left (TextRowError 2 17 TextRowEndsEarly)
+        decodeTextRow (map columnKind employeeColumns) (B.take 20 employeeRow)
+            @?= Left (RowError 2 17 RowEndsEarly)
     , testCase "a field that does not lex names its column" $
-        decodeTextRow (map textColumn employeeColumns) (encodeRow [Just "1", Just "abc"])
-            @?= Left (TextRowError 1 2
-                        (TextRowField (TextFieldUnparsable mySQLTypeDate "abc")))
+        decodeTextRow (map columnKind employeeColumns) (encodeRow [Just "1", Just "abc"])
+            @?= Left (RowError 1 2
+                        (RowFieldError (TextFieldUnparsable mySQLTypeDate "abc")))
     ]
 
 -- | Both decoders succeed with the same values, or both fail.
 sameValues :: [ColumnDef] -> ByteString -> Property
 sameValues columns row =
-    rowValues (decodeTextRow (map textColumn columns) row)
+    rowValues (decodeTextRow (map columnKind columns) row)
         === rowValues (parseOnly (getTextRow columns) row)
 
 decodes :: [ColumnDef] -> ByteString -> Bool
-decodes columns row = either (const False) (const True) (decodeTextRow (map textColumn columns) row)
+decodes columns row = either (const False) (const True) (decodeTextRow (map columnKind columns) row)
 
 rowValues :: Either rowError [MySQLValue] -> Maybe [MySQLValue]
 rowValues = either (const Nothing) Just
@@ -118,7 +131,7 @@ genRow :: Gen ([ColumnDef], [Maybe ByteString])
 genRow = do
     columnCount <- choose (0, 8)
     columns <- vectorOf columnCount genColumn
-    fields <- mapM (genField . textColumn) columns
+    fields <- mapM (genField . columnKind) columns
     pure (columns, fields)
 
 -- | Every column type the text decoder knows, and JSON (0xf5), which it does not.
@@ -139,37 +152,37 @@ genColumn = columnOf
     <*> elements [utf8, binary]
 
 -- | A column of type NULL always holds the NULL marker.
-genField :: TextColumn -> Gen (Maybe ByteString)
+genField :: ColumnKind -> Gen (Maybe ByteString)
 genField column = case column of
-    TextColumnNull          -> pure Nothing
-    TextColumnValue _ value -> frequency [(1, pure Nothing), (6, Just <$> genValueBytes value)]
+    NullColumn          -> pure Nothing
+    ValueColumn _ value -> frequency [(1, pure Nothing), (6, Just <$> genValueBytes value)]
 
 -- | Mostly what the server sends for the column, sometimes bytes it would not.
 -- Text in a non-binary character set stays valid UTF-8: 'getTextRow' decodes it
 -- lazily, so invalid bytes would throw while the values are compared.
-genValueBytes :: TextValue -> Gen ByteString
+genValueBytes :: ValueKind -> Gen ByteString
 genValueBytes value = case value of
-    TextDecimal     -> renderedOrArbitrary (arbitrary :: Gen Double)
-    TextInt8U       -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt8        -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt16U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt16       -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt32U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt32       -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt64U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextInt64       -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextFloat       -> renderedOrArbitrary (arbitrary :: Gen Double)
-    TextDouble      -> renderedOrArbitrary (arbitrary :: Gen Double)
-    TextYear        -> renderedOrArbitrary (arbitrary :: Gen Integer)
-    TextTimeStamp   -> renderedOrArbitrary (arbitrary :: Gen LocalTime)
-    TextDateTime    -> renderedOrArbitrary (arbitrary :: Gen LocalTime)
-    TextDate        -> renderedOrArbitrary (arbitrary :: Gen Day)
-    TextTime        -> oneof [genTime, renderedOrArbitrary (arbitrary :: Gen TimeOfDay)]
-    TextGeometry    -> arbitrary
-    TextUtf8        -> T.encodeUtf8 <$> arbitrary
-    TextBytes       -> frequency [(9, arbitrary), (1, genLongBytes)]
-    TextBit         -> B.pack <$> (choose (1, 10) >>= vector)
-    TextUnsupported -> arbitrary
+    KindDecimal     -> renderedOrArbitrary (arbitrary :: Gen Double)
+    KindInt8U       -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt8        -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt16U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt16       -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt32U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt32       -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt64U      -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindInt64       -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindFloat       -> renderedOrArbitrary (arbitrary :: Gen Double)
+    KindDouble      -> renderedOrArbitrary (arbitrary :: Gen Double)
+    KindYear        -> renderedOrArbitrary (arbitrary :: Gen Integer)
+    KindTimeStamp   -> renderedOrArbitrary (arbitrary :: Gen LocalTime)
+    KindDateTime    -> renderedOrArbitrary (arbitrary :: Gen LocalTime)
+    KindDate        -> renderedOrArbitrary (arbitrary :: Gen Day)
+    KindTime        -> oneof [genTime, renderedOrArbitrary (arbitrary :: Gen TimeOfDay)]
+    KindGeometry    -> arbitrary
+    KindText        -> T.encodeUtf8 <$> arbitrary
+    KindBytes       -> frequency [(9, arbitrary), (1, genLongBytes)]
+    KindBit         -> B.pack <$> (choose (1, 10) >>= vector)
+    KindUnsupported -> arbitrary
 
 renderedOrArbitrary :: Show a => Gen a -> Gen ByteString
 renderedOrArbitrary gen = frequency [(4, BC.pack . show <$> gen), (1, arbitrary)]

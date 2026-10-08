@@ -10,6 +10,7 @@ import qualified MysqlTests
 import qualified QueryWithoutResultSet
 import qualified RoundtripBit
 import qualified RoundtripYear
+import qualified RowDecoderQueries
 import qualified SelectOne
 import qualified TLSConnection
 import qualified UnixSocket
@@ -36,6 +37,7 @@ main = do
         , MysqlTests.tests
         , QueryWithoutResultSet.tests
         , MultipleResults.tests
+        , RowDecoderQueries.tests
         ]
         -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
         -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
