@@ -66,6 +66,10 @@ module Database.MySQL.Decoder
   , PreparedRow
   , prepareRowDecoder
   , runPreparedRow
+    -- * Prepared statements' rows as 'MySQLValue's
+  , BinaryValueColumns
+  , binaryValueColumns
+  , decodeBinaryValues
   , module Database.MySQL.Protocol.RawRow
   ) where
 
@@ -668,6 +672,42 @@ parseRawField column parser row = case rawField row column of
         (# kind | #)  -> (# FieldError column kind | #)
         (# | value #) -> (# | value #)
     RawAbsent -> (# FieldError column FieldAbsent | #)
+
+-- | A prepared statement's columns, resolved once per result set for
+-- 'decodeBinaryValues'.
+--
+-- @since 1.3.4
+data BinaryValueColumns = BinaryValueColumns !Int [BinaryValueColumn]
+
+data BinaryValueColumn = BinaryValueColumn !ColumnKind !BinaryWidth
+
+-- | @since 1.3.4
+binaryValueColumns :: [ColumnDef] -> BinaryValueColumns
+binaryValueColumns definitions = BinaryValueColumns (length definitions)
+    (map (\definition -> BinaryValueColumn (columnKind definition) (binaryWidth definition)) definitions)
+
+-- | The values of a binary-protocol row, as
+-- 'Database.MySQL.Protocol.MySQLValue.getBinaryRow' gives them, in one walk
+-- over the row that calls the value parser directly, as 'decodeTextRow' does
+-- for the text protocol. Bytes after the last field are ignored.
+--
+-- @since 1.3.4
+decodeBinaryValues :: BinaryValueColumns -> ByteString -> Either FieldError [MySQLValue]
+decodeBinaryValues (BinaryValueColumns columnCount columns) row = case binaryRowStart columnCount row of
+    (# fieldError | #) -> Left fieldError
+    (# | start #) -> case binaryValueFields row 0 start columns of
+        (# fieldError | #) -> Left fieldError
+        (# | values #)     -> Right values
+
+binaryValueFields :: ByteString -> Int -> Int -> [BinaryValueColumn] -> (# FieldError | [MySQLValue] #)
+binaryValueFields row column offset columns = case columns of
+    [] -> (# | [] #)
+    BinaryValueColumn kind width : laterColumns ->
+        case binaryFieldStep column width (FieldParser (Just MySQLNull) (binaryMySQLValue kind)) row offset of
+            (# fieldError | #) -> (# fieldError | #)
+            (# | (# value, next #) #) -> case binaryValueFields row (column + 1) next laterColumns of
+                (# fieldError | #) -> (# fieldError | #)
+                (# | values #)     -> (# | value : values #)
 
 -- | A result set that does not fit a 'RowDecoder', raised before any row is read.
 --

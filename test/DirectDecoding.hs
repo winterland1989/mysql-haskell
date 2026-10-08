@@ -55,6 +55,16 @@ tests = testGroup "direct decoding"
                     , binaryMySQLValues columns (B.take kept row)
                         === getBinaryRowValues columns (B.take kept row)
                     ]
+    , testProperty "binary rows: decodeBinaryValues gives what getBinaryRow gives" $ checkCoverage $
+        forAll genBinaryRow $ \(columns, row) ->
+            forAll (choose (0, B.length row)) $ \kept ->
+                cover 25 (isJust (getBinaryRowValues columns row)) "the whole row decodes" $
+                conjoin
+                    [ shownRow (Decode.decodeBinaryValues (Decode.binaryValueColumns columns) row)
+                        === getBinaryRowValues columns row
+                    , shownRow (Decode.decodeBinaryValues (Decode.binaryValueColumns columns) (B.take kept row))
+                        === getBinaryRowValues columns (B.take kept row)
+                    ]
     , testProperty "text rows: by column number gives what the row decoder gives" $ checkCoverage $
         forAll genRow $ \(columns, fields) ->
             forAll (choose (0, B.length (encodeRow fields))) $ \kept ->

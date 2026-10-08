@@ -94,7 +94,6 @@ module Database.MySQL.Base
 
 import           Control.Exception                  (mask, onException, throwIO)
 import           Control.Monad
-import           Data.Binary                        (Get)
 import           Data.Bits                          ((.&.))
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
@@ -485,10 +484,15 @@ resultSetRows is consumed decodeRow = do
                 | isERR q -> decodeFromPacket q >>= throwIO . ERRException
                 | otherwise -> Just <$> decodeRow q
 
--- | A binary-protocol row, whose packets start with 0x00 like an OK packet.
-decodeBinaryRow :: Get row -> Packet -> IO row
-decodeBinaryRow getRow q =
-    if isOK q then getFromPacket getRow q else throwIO (UnexpectedPacket q)
+-- | A binary-protocol row, whose packets start with 0x00 like an OK packet. A
+-- row that does not decode raises 'DecodePacketFailed', as it did when rows
+-- were decoded with 'getBinaryRow'.
+binaryValuesPacket :: Decoder.BinaryValueColumns -> Packet -> IO [MySQLValue]
+binaryValuesPacket columns packet = do
+    row <- binaryRowBody packet
+    case Decoder.decodeBinaryValues columns row of
+        Left fieldError -> throwIO (DecodePacketFailed row 0 (show fieldError))
+        Right values    -> pure values
 
 -- | What followed a reply flagged SERVER_MORE_RESULTS_EXISTS.
 data FurtherResults
@@ -645,7 +649,7 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeBinaryRow (getBinaryRow fields len))
+            rows <- resultSetRows is consumed (binaryValuesPacket (Decoder.binaryValueColumns fields))
             return (fields, rows)
 
 -- | 'V.Vector' version of 'queryStmt'
@@ -663,7 +667,8 @@ queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeBinaryRow (getBinaryRowVector fields len))
+            rows <- resultSetRows is consumed
+                (fmap V.fromList . binaryValuesPacket (Decoder.binaryValueColumns (V.toList fields)))
             return (fields, rows)
 
 -- | Run querys inside a transaction, querys will be rolled back if exception arise.
