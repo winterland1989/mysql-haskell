@@ -236,10 +236,10 @@ data MySQLRowEnv = MySQLRowEnv
 
 instance FieldDecode MySQLRowEnv Int64 where
     prepareField env _name col onErr onOk =
-        case prepareFieldParser int64 col (columnAt env col) of
+        case prepareFieldParser int64 (ColumnNumber col) (columnAt env col) of
             Left mismatch -> onErr (renderColumnMismatch mismatch)
             Right parser  -> onOk $ FieldRunner $ \rowEnv onErr' onOk' ->
-                runFieldParser parser (envRow rowEnv) col (onErr' . renderFieldError) onOk'
+                runFieldParser parser (envRow rowEnv) (ColumnNumber col) (onErr' . renderFieldError) onOk'
 ```
 
 That drops both `MySQLValue` and `PersistValue`; only the record remains.
