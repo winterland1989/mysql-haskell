@@ -156,8 +156,68 @@ takes 2.25 ms for the Haskell client and 2.45 ms for the C client
 character-set conversion tables, not the dynamic linker resolving symbols.
 The fixed cost per insert run is 9.5 ms for Haskell and 7.8 ms for C.
 
+## Which fixes need an API change
+
+A cost can be removed in three places: inside the library behind the current
+API, by a JIT without touching the code, or by a new typed API that decodes
+straight into the caller's record (a `FromRow`-style class, checked against the
+column definitions once per result set). Only one cost needs the new API.
+
+| cost | inside the library | by a JIT | needs a typed API |
+|------|--------------------|----------|-------------------|
+| type check per field (finding 1) | yes, one decoder per column chosen when the column definitions arrive | partly, see below | no |
+| unknown calls through `Get` (finding 1, ~10%) | yes, a strict hand-written row decoder | mostly, through call-site caches and inlining | no |
+| a thunk per field (finding 1, ~3%) | yes, evaluate each value while decoding | yes, with runtime speculation | no |
+| a `MySQLValue` box and list cell per field | no | only when the values don't escape | yes |
+| packet framing (finding 2) | yes | partly | no |
+| syscalls per insert (finding 3) | yes | no | no |
+| receive buffer (finding 4) | yes | no | no |
+| lexing (finding 5) and UTF-8 (finding 6) | faster parsers, but the work stays | no | no |
+
+The column type changes from field to field within a row, so a JIT sees five
+or six targets at the one place that dispatches on it. To remove the dispatch
+it would have to treat the column list as a constant and unroll the row loop
+for every query shape. The library gets the same effect once per result set,
+for the price of one indirect call per field.
+
+GHC's demand analysis removes laziness only where it can prove a value will be
+used, and the use of a decoded field happens in the caller's code, outside the
+library. A JIT can observe at run time that every field gets forced and
+evaluate it eagerly, with a way back to the thunk for a value whose evaluation
+would fail or run long; optimistic evaluation (Ennals and Peyton Jones, ICFP 2003) did this inside GHC. THC does
+not do this: it uses GHC's static demand signatures, opt-in through
+`-Dthc.callDemands=true` (`docs/demand-probe.md` in ekmett/thc).
+
+Graal's partial escape analysis removes allocations that do not escape the
+compiled code. That covers a benchmark that throws rows away, but not an
+application that keeps rows or passes them through io-streams.
+
+How much the typed API alone would save is an estimate from the data layout,
+not a measurement. Each field costs a `MySQLValue` constructor (2 words; small
+strict fields are unpacked, the rest are one pointer) and a list cell
+(3 words), so 40 bytes per field and 240 bytes per `employees` row, about 6% of
+the 4.2 KB allocated per row today. A typed decoder still builds the caller's
+record, so its saving is smaller than that, plus whatever the caller's own
+conversion out of `MySQLValue` costs, which this benchmark does not include.
+
+### THC
+
+THC (ekmett/thc, Haskell on Truffle and Graal) is the JIT within reach, and it
+is not an option yet. On the 1BR challenge it needs 108 to 115 s for a billion
+rows where native GHC needs 1.32 s
+([jappeace/1br `thc/PERFORMANCE.md`](https://github.com/jappeace/1br/blob/HEAD/thc/PERFORMANCE.md));
+reading `Addr#` words, which is what parsing a `ByteString` does, is the main
+cost there. THC requires GHC 9.14.1, which ships base 4.22.0.0, while this
+package allows `base <4.22`. The C parts of crypton and network have not been
+tried under it.
+
 ## Suggested order
 
-Findings 1 and 2 together, since they share the decoding path, measured by
-instructions per row. Findings 3 and 4 are each small and independent of the
-rest.
+1. Findings 1 and 2 inside the library, thunks included, measured by
+   instructions per row. They need no API change.
+2. Then measure what the `MySQLValue` boxes and list cells cost in what
+   remains. Only that decides whether a typed API is worth adding next to the
+   current one.
+3. Findings 3 and 4 are each small and independent of the rest.
+4. Revisit a JIT once THC parses a `ByteString` within a small factor of
+   native GHC.
