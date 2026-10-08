@@ -103,6 +103,8 @@ import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      lexSignedIntegral,
                                                      lengthEncodedInt,
                                                      lexSignedTime)
+-- The internal utilities come in qualified only, so that the @module@
+-- re-export in the export list does not publish them.
 import           Database.MySQL.Protocol.RawRow      hiding (binaryNullMapLength,
                                                              isNullInMap)
 import qualified Database.MySQL.Protocol.RawRow      as RawRow
