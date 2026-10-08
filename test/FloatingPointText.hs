@@ -11,23 +11,28 @@ import           Test.Tasty
 import           Test.Tasty.HUnit                      (testCase, (@?=))
 import           Test.Tasty.QuickCheck                 (testProperty)
 
+-- | The properties run 5,000 cases each: CI uses QuickCheck's default of 100,
+-- which missed a fast path that accepted truncated significands.
 tests :: TestTree
 tests = testGroup "FLOAT and DOUBLE text"
-    [ testProperty "a shown Double reads back as itself" $
+    [ testProperty "a shown Double reads back as itself" $ withMaxSuccess 5000 $
         forAll finiteDouble $ \value -> readDouble (BC.pack (show value)) === Just value
-    , testProperty "a Double in plain decimals reads back as itself" $
+    , testProperty "a Double in plain decimals reads back as itself" $ withMaxSuccess 5000 $
         forAll finiteDouble $ \value -> readDouble (BC.pack (showFFloat Nothing value "")) === Just value
-    , testProperty "a shown Float reads back as itself" $
+    , testProperty "a shown Float reads back as itself" $ withMaxSuccess 5000 $
         forAll finiteFloat $ \value -> readFloat (BC.pack (show value)) === Just value
-    , testProperty "any decimal text gives the Double read gives" $
+    , testProperty "any decimal text gives the Double read gives" $ withMaxSuccess 5000 $
         forAll genDecimalText $ \text -> readDouble (BC.pack text) === Just (read text)
-    , testProperty "any decimal text gives the Float read gives" $
+    , testProperty "any decimal text gives the Float read gives" $ withMaxSuccess 5000 $
         forAll genDecimalText $ \text -> readFloat (BC.pack text) === Just (read text)
     , testCase "exponent form, as MySQL writes large values" $
         map (readDouble . BC.pack) ["1e20", "-1e20", "1.5e300", "2.5E-7", "1e+5"]
             @?= map Just [1e20, -1e20, 1.5e300, 2.5e-7, 1e5]
     , testCase "seventeen significant digits" $
         readDouble (BC.pack "0.30000000000000004") @?= Just (0.1 + 0.2)
+    , testCase "more than 19 significant digits, the first 19 an exact Double" $
+        map (readDouble . BC.pack) ["1000000000000000000000", "10000000000000000000000.5", "-20840713482839362564625e5"]
+            @?= map Just [1e21, 1e22, -2.0840713482839362564625e27]
     , testCase "out of range" $
         map (readDouble . BC.pack) ["1e400", "1e-400"] @?= map Just [1 / 0, 0]
     , testCase "bytes after the number are ignored, as readDecimal ignored them" $

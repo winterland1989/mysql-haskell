@@ -35,15 +35,14 @@ read @1e20@ as 1, missed 2 of 243 plain decimals. Reading the text exactly as a
 14,000 instructions per DOUBLE field.
 
 Clinger's fast path avoids that cost: when the significant digits, read as an
-integer, convert to a Double exactly (at most 2^53, so up to 15 digits always
-do) and the power of ten is at most 22 either way, that power is exact as
-well, so one multiplication or division rounds once and gives the nearest
-Double. A Float takes integers up to 2^24 and powers up to 10. MySQL writes
-most values within these bounds; the rest go the exact way.
-
-The integer is accumulated from at most 19 digits, so it cannot wrap around a
-'Word64'. A number with more digits has a 19-digit prefix of at least 10^18,
-which no Double holds exactly, so it always goes the exact way.
+integer, lie in the exact integer range of a Double (below 2^53, where
+unwitch's 'Word64.toDouble' converts and every integer is exact) and the power
+of ten is at most 22 either way, that power is exact as well, so one
+multiplication or division rounds once and gives the nearest Double. A Float
+takes integers below 2^24 and powers up to 10. A number with more than 19
+significant digits does not fit a 'Word64' and has no significand at all, so
+it never reaches the fast path. MySQL writes most values within these bounds;
+the rest go the exact way.
 -}
 
 -- | The nearest 'Double' to the decimal number at the start of the bytes:
@@ -51,24 +50,30 @@ which no Double holds exactly, so it always goes the exact way.
 readDouble :: ByteString -> Maybe Double
 readDouble bytes = do
     decimal <- scanDecimal bytes
-    if  | abs (decimalExponent decimal) <= 22 ->
-            -- Right only when the significand is exact in a Double (at most
-            -- 2^53); see Note [Correctly rounded floating point text].
-            case Word64.toDouble (decimalSignificand decimal) of
-                Right exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
-                Left _            -> exactly bytes
-        | otherwise -> exactly bytes
+    case fastSignificand Word64.toDouble 22 decimal of
+        Just exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
+        Nothing          -> exactly bytes
 
 -- | 'readDouble' for 'Float'.
 readFloat :: ByteString -> Maybe Float
 readFloat bytes = do
     decimal <- scanDecimal bytes
-    if  | abs (decimalExponent decimal) <= 10 ->
-            -- Right only when the significand is exact in a Float (at most 2^24).
-            case Word64.toFloat (decimalSignificand decimal) of
-                Right exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
-                Left _            -> exactly bytes
-        | otherwise -> exactly bytes
+    case fastSignificand Word64.toFloat 10 decimal of
+        Just exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
+        Nothing          -> exactly bytes
+
+-- | The significand as an exact @a@, when the fast path applies: it has at
+-- most 19 digits, @toExactInteger@ converts it (unwitch's conversions fail
+-- outside the exact integer range of the type), and the power of ten is
+-- within @maxPower@ either way. 'Nothing' sends the number the exact way, so
+-- the conversion's failure is a choice of path, not a lost error.
+-- See Note [Correctly rounded floating point text].
+fastSignificand :: (Word64 -> Either overflow a) -> Int -> DecimalText -> Maybe a
+fastSignificand toExactInteger maxPower decimal = do
+    digits <- decimalSignificand decimal
+    if abs (decimalExponent decimal) <= maxPower
+    then either (const Nothing) Just (toExactInteger digits)
+    else Nothing
 
 -- | The significand times @10 ^ powerOfTen@, with one rounding: the caller
 -- guarantees that the significand and the power of ten are both exact.
@@ -98,9 +103,9 @@ data Sign = Positive | Negative
 -- | A decimal number in text, as far as the fast path needs it.
 data DecimalText = DecimalText
     { decimalSign        :: !Sign
-    , decimalSignificand :: !Word64
-      -- ^ the first 19 digits from the first non-zero one on, without the
-      -- point, as one integer; see Note [Correctly rounded floating point text]
+    , decimalSignificand :: !(Maybe Word64)
+      -- ^ the digits from the first non-zero one on, without the point, as one
+      -- integer; 'Nothing' when there are more than 19, too many for a 'Word64'
     , decimalExponent    :: !Int
       -- ^ the power of ten the significand is scaled by; 'maxBound' when the
       -- written exponent has more digits than the fast path takes
@@ -119,7 +124,10 @@ scanDecimal bytes =
        then Nothing
        else Just DecimalText
            { decimalSign        = sign
-           , decimalSignificand = B.foldl' appendDigit 0 (B.take 19 significant)
+           , decimalSignificand =
+               if B.length significant <= 19
+               then Just (B.foldl' appendDigit 0 significant)
+               else Nothing
            , decimalExponent    = writtenExponent afterFraction `minusDigits` B.length fractionPart
            }
 
