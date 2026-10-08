@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | The select benchmark with every value of every row decoded, as an
+-- application that reads its columns would.
 module Main where
 
 import           Control.Concurrent.Async
@@ -25,7 +27,9 @@ go n table = void . flip mapConcurrently [1..n] $ \ _ -> do
                                     }
 
     (fs, is) <- query_ c (Query ("SELECT * FROM " <> BL.pack table))
-    (rowCount :: Int) <- fold (\s _ -> s+1) 0 is
+    -- MySQLValue's fields are strict, so a value in weak head normal form is
+    -- fully decoded; MySQLHaskell.hs only counts the rows.
+    (rowCount :: Int) <- fold (\s row -> foldr seq () row `seq` s + 1) 0 is
     putStr "field name: "
     forM_ fs $ \ f -> B.putStr (columnName f) >> B.putStr ", "
     putStr "\n"

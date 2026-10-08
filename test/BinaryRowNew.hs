@@ -7,14 +7,19 @@ import           Control.Applicative
 import           Data.Time.Calendar  (fromGregorian)
 import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
+import           QueryApi
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
 
-tests :: MySQLConn -> Assertion
-tests c = do
+-- | The columns of the @test_new@ table.
+testNewColumns :: ColumnCount
+testNewColumns = ColumnCount 4
+
+tests :: QueryApi -> MySQLConn -> Assertion
+tests api c = do
     selStmt <- prepareStmt c "SELECT * FROM test_new"
 
-    (f, is) <- queryStmt c selStmt []
+    (f, is) <- apiQueryStmt api testNewColumns c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
         [ mySQLTypeLong
         , mySQLTypeDateTime
@@ -37,7 +42,7 @@ tests c = do
                 \__timestamp  = '2016-08-08 17:25:59.1234'                ,\
                 \__time       = '-199:59:59.123456' WHERE __id=0"
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testNewColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol" v
@@ -54,7 +59,7 @@ tests c = do
                 \__timestamp  = '2016-08-08 17:25:59.12'                ,\
                 \__time       = '199:59:59.123' WHERE __id=0"
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testNewColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol 2" v
@@ -79,7 +84,7 @@ tests c = do
                 ]
 
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testNewColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "roundtrip binary protocol" v
@@ -98,7 +103,7 @@ tests c = do
                 ]
 
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testNewColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "roundtrip binary protocol 2" v

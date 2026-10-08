@@ -3,13 +3,16 @@ module Main (main) where
 import qualified Data.ByteString as B
 import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
-import           Test.Tasty (defaultMain, testGroup)
+import           Test.Tasty (TestTree, defaultMain, testGroup)
 import qualified CachingSha2
+import qualified FloatingPoint
 import qualified MultipleResults
 import qualified MysqlTests
+import           QueryApi
 import qualified QueryWithoutResultSet
 import qualified RoundtripBit
 import qualified RoundtripYear
+import qualified RowDecoderQueries
 import qualified SelectOne
 import qualified TLSConnection
 import qualified UnixSocket
@@ -30,17 +33,26 @@ main = do
     mTlsCaPath <- lookupEnv "MYSQL_TLS_CA_PATH"
 
     defaultMain $ testGroup "mysql-integration" $
-        [ SelectOne.tests
-        , RoundtripBit.tests
-        , RoundtripYear.tests
-        , MysqlTests.tests
-        , QueryWithoutResultSet.tests
+        [ MysqlTests.tests
         , MultipleResults.tests
+        , RowDecoderQueries.tests
         ]
-        -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
-        -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
-        ++ [ CachingSha2.tests | isMySql80 ]
-        -- Unix socket tests are included only when a socket file is found.
-        ++ [ UnixSocket.tests p | Just p <- [mSockPath] ]
-        -- TLS tests are included only when a CA certificate path is provided.
-        ++ [ TLSConnection.tests p | Just p <- [mTlsCaPath] ]
+        ++ map (apiTests isMySql80 mSockPath mTlsCaPath) queryApis
+
+-- | The suites that read rows, through one of the 'QueryApi's.
+apiTests :: Bool -> Maybe FilePath -> Maybe FilePath -> QueryApi -> TestTree
+apiTests isMySql80 mSockPath mTlsCaPath api = testGroup (apiName api) $
+    [ SelectOne.tests api
+    , RoundtripBit.tests api
+    , RoundtripYear.tests api
+    , QueryWithoutResultSet.tests api
+    , MultipleResults.rowTests api
+    , FloatingPoint.tests api
+    ]
+    -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
+    -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
+    ++ [ CachingSha2.tests api | isMySql80 ]
+    -- Unix socket tests are included only when a socket file is found.
+    ++ maybe [] (\p -> [UnixSocket.tests api p]) mSockPath
+    -- TLS tests are included only when a CA certificate path is provided.
+    ++ maybe [] (\p -> [TLSConnection.tests api p]) mTlsCaPath

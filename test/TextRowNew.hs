@@ -6,12 +6,17 @@ module TextRowNew where
 import           Data.Time.Calendar  (fromGregorian)
 import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
+import           QueryApi
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
 
-tests :: MySQLConn -> Assertion
-tests c = do
-    (f, is5) <- query_ c "SELECT * FROM test_new"
+-- | The columns of the @test_new@ table.
+testNewColumns :: ColumnCount
+testNewColumns = ColumnCount 4
+
+tests :: QueryApi -> MySQLConn -> Assertion
+tests api c = do
+    (f, is5) <- apiQuery_ api testNewColumns c "SELECT * FROM test_new"
 
     assertEqual "decode Field types" (columnType <$> f)
         [ mySQLTypeLong
@@ -35,7 +40,7 @@ tests c = do
                 \__timestamp  = '2016-08-08 17:25:59.1234'                ,\
                 \__time       = '-199:59:59.123456' WHERE __id=0"
 
-    (_, is4) <- query_ c "SELECT * FROM test_new"
+    (_, is4) <- apiQuery_ api testNewColumns c "SELECT * FROM test_new"
     Just v2 <- Stream.read is4
 
     assertEqual "decode text protocol" v2
@@ -52,7 +57,7 @@ tests c = do
                 \__timestamp  = '2016-08-08 17:25:59.12'                ,\
                 \__time       = '199:59:59.1234' WHERE __id=0"
 
-    (_, is0) <- query_ c "SELECT * FROM test_new"
+    (_, is0) <- apiQuery_ api testNewColumns c "SELECT * FROM test_new"
     Just v3 <- Stream.read is0
 
     assertEqual "decode text protocol 2" v3
@@ -74,7 +79,7 @@ tests c = do
                 ]
 
 
-    (_, is1) <- query_ c "SELECT * FROM test_new"
+    (_, is1) <- apiQuery_ api testNewColumns c "SELECT * FROM test_new"
     Just v4 <- Stream.read is1
 
     assertEqual "roundtrip text protocol" v4
@@ -95,7 +100,7 @@ tests c = do
                 , MySQLTime 0 (TimeOfDay 199 59 59.1234)
                 ]
 
-    (_, is2) <- query_ c "SELECT * FROM test_new"
+    (_, is2) <- apiQuery_ api testNewColumns c "SELECT * FROM test_new"
     Just v5 <- Stream.read is2
 
     assertEqual "roundtrip text protocol 2" v5
@@ -133,7 +138,7 @@ tests c = do
             \)"
             row1
 
-    (_, is3) <- query c "SELECT * FROM test_new WHERE __id IN (?) ORDER BY __id" [Many [MySQLInt32 0, MySQLInt32 1]]
+    (_, is3) <- apiQuery api testNewColumns c "SELECT * FROM test_new WHERE __id IN (?) ORDER BY __id" [Many [MySQLInt32 0, MySQLInt32 1]]
     Just v6 <- Stream.read is3
     Just v7 <- Stream.read is3
 
