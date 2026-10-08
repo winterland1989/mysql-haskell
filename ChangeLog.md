@@ -1,5 +1,28 @@
 # Revision history for mysql-haskell
 
+## 1.3.4 -- 2026.10.08
+
+New functions only. Rows decode faster: the query functions resolve each
+column's type once per result set and walk each row once, so an application
+decoding rows into its own types through `query_` or `queryStmt` runs up to
+22% fewer instructions and allocates 22 to 40% less. The new
+`Database.MySQL.Decoder` decodes rows straight into Haskell values with
+`queryRows_`, `queryRows` and `queryStmtRows`, raising typed errors instead of
+exceptions from inside values; `queryRawRows_` and `queryStmtRawRows` hand over
+rows with their field bounds for libraries that decode by column number.
+
+`Database.MySQL.Base` now also exports those five functions and re-exports
+`Database.MySQL.Protocol.RawRow`, which can clash with same-named definitions
+under an unqualified import. The new `unwitch` dependency needs GHC 9.6 or
+newer; projects on older compilers keep resolving to 1.3.3.
+
++ Faster row decoding, and decoders straight into Haskell values
+  [#98](https://github.com/winterland1989/mysql-haskell/pull/98)
++ Benchmark figures re-measured on current hardware
+  [#95](https://github.com/winterland1989/mysql-haskell/pull/95)
++ A profile of where the CPU time goes, in `benchmark/`
+  [#96](https://github.com/winterland1989/mysql-haskell/pull/96)
+
 ## 1.3.3 -- 2026.10.07
 
 New functions, and fixes to `executeMany` and `executeMany_` for inputs that
