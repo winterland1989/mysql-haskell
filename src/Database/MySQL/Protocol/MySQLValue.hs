@@ -84,6 +84,7 @@ import           Data.Time.LocalTime                (LocalTime (..),
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
+import           Database.MySQL.Protocol.FloatingPoint (readDouble, readFloat)
 import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                       (Generic)
 import qualified Data.Vector                        as V
@@ -319,8 +320,8 @@ decodeTextValue fieldType value bytes = case value of
     KindInt32       -> lexedValue fieldType MySQLInt32 lexSignedIntegral bytes
     KindInt64U      -> lexedValue fieldType MySQLInt64U lexSignedIntegral bytes
     KindInt64       -> lexedValue fieldType MySQLInt64 lexSignedIntegral bytes
-    KindFloat       -> lexedValue fieldType MySQLFloat lexSignedFraction bytes
-    KindDouble      -> lexedValue fieldType MySQLDouble lexSignedFraction bytes
+    KindFloat       -> lexedValue fieldType MySQLFloat readFloat bytes
+    KindDouble      -> lexedValue fieldType MySQLDouble readDouble bytes
     KindYear        -> lexedValue fieldType MySQLYear lexSignedIntegral bytes
     KindTimeStamp   -> lexedValue fieldType MySQLTimeStamp lexLocalTime bytes
     KindDateTime    -> lexedValue fieldType MySQLDateTime lexLocalTime bytes
@@ -366,9 +367,8 @@ lexSignedIntegral bytes = fst <$> LexInt.readSigned LexInt.readDecimal bytes
 
 lexSignedFraction :: Fractional a => ByteString -> Maybe a
 lexSignedFraction bytes = fst <$> LexFrac.readSigned LexFrac.readDecimal bytes
-{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Float #-}
-{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Double #-}
 {-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Scientific #-}
+
 
 -- | @YYYY-MM-DD hh:mm:ss[.fraction]@, as DATETIME and TIMESTAMP fields come.
 lexLocalTime :: ByteString -> Maybe LocalTime

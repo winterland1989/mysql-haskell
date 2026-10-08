@@ -5,6 +5,7 @@ import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
 import           Test.Tasty (TestTree, defaultMain, testGroup)
 import qualified CachingSha2
+import qualified FloatingPoint
 import qualified MultipleResults
 import qualified MysqlTests
 import           QueryApi
@@ -46,6 +47,7 @@ apiTests isMySql80 mSockPath mTlsCaPath api = testGroup (apiName api) $
     , RoundtripYear.tests api
     , QueryWithoutResultSet.tests api
     , MultipleResults.rowTests api
+    , FloatingPoint.tests api
     ]
     -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
     -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.

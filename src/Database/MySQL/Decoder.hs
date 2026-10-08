@@ -91,6 +91,7 @@ import qualified Data.Vector                        as V
 import           Data.Word                          (Word16, Word32, Word64,
                                                      Word8)
 import           Database.MySQL.Protocol.ColumnDef
+import           Database.MySQL.Protocol.FloatingPoint (readDouble, readFloat)
 import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      MySQLValue (..),
                                                      RowErrorKind (..),
@@ -223,12 +224,12 @@ word64 = kindDecoder "Word64" [KindInt64U] (lexedField lexSignedIntegral)
 
 -- | FLOAT.
 float :: FieldDecoder Float
-float = kindDecoder "Float" [KindFloat] (lexedField lexSignedFraction)
+float = kindDecoder "Float" [KindFloat] (lexedField readFloat)
     (fixedField 4 (castWord32ToFloat . littleEndian32))
 
 -- | DOUBLE.
 double :: FieldDecoder Double
-double = kindDecoder "Double" [KindDouble] (lexedField lexSignedFraction)
+double = kindDecoder "Double" [KindDouble] (lexedField readDouble)
     (fixedField 8 (castWord64ToDouble . littleEndian64))
 
 -- | DECIMAL; the binary protocol sends it as text too.

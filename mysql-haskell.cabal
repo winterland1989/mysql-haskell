@@ -76,6 +76,7 @@ library
     Database.MySQL.Protocol.ColumnDef
     Database.MySQL.Protocol.Command
     Database.MySQL.Protocol.Escape
+    Database.MySQL.Protocol.FloatingPoint
     Database.MySQL.Protocol.MySQLValue
     Database.MySQL.Protocol.Packet
     Database.MySQL.Protocol.RawRow
@@ -144,6 +145,7 @@ test-suite test
     DecoderRoundtrip
     DirectDecoding
     FieldRoundtrip
+    FloatingPointText
     JSON
     QC.ByteString
     QC.Combinator
@@ -196,6 +198,7 @@ test-suite integration
     BinLogNew
     CachingSha2
     ExecuteMany
+    FloatingPoint
     MultipleResults
     MysqlTests
     QueryApi

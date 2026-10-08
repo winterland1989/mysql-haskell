@@ -13,6 +13,7 @@ import qualified FieldRoundtrip
 import qualified TextRowDecoding
 import qualified DirectDecoding
 import qualified DecoderRoundtrip
+import qualified FloatingPointText
 
 main :: IO ()
 main = do
@@ -36,4 +37,5 @@ main = do
       , TextRowDecoding.tests
       , DirectDecoding.tests
       , DecoderRoundtrip.tests
+      , FloatingPointText.tests
       ]
