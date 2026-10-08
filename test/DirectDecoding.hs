@@ -103,10 +103,10 @@ tests = testGroup "direct decoding"
                     typedBinary decoder column (encodeBinaryRow [fieldBytes])
                         === viaFieldBinary viaField column (encodeBinaryRow [fieldBytes])
     , testCase "a raw row knows where each field is" $
-        fmap (\row -> map (Decode.rawField row) [0, 1, 6]) (Decode.textRawRow 6 employeeRow)
+        fmap (\row -> map (Decode.rawField row . ColumnNumber) [0, 1, 6]) (Decode.textRawRow 6 employeeRow)
             @?= Right [Decode.RawBytes "10001", Decode.RawBytes "1953-09-02", Decode.RawAbsent]
     , testCase "a column number past the row is absent, however large" $
-        fmap (\row -> map (Decode.rawField row) [6, 2 ^ (62 :: Int), 2 ^ (62 :: Int) + 1000, -1])
+        fmap (\row -> map (Decode.rawField row . ColumnNumber) [6, 2 ^ (62 :: Int), 2 ^ (62 :: Int) + 1000, -1])
              (Decode.textRawRow 6 employeeRow)
             @?= Right (replicate 4 Decode.RawAbsent)
     , testCase "a record decoder reads the employees row" $
@@ -117,22 +117,22 @@ tests = testGroup "direct decoding"
             @?= Mismatch (Decode.ColumnCountMismatch 1 6)
     , testCase "a decoder that does not take the column's type" $
         decodeTextWith (Decode.field Decode.text) [columnOf mySQLTypeLong 0 binary] (encodeRow [Just "1"])
-            @?= Mismatch (Decode.ColumnTypeMismatch 0 "" mySQLTypeLong "Text")
+            @?= Mismatch (Decode.ColumnTypeMismatch (ColumnNumber 0) "" mySQLTypeLong "Text")
     , testCase "NULL is Nothing for a nullable decoder" $
         decodeTextWith (Decode.field (Decode.nullable Decode.int32)) [columnOf mySQLTypeLong 0 binary]
             (encodeRow [Nothing])
             @?= Decoded Nothing
     , testCase "NULL is an error for any other decoder" $
         decodeTextWith (Decode.field Decode.int32) [columnOf mySQLTypeLong 0 binary] (encodeRow [Nothing])
-            @?= FieldFailed (Decode.FieldError 0 Decode.FieldUnexpectedNull)
+            @?= FieldFailed (Decode.FieldError (ColumnNumber 0) Decode.FieldUnexpectedNull)
     , testCase "a negative TIME is not a TimeOfDay" $
         decodeTextWith (Decode.field Decode.timeOfDay) [columnOf mySQLTypeTime 0 binary]
             (encodeRow [Just "-01:00:00"])
-            @?= FieldFailed (Decode.FieldError 0 (Decode.FieldNegativeTime "-01:00:00"))
+            @?= FieldFailed (Decode.FieldError (ColumnNumber 0) (Decode.FieldNegativeTime "-01:00:00"))
     , testCase "invalid UTF-8 is an error, not an exception" $
         decodeTextWith (Decode.field Decode.text) [columnOf mySQLTypeVarString 0 utf8]
             (encodeRow [Just (B.pack [0xff])])
-            @?= FieldFailed (Decode.FieldError 0 (Decode.FieldInvalidUtf8 (B.pack [0xff])))
+            @?= FieldFailed (Decode.FieldError (ColumnNumber 0) (Decode.FieldInvalidUtf8 (B.pack [0xff])))
     , testCase "the binary protocol's signed integers are two's complement" $
         decodeBinaryWith (Decode.field Decode.int32) [columnOf mySQLTypeLong 0 binary]
             (encodeBinaryRow [Just (B.pack [0xfe, 0xff, 0xff, 0xff])])
@@ -176,10 +176,10 @@ rawRowValues :: Decode.RowProtocol protocol
 rawRowValues columns rawRow = do
     raw <- either (const Nothing) Just rawRow
     parsers <- either (const Nothing) Just
-        (traverse (uncurry (Decode.prepareFieldParser Decode.mysqlValue)) (zip [0 ..] columns))
-    shownRow (traverse (rawFieldValue raw) (zip [0 ..] parsers))
+        (traverse (uncurry (Decode.prepareFieldParser Decode.mysqlValue)) (zip (map ColumnNumber [0 ..]) columns))
+    shownRow (traverse (rawFieldValue raw) (zip (map ColumnNumber [0 ..]) parsers))
 
-rawFieldValue :: Decode.RawRow protocol -> (Int, Decode.FieldParser protocol MySQLValue)
+rawFieldValue :: Decode.RawRow protocol -> (ColumnNumber, Decode.FieldParser protocol MySQLValue)
               -> Either Decode.FieldError MySQLValue
 rawFieldValue raw (column, parser) = Decode.runFieldParser parser raw column Left Right
 

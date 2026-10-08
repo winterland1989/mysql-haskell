@@ -24,6 +24,7 @@ module Database.MySQL.Protocol.RawRow
   , rawRowBytes
   , rawRowFieldCount
   , RawField(..)
+  , ColumnNumber(..)
   , rawField
     -- * Building raw rows
   , textRawRow
@@ -46,9 +47,11 @@ import qualified Data.Vector                        as V
 import qualified Data.Vector.Unboxed                as VU
 import qualified Data.Vector.Unboxed.Mutable        as VUM
 import           Database.MySQL.Protocol.ColumnDef
-import           Database.MySQL.Protocol.MySQLValue (RowError (..),
+import           Database.MySQL.Protocol.MySQLValue (ColumnNumber (..),
+                                                     RowError (..),
                                                      RowErrorKind (..),
-                                                     lengthEncodedInt)
+                                                     lengthEncodedInt,
+                                                     nextColumn)
 
 -- | Rows of a plain query, whose fields are text.
 --
@@ -93,8 +96,8 @@ data RawField
 -- on the result never allocates the 'RawField'.
 --
 -- @since 1.3.4
-rawField :: RawRow protocol -> Int -> RawField
-rawField row@(RawRow bytes bounds) column =
+rawField :: RawRow protocol -> ColumnNumber -> RawField
+rawField row@(RawRow bytes bounds) (ColumnNumber column) =
     -- Compared with the field count, not @2 * column + 1@ with the bounds'
     -- length: doubling a large column number overflows and passes the check.
     if column < 0 || column >= rawRowFieldCount row
@@ -117,20 +120,20 @@ nullFieldLength = -1
 textRawRow :: Int -> ByteString -> Either RowError (RawRow TextProtocol)
 textRawRow columnCount row = runST $ do
     bounds <- VUM.unsafeNew (2 * columnCount)
-    outcome <- fillTextBounds row bounds columnCount 0 0
+    outcome <- fillTextBounds row bounds columnCount (ColumnNumber 0) 0
     case outcome of
         Left rowError -> pure (Left rowError)
         Right ()      -> Right . RawRow row <$> VU.unsafeFreeze bounds
 
 -- | Records the bounds of the fields from @column@ on, the first of which
 -- starts at byte @offset@.
-fillTextBounds :: ByteString -> VUM.MVector s Int -> Int -> Int -> Int -> ST s (Either RowError ())
-fillTextBounds row bounds columnCount column offset =
-    if  | column >= columnCount -> pure (Right ())
+fillTextBounds :: ByteString -> VUM.MVector s Int -> Int -> ColumnNumber -> Int -> ST s (Either RowError ())
+fillTextBounds row bounds columnCount column@(ColumnNumber number) offset =
+    if  | number >= columnCount -> pure (Right ())
         | offset >= B.length row -> pure (Left (RowError column offset RowEndsEarly))
         | B.unsafeIndex row offset == 0xFB -> do
             writeBounds bounds column offset nullFieldLength
-            fillTextBounds row bounds columnCount (column + 1) (offset + 1)
+            fillTextBounds row bounds columnCount (nextColumn column) (offset + 1)
         | otherwise -> case lengthEncodedInt row offset of
             (# kind | #) -> pure (Left (RowError column offset kind))
             (# | (# fieldLength, fieldStart #) #) ->
@@ -138,10 +141,10 @@ fillTextBounds row bounds columnCount column offset =
                 then pure (Left (RowError column offset RowEndsEarly))
                 else do
                     writeBounds bounds column fieldStart fieldLength
-                    fillTextBounds row bounds columnCount (column + 1) (fieldStart + fieldLength)
+                    fillTextBounds row bounds columnCount (nextColumn column) (fieldStart + fieldLength)
 
-writeBounds :: VUM.MVector s Int -> Int -> Int -> Int -> ST s ()
-writeBounds bounds column start fieldLength = do
+writeBounds :: VUM.MVector s Int -> ColumnNumber -> Int -> Int -> ST s ()
+writeBounds bounds (ColumnNumber column) start fieldLength = do
     VUM.unsafeWrite bounds (2 * column) start
     VUM.unsafeWrite bounds (2 * column + 1) fieldLength
 
@@ -179,31 +182,31 @@ binaryRawRow :: V.Vector BinaryWidth -> ByteString -> Either RowError (RawRow Bi
 binaryRawRow widths row =
     let nullMapLength = binaryNullMapLength (V.length widths)
     in if 1 + nullMapLength > B.length row
-       then Left (RowError 0 0 RowEndsEarly)
+       then Left (RowError (ColumnNumber 0) 0 RowEndsEarly)
        else runST $ do
            bounds <- VUM.unsafeNew (2 * V.length widths)
-           outcome <- fillBinaryBounds row widths bounds 0 (1 + nullMapLength)
+           outcome <- fillBinaryBounds row widths bounds (ColumnNumber 0) (1 + nullMapLength)
            case outcome of
                Left rowError -> pure (Left rowError)
                Right ()      -> Right . RawRow row <$> VU.unsafeFreeze bounds
 
-fillBinaryBounds :: ByteString -> V.Vector BinaryWidth -> VUM.MVector s Int -> Int -> Int
+fillBinaryBounds :: ByteString -> V.Vector BinaryWidth -> VUM.MVector s Int -> ColumnNumber -> Int
                  -> ST s (Either RowError ())
-fillBinaryBounds row widths bounds column offset =
-    if  | column >= V.length widths -> pure (Right ())
+fillBinaryBounds row widths bounds column@(ColumnNumber number) offset =
+    if  | number >= V.length widths -> pure (Right ())
         | isNullInMap row column -> do
             writeBounds bounds column offset nullFieldLength
-            fillBinaryBounds row widths bounds (column + 1) offset
-        | otherwise -> case V.unsafeIndex widths column of
+            fillBinaryBounds row widths bounds (nextColumn column) offset
+        | otherwise -> case V.unsafeIndex widths number of
             BinaryNoBytes -> do
                 writeBounds bounds column offset 0
-                fillBinaryBounds row widths bounds (column + 1) offset
+                fillBinaryBounds row widths bounds (nextColumn column) offset
             BinaryFixed width ->
                 if width > B.length row - offset
                 then pure (Left (RowError column offset RowEndsEarly))
                 else do
                     writeBounds bounds column offset width
-                    fillBinaryBounds row widths bounds (column + 1) (offset + width)
+                    fillBinaryBounds row widths bounds (nextColumn column) (offset + width)
             BinaryLengthEncoded ->
                 if offset >= B.length row
                 then pure (Left (RowError column offset RowEndsEarly))
@@ -214,7 +217,7 @@ fillBinaryBounds row widths bounds column offset =
                         then pure (Left (RowError column offset RowEndsEarly))
                         else do
                             writeBounds bounds column fieldStart fieldLength
-                            fillBinaryBounds row widths bounds (column + 1) (fieldStart + fieldLength)
+                            fillBinaryBounds row widths bounds (nextColumn column) (fieldStart + fieldLength)
 
 -- | The bytes of a binary-protocol row's NULL map, which holds a bit per
 -- column from bit 2 on.
@@ -223,6 +226,6 @@ binaryNullMapLength columnCount = (columnCount + 7 + 2) `unsafeShiftR` 3
 
 -- | The NULL map starts after the header byte; column @i@ is bit @i + 2@. The
 -- row must be long enough to hold the map.
-isNullInMap :: ByteString -> Int -> Bool
-isNullInMap row column =
+isNullInMap :: ByteString -> ColumnNumber -> Bool
+isNullInMap row (ColumnNumber column) =
     testBit (B.unsafeIndex row (1 + ((column + 2) `unsafeShiftR` 3))) ((column + 2) .&. 7)

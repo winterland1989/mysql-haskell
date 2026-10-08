@@ -29,6 +29,8 @@ module Database.MySQL.Protocol.MySQLValue
   , columnKind
   , decodeTextRow
   , decodeTextRowVector
+  , ColumnNumber(..)
+  , nextColumn
   , RowError(..)
   , RowErrorKind(..)
   , TextFieldError(..)
@@ -406,11 +408,21 @@ lexTimeOfDay bytes = do
     (ss, _) <- LexFrac.readDecimal (B.tail rest')
     return (TimeOfDay hh mm ss)
 
+-- | A column's position in a result set, counting from 0.
+--
+-- @since 1.3.4
+newtype ColumnNumber = ColumnNumber Int
+    deriving (Show, Eq, Ord)
+
+-- | @since 1.3.4
+nextColumn :: ColumnNumber -> ColumnNumber
+nextColumn (ColumnNumber column) = ColumnNumber (column + 1)
+
 -- | Where and why a text-protocol row did not decode.
 --
 -- @since 1.3.4
 data RowError = RowError
-    { rowErrorColumn :: !Int               -- ^ zero-based index of the column
+    { rowErrorColumn :: !ColumnNumber
     , rowErrorOffset :: !Int               -- ^ byte offset of that column's field in the row
     , rowErrorKind   :: !RowErrorKind
     } deriving (Show, Eq)
@@ -429,7 +441,7 @@ data RowErrorKind
 
 -- | @since 1.3.4
 describeRowError :: RowError -> String
-describeRowError (RowError column offset kind) =
+describeRowError (RowError (ColumnNumber column) offset kind) =
     "Database.MySQL.Protocol.MySQLValue: column " ++ show column ++ " at byte "
         ++ show offset ++ ": " ++ kindDescription
   where
@@ -437,7 +449,7 @@ describeRowError (RowError column offset kind) =
         RowEndsEarly                  -> "the row ends inside this field"
         RowInvalidLengthPrefix prefix -> "invalid length prefix " ++ show prefix
         RowLengthOverflow             -> "length does not fit an Int"
-        RowFieldError fieldError           -> describeTextFieldError fieldError
+        RowFieldError fieldError      -> describeTextFieldError fieldError
 
 -- | The values of a text-protocol row, one per 'ColumnKind'. Bytes after the
 -- last column are ignored, as 'getTextRow' ignores them.
@@ -445,7 +457,7 @@ describeRowError (RowError column offset kind) =
 --
 -- @since 1.3.4
 decodeTextRow :: [ColumnKind] -> ByteString -> Either RowError [MySQLValue]
-decodeTextRow columns row = case decodeTextFields row 0 0 columns of
+decodeTextRow columns row = case decodeTextFields row (ColumnNumber 0) 0 columns of
     (# rowError | #) -> Left rowError
     (# | values #)   -> Right values
 
@@ -456,37 +468,37 @@ decodeTextRowVector :: V.Vector ColumnKind -> ByteString -> Either RowError (V.V
 decodeTextRowVector columns row =
     V.fromListN (V.length columns) <$> decodeTextRow (V.toList columns) row
 
--- | The fields of @columns@, the first of which is column @columnIndex@ and
--- starts at byte @offset@ of the row.
-decodeTextFields :: ByteString -> Int -> Int -> [ColumnKind] -> (# RowError | [MySQLValue] #)
-decodeTextFields row columnIndex offset columns = case columns of
+-- | The fields of @columns@, the first of which is @column@ and starts at byte
+-- @offset@ of the row.
+decodeTextFields :: ByteString -> ColumnNumber -> Int -> [ColumnKind] -> (# RowError | [MySQLValue] #)
+decodeTextFields row columnNumber offset columns = case columns of
     [] -> (# | [] #)
-    column : laterColumns -> case decodeTextFieldAt row columnIndex offset column of
+    column : laterColumns -> case decodeTextFieldAt row columnNumber offset column of
         (# rowError | #) -> (# rowError | #)
         (# | (# value, nextOffset #) #) ->
-            case decodeTextFields row (columnIndex + 1) nextOffset laterColumns of
+            case decodeTextFields row (nextColumn columnNumber) nextOffset laterColumns of
                 (# rowError | #) -> (# rowError | #)
                 (# | values #)   -> (# | value : values #)
 
 -- | The field at byte @offset@ and the offset after it. The NULL marker is
 -- checked before the column, as 'getTextRow' does.
-decodeTextFieldAt :: ByteString -> Int -> Int -> ColumnKind
+decodeTextFieldAt :: ByteString -> ColumnNumber -> Int -> ColumnKind
                   -> (# RowError | (# MySQLValue, Int #) #)
-decodeTextFieldAt row columnIndex offset column =
+decodeTextFieldAt row columnNumber offset column =
     if  | offset >= B.length row ->
-            (# RowError columnIndex offset RowEndsEarly | #)
+            (# RowError columnNumber offset RowEndsEarly | #)
         | B.unsafeIndex row offset == 0xFB -> (# | (# MySQLNull, offset + 1 #) #)
         | otherwise -> case column of
             NullColumn -> (# | (# MySQLNull, offset #) #)
             ValueColumn fieldType value -> case lengthEncodedInt row offset of
-                (# kind | #) -> (# RowError columnIndex offset kind | #)
+                (# kind | #) -> (# RowError columnNumber offset kind | #)
                 (# | (# fieldLength, fieldStart #) #) ->
                     if fieldLength > B.length row - fieldStart
-                    then (# RowError columnIndex offset RowEndsEarly | #)
+                    then (# RowError columnNumber offset RowEndsEarly | #)
                     else case decodeTextValue fieldType value
                                 (B.unsafeTake fieldLength (B.unsafeDrop fieldStart row)) of
                         Left fieldError ->
-                            (# RowError columnIndex offset (RowFieldError fieldError) | #)
+                            (# RowError columnNumber offset (RowFieldError fieldError) | #)
                         Right decoded -> (# | (# decoded, fieldStart + fieldLength #) #)
 
 -- | The length-encoded integer at byte @offset@, which must be inside the row,

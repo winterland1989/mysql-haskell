@@ -62,10 +62,10 @@ tests = testGroup "text rows"
             @?= Right [MySQLNull, MySQLNull]
     , testCase "a row cut inside a field names that column and where it starts" $
         decodeTextRow (map columnKind employeeColumns) (B.take 20 employeeRow)
-            @?= Left (RowError 2 17 RowEndsEarly)
+            @?= Left (RowError (ColumnNumber 2) 17 RowEndsEarly)
     , testCase "a field that does not lex names its column" $
         decodeTextRow (map columnKind employeeColumns) (encodeRow [Just "1", Just "abc"])
-            @?= Left (RowError 1 2
+            @?= Left (RowError (ColumnNumber 1) 2
                         (RowFieldError (TextFieldUnparsable mySQLTypeDate "abc")))
     ]
 

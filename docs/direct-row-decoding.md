@@ -99,8 +99,8 @@ queryRawRows_    :: MySQLConn -> Query -> IO ([ColumnDef], InputStream (RawRow T
 queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
 
 prepareFieldParser :: RowProtocol protocol
-                   => FieldDecoder a -> Int -> ColumnDef -> Either ColumnMismatch (FieldParser protocol a)
-runFieldParser :: FieldParser protocol a -> RawRow protocol -> Int -> (FieldError -> r) -> (a -> r) -> r
+                   => FieldDecoder a -> ColumnNumber -> ColumnDef -> Either ColumnMismatch (FieldParser protocol a)
+runFieldParser :: FieldParser protocol a -> RawRow protocol -> ColumnNumber -> (FieldError -> r) -> (a -> r) -> r
 ```
 
 A `RawRow` is the row's bytes plus each field's bounds, found in one pass

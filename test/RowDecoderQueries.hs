@@ -78,14 +78,14 @@ tests = testGroup "decoding rows without MySQLValue"
     , testCase "queryRawRows_ rows decode by column number" $ withRows $ \c -> do
         (columns, rows) <- queryRawRows_ c "SELECT id, name FROM decoded_rows ORDER BY id"
         parser <- either (assertFailure . show) pure
-            (Decode.prepareFieldParser Decode.text 1 (columns !! 1))
+            (Decode.prepareFieldParser Decode.text (Decode.ColumnNumber 1) (columns !! 1))
         names <- Stream.toList =<< Stream.mapM
-            (\row -> Decode.runFieldParser parser row 1 (assertFailure . show) pure) rows
+            (\row -> Decode.runFieldParser parser row (Decode.ColumnNumber 1) (assertFailure . show) pure) rows
         names @?= ["Jappie", "café"]
     , testCase "a column the decoder does not take raises before any row" $ withRows $ \c -> do
         outcome <- try (queryRows_ (Decode.field Decode.text) c "SELECT id FROM decoded_rows")
         case outcome of
-            Left mismatch -> mismatch @?= Decode.ColumnTypeMismatch 0 "id" mySQLTypeLong "Text"
+            Left mismatch -> mismatch @?= Decode.ColumnTypeMismatch (Decode.ColumnNumber 0) "id" mySQLTypeLong "Text"
             Right _       -> assertFailure "the INT column was accepted as Text"
         assertRowCount c
     , testCase "a decoder for another number of columns raises before any row" $ withRows $ \c -> do
@@ -100,7 +100,7 @@ tests = testGroup "decoding rows without MySQLValue"
             "SELECT maybe_count FROM decoded_rows ORDER BY id"
         outcome <- try (Stream.toList rows)
         case outcome of
-            Left fieldError -> fieldError @?= Decode.FieldError 0 Decode.FieldUnexpectedNull
+            Left fieldError -> fieldError @?= Decode.FieldError (Decode.ColumnNumber 0) Decode.FieldUnexpectedNull
             Right counts    -> assertFailure ("the NULL decoded: " ++ show counts)
         assertRowCount c
     , testCase "an INSERT gives no columns and no rows" $ withRows $ \c -> do

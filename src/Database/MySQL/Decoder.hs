@@ -94,6 +94,7 @@ import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      MySQLValue (..),
                                                      RowErrorKind (..),
+                                                     nextColumn,
                                                      TextFieldError (..),
                                                      ValueKind (..),
                                                      columnKind, decodeTextBit,
@@ -466,7 +467,7 @@ data RowDecoder a = RowDecoder
     !Int
     -- ^ how many columns it reads
     (forall protocol. RowProtocol protocol
-        => V.Vector ColumnDef -> Int -> Either ColumnMismatch (FieldSteps protocol a))
+        => V.Vector ColumnDef -> ColumnNumber -> Either ColumnMismatch (FieldSteps protocol a))
     -- ^ fits it to the columns from the given column number on
 
 -- Decision: the instance methods and the step combinators are inlined, so that
@@ -486,18 +487,22 @@ instance Applicative RowDecoder where
     RowDecoder functionWidth prepareFunction <*> RowDecoder argumentWidth prepareArgument =
         RowDecoder (functionWidth + argumentWidth) (\columns start ->
             apSteps <$> prepareFunction columns start
-                    <*> prepareArgument columns (start + functionWidth))
+                    <*> prepareArgument columns (columnsAfter start functionWidth))
     {-# INLINE (<*>) #-}
 
 -- | Decodes the next column with this decoder.
 --
 -- @since 1.3.4
 field :: FieldDecoder a -> RowDecoder a
-field decoder = RowDecoder 1 (\columns column -> case columns V.!? column of
-    Nothing -> Left (ColumnCountMismatch (column + 1) (V.length columns))
+field decoder = RowDecoder 1 (\columns column@(ColumnNumber number) -> case columns V.!? number of
+    Nothing -> Left (ColumnCountMismatch (number + 1) (V.length columns))
     Just definition ->
         fieldSteps column definition <$> prepareFieldParser decoder column definition)
 {-# INLINE field #-}
+
+-- | The column @count@ columns after @column@.
+columnsAfter :: ColumnNumber -> Int -> ColumnNumber
+columnsAfter (ColumnNumber column) count = ColumnNumber (column + count)
 
 -- | Reads fields from a row's bytes at an offset, and returns the offset after
 -- them. A row is walked once, in column order, each field parsed as it is
@@ -543,7 +548,7 @@ prepareRowDecoder :: RowProtocol protocol
 prepareRowDecoder (RowDecoder width prepare) columns =
     if width /= V.length columns
     then Left (ColumnCountMismatch width (V.length columns))
-    else PreparedRow (rowStart width) <$> prepare columns 0
+    else PreparedRow (rowStart width) <$> prepare columns (ColumnNumber 0)
 
 -- | Decodes the body of a row packet of the protocol. Bytes after the last
 -- field are ignored, as 'decodeTextRow' ignores them.
@@ -562,7 +567,7 @@ runPreparedRow (PreparedRow (RowStart start) (FieldSteps run)) row = case start 
 -- @since 1.3.4
 class RowProtocol (protocol :: Type) where
     protocolParser :: FieldDecoder a -> ColumnKind -> Maybe (FieldParser protocol a)
-    fieldSteps     :: Int -> ColumnDef -> FieldParser protocol a -> FieldSteps protocol a
+    fieldSteps     :: ColumnNumber -> ColumnDef -> FieldParser protocol a -> FieldSteps protocol a
     rowStart       :: Int -> RowStart protocol
 
 instance RowProtocol TextProtocol where
@@ -580,7 +585,7 @@ textRowStart :: ByteString -> (# FieldError | Int #)
 textRowStart _ = (# | 0 #)
 
 -- | A text-protocol field: the NULL marker or a length-encoded value.
-textFieldStep :: Int -> FieldParser TextProtocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
+textFieldStep :: ColumnNumber -> FieldParser TextProtocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
 textFieldStep column parser = \row offset ->
     if  | offset >= B.length row -> (# FieldError column FieldRowEndsEarly | #)
         | B.unsafeIndex row offset == 0xFB -> nullStep column parser (offset + 1)
@@ -591,11 +596,11 @@ textFieldStep column parser = \row offset ->
 binaryRowStart :: Int -> ByteString -> (# FieldError | Int #)
 binaryRowStart columnCount row =
     let start = 1 + RawRow.binaryNullMapLength columnCount
-    in if start > B.length row then (# FieldError 0 FieldRowEndsEarly | #) else (# | start #)
+    in if start > B.length row then (# FieldError (ColumnNumber 0) FieldRowEndsEarly | #) else (# | start #)
 
 -- | A binary-protocol field: absent when the NULL map marks it, otherwise laid
 -- out as its column's 'BinaryWidth' says.
-binaryFieldStep :: Int -> BinaryWidth -> FieldParser BinaryProtocol a -> ByteString -> Int
+binaryFieldStep :: ColumnNumber -> BinaryWidth -> FieldParser BinaryProtocol a -> ByteString -> Int
                 -> (# FieldError | (# a, Int #) #)
 binaryFieldStep column width parser = \row offset ->
     if RawRow.isNullInMap row column
@@ -609,18 +614,18 @@ binaryFieldStep column width parser = \row offset ->
             else lengthEncodedStep column parser row offset
 {-# INLINE binaryFieldStep #-}
 
-nullStep :: Int -> FieldParser protocol a -> Int -> (# FieldError | (# a, Int #) #)
+nullStep :: ColumnNumber -> FieldParser protocol a -> Int -> (# FieldError | (# a, Int #) #)
 nullStep column parser next = case parserNull parser of
     Just value -> (# | (# value, next #) #)
     Nothing    -> (# FieldError column FieldUnexpectedNull | #)
 
 -- | A length at @offset@, which must be inside the row, then that many bytes.
-lengthEncodedStep :: Int -> FieldParser protocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
+lengthEncodedStep :: ColumnNumber -> FieldParser protocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
 lengthEncodedStep column parser row offset = case lengthEncodedInt row offset of
     (# kind | #) -> (# FieldError column (lengthErrorKind kind) | #)
     (# | (# fieldLength, fieldStart #) #) -> sliceStep column parser row fieldStart fieldLength
 
-sliceStep :: Int -> FieldParser protocol a -> ByteString -> Int -> Int -> (# FieldError | (# a, Int #) #)
+sliceStep :: ColumnNumber -> FieldParser protocol a -> ByteString -> Int -> Int -> (# FieldError | (# a, Int #) #)
 sliceStep column parser row start fieldLength =
     if fieldLength > B.length row - start
     then (# FieldError column FieldRowEndsEarly | #)
@@ -647,7 +652,7 @@ data FieldParser (protocol :: Type) a = FieldParser
 --
 -- @since 1.3.4
 prepareFieldParser :: RowProtocol protocol
-                   => FieldDecoder a -> Int -> ColumnDef -> Either ColumnMismatch (FieldParser protocol a)
+                   => FieldDecoder a -> ColumnNumber -> ColumnDef -> Either ColumnMismatch (FieldParser protocol a)
 prepareFieldParser decoder column definition =
     case protocolParser decoder (columnKind definition) of
         Just parser -> Right parser
@@ -659,13 +664,13 @@ prepareFieldParser decoder column definition =
 -- needs.
 --
 -- @since 1.3.4
-runFieldParser :: FieldParser protocol a -> RawRow protocol -> Int -> (FieldError -> r) -> (a -> r) -> r
+runFieldParser :: FieldParser protocol a -> RawRow protocol -> ColumnNumber -> (FieldError -> r) -> (a -> r) -> r
 runFieldParser parser row column onError onValue = case parseRawField column parser row of
     (# fieldError | #) -> onError fieldError
     (# | value #)      -> onValue value
 {-# INLINE runFieldParser #-}
 
-parseRawField :: Int -> FieldParser protocol a -> RawRow protocol -> (# FieldError | a #)
+parseRawField :: ColumnNumber -> FieldParser protocol a -> RawRow protocol -> (# FieldError | a #)
 parseRawField column parser row = case rawField row column of
     RawNull -> case parserNull parser of
         Just value -> (# | value #)
@@ -697,17 +702,17 @@ binaryValueColumns definitions = BinaryValueColumns (length definitions)
 decodeBinaryValues :: BinaryValueColumns -> ByteString -> Either FieldError [MySQLValue]
 decodeBinaryValues (BinaryValueColumns columnCount columns) row = case binaryRowStart columnCount row of
     (# fieldError | #) -> Left fieldError
-    (# | start #) -> case binaryValueFields row 0 start columns of
+    (# | start #) -> case binaryValueFields row (ColumnNumber 0) start columns of
         (# fieldError | #) -> Left fieldError
         (# | values #)     -> Right values
 
-binaryValueFields :: ByteString -> Int -> Int -> [BinaryValueColumn] -> (# FieldError | [MySQLValue] #)
+binaryValueFields :: ByteString -> ColumnNumber -> Int -> [BinaryValueColumn] -> (# FieldError | [MySQLValue] #)
 binaryValueFields row column offset columns = case columns of
     [] -> (# | [] #)
     BinaryValueColumn kind width : laterColumns ->
         case binaryFieldStep column width (FieldParser (Just MySQLNull) (binaryMySQLValue kind)) row offset of
             (# fieldError | #) -> (# fieldError | #)
-            (# | (# value, next #) #) -> case binaryValueFields row (column + 1) next laterColumns of
+            (# | (# value, next #) #) -> case binaryValueFields row (nextColumn column) next laterColumns of
                 (# fieldError | #) -> (# fieldError | #)
                 (# | values #)     -> (# | value : values #)
 
@@ -715,7 +720,7 @@ binaryValueFields row column offset columns = case columns of
 --
 -- @since 1.3.4
 data ColumnMismatch
-    = ColumnTypeMismatch !Int !ByteString !FieldType !Text
+    = ColumnTypeMismatch !ColumnNumber !ByteString !FieldType !Text
       -- ^ column number, column name, its type, and the Haskell type of the
       -- decoder that does not accept it
     | ColumnCountMismatch !Int !Int
@@ -728,7 +733,7 @@ instance Exception ColumnMismatch
 --
 -- @since 1.3.4
 data FieldError = FieldError
-    { fieldErrorColumn :: !Int
+    { fieldErrorColumn :: !ColumnNumber
     , fieldErrorKind   :: !FieldErrorKind
     } deriving (Show, Eq)
 
