@@ -175,11 +175,13 @@ was 47.5% of select CPU (benchmark/cpu-profile-1.3.3.md).
 
 The query functions in "Database.MySQL.Base" instead resolve each column to a
 'TextColumn' once, when the column definitions arrive, and decode every row
-with 'decodeTextRow': a walk over the row as one strict 'ByteString'. Values
-are evaluated as they are decoded instead of being left as thunks, so invalid
-UTF-8 in a text column now raises its exception while the row is read rather
-than when the value is used. The walk returns unboxed sums, so no 'Either' or
-tuple is allocated per field.
+with 'decodeTextRow': a walk over the row as one strict 'ByteString' that
+returns unboxed sums, so no 'Either' or tuple is allocated per field.
+
+Decision: values stay as lazy as 'getTextField' leaves them, so invalid UTF-8
+still raises when the value is used. Evaluating every value while decoding
+saved 3% of the instructions when a caller uses every value, and cost 2.75
+times the instructions when it uses none (docs/direct-row-decoding.md).
 
 'getTextField' and 'getTextRow' keep their 'Get' interface and share
 'textColumn' and 'decodeTextValue', so both paths turn the same bytes into the
@@ -290,8 +292,10 @@ describeTextFieldError fieldError = case fieldError of
     TextFieldUnsupportedType fieldType ->
         "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show fieldType
 
--- | The value of a field's bytes, evaluated. Inlined so that 'decodeTextFieldAt'
--- matches its 'Right' away instead of allocating it.
+-- | The value of a field's bytes. The lexer runs at once, so a malformed field
+-- fails while the row is read; the 'MySQLValue' and any 'Text' are left lazy.
+-- See Note [Text rows decoded once per result set]. Inlined so that
+-- 'decodeTextFieldAt' matches the 'Right' away instead of allocating it.
 decodeTextValue :: FieldType -> TextValue -> ByteString -> Either TextFieldError MySQLValue
 decodeTextValue fieldType value bytes = case value of
     TextDecimal     -> lexedValue fieldType MySQLDecimal lexSignedFraction bytes
@@ -311,7 +315,7 @@ decodeTextValue fieldType value bytes = case value of
     TextDate        -> lexedValue fieldType MySQLDate lexDate bytes
     TextTime        -> lexedValue fieldType id lexTime bytes
     TextGeometry    -> Right $! MySQLGeometry bytes
-    TextUtf8        -> Right $! MySQLText (T.decodeUtf8 bytes)
+    TextUtf8        -> Right (MySQLText (T.decodeUtf8 bytes))
     TextBytes       -> Right $! MySQLBytes bytes
     TextBit         -> decodeTextBit bytes
     TextUnsupported -> Left (TextFieldUnsupportedType fieldType)
@@ -320,7 +324,7 @@ decodeTextValue fieldType value bytes = case value of
 lexedValue :: FieldType -> (a -> MySQLValue) -> (ByteString -> Maybe a) -> ByteString
            -> Either TextFieldError MySQLValue
 lexedValue fieldType construct lexer bytes = case lexer bytes of
-    Just lexed -> Right $! construct lexed
+    Just lexed -> Right (construct lexed)
     Nothing    -> Left (TextFieldUnparsable fieldType bytes)
 {-# INLINE lexedValue #-}
 
