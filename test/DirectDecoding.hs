@@ -55,6 +55,25 @@ tests = testGroup "direct decoding"
                     , binaryMySQLValues columns (B.take kept row)
                         === getBinaryRowValues columns (B.take kept row)
                     ]
+    , testProperty "text rows: by column number gives what the row decoder gives" $ checkCoverage $
+        forAll genRow $ \(columns, fields) ->
+            forAll (choose (0, B.length (encodeRow fields))) $ \kept ->
+                cover 25 (isJust (textMySQLValues columns (encodeRow fields))) "the whole row decodes" $
+                conjoin
+                    [ rawRowValues columns (Decode.textRawRow (length columns) (encodeRow fields))
+                        === textMySQLValues columns (encodeRow fields)
+                    , rawRowValues columns (Decode.textRawRow (length columns) (B.take kept (encodeRow fields)))
+                        === textMySQLValues columns (B.take kept (encodeRow fields))
+                    ]
+    , testProperty "binary rows: by column number gives what the row decoder gives" $ checkCoverage $
+        forAll genBinaryRow $ \(columns, row) ->
+            forAll (choose (0, B.length row)) $ \kept ->
+                cover 25 (isJust (binaryMySQLValues columns row)) "the whole row decodes" $
+                conjoin
+                    [ rawRowValues columns (binaryRawRowOf columns row) === binaryMySQLValues columns row
+                    , rawRowValues columns (binaryRawRowOf columns (B.take kept row))
+                        === binaryMySQLValues columns (B.take kept row)
+                    ]
     , testProperty "text fields: a typed decoder gives what Field gives" $ checkCoverage $
         forAll genColumn $ \column -> forAll (genField (columnKind column)) $ \fieldBytes ->
             case comparisonFor column of
@@ -118,45 +137,50 @@ employeeDecoder = (,,,,,)
 -- | What decoding one row came to.
 data Outcome a
     = Mismatch Decode.ColumnMismatch
-    | Malformed RowError
     | FieldFailed Decode.FieldError
     | Decoded a
     deriving (Show, Eq)
 
 decodeTextWith :: Decode.RowDecoder a -> [ColumnDef] -> ByteString -> Outcome a
-decodeTextWith decoder columns row =
-    outcome decoder columns (Decode.textRawRow (length columns) row)
+decodeTextWith decoder columns row = case Decode.prepareRowDecoder @Decode.TextProtocol decoder (V.fromList columns) of
+    Left mismatch  -> Mismatch mismatch
+    Right prepared -> either FieldFailed Decoded (Decode.runPreparedRow prepared row)
 
 decodeBinaryWith :: Decode.RowDecoder a -> [ColumnDef] -> ByteString -> Outcome a
-decodeBinaryWith decoder columns row =
-    outcome decoder columns (Decode.binaryRawRow (V.fromList (map Decode.binaryWidth columns)) row)
-
-outcome :: Decode.RowProtocol protocol
-        => Decode.RowDecoder a -> [ColumnDef] -> Either RowError (Decode.RawRow protocol) -> Outcome a
-outcome decoder columns rawRow = case Decode.prepareRowDecoder decoder (V.fromList columns) of
+decodeBinaryWith decoder columns row = case Decode.prepareRowDecoder @Decode.BinaryProtocol decoder (V.fromList columns) of
     Left mismatch  -> Mismatch mismatch
-    Right prepared -> case rawRow of
-        Left rowError -> Malformed rowError
-        Right raw     -> either FieldFailed Decoded (Decode.runPreparedRow prepared raw)
+    Right prepared -> either FieldFailed Decoded (Decode.runPreparedRow prepared row)
+
+-- | Every column through 'Decode.mysqlValue'.
+allValues :: [ColumnDef] -> Decode.RowDecoder [MySQLValue]
+allValues = traverse (const (Decode.field Decode.mysqlValue))
+
+-- | Every column through 'Decode.mysqlValue' on a 'Decode.RawRow', by column
+-- number, as a library decoding by column number would.
+rawRowValues :: Decode.RowProtocol protocol
+             => [ColumnDef] -> Either RowError (Decode.RawRow protocol) -> Maybe String
+rawRowValues columns rawRow = do
+    raw <- either (const Nothing) Just rawRow
+    parsers <- either (const Nothing) Just
+        (traverse (uncurry (Decode.prepareFieldParser Decode.mysqlValue)) (zip [0 ..] columns))
+    shownRow (traverse (rawFieldValue raw) (zip [0 ..] parsers))
+
+rawFieldValue :: Decode.RawRow protocol -> (Int, Decode.FieldParser protocol MySQLValue)
+              -> Either Decode.FieldError MySQLValue
+rawFieldValue raw (column, parser) = Decode.runFieldParser parser raw column Left Right
 
 -- | Values are compared shown, so that a NaN read from random bytes equals itself.
 shownRow :: Either rowError [MySQLValue] -> Maybe String
 shownRow = either (const Nothing) (Just . show)
 
+binaryRawRowOf :: [ColumnDef] -> ByteString -> Either RowError (Decode.RawRow Decode.BinaryProtocol)
+binaryRawRowOf columns = Decode.binaryRawRow (V.fromList (map Decode.binaryWidth columns))
+
 textMySQLValues :: [ColumnDef] -> ByteString -> Maybe String
-textMySQLValues columns row = do
-    raw <- either (const Nothing) Just (Decode.textRawRow (length columns) row)
-    prepared <- either (const Nothing) Just
-        (Decode.prepareRowDecoder (traverse (const (Decode.field Decode.mysqlValue)) columns) (V.fromList columns))
-    shownRow (Decode.runPreparedRow prepared raw)
+textMySQLValues columns row = shownOutcome (decodeTextWith (allValues columns) columns row)
 
 binaryMySQLValues :: [ColumnDef] -> ByteString -> Maybe String
-binaryMySQLValues columns row = do
-    raw <- either (const Nothing) Just
-        (Decode.binaryRawRow (V.fromList (map Decode.binaryWidth columns)) row)
-    prepared <- either (const Nothing) Just
-        (Decode.prepareRowDecoder (traverse (const (Decode.field Decode.mysqlValue)) columns) (V.fromList columns))
-    shownRow (Decode.runPreparedRow prepared raw)
+binaryMySQLValues columns row = shownOutcome (decodeBinaryWith (allValues columns) columns row)
 
 getBinaryRowValues :: [ColumnDef] -> ByteString -> Maybe String
 getBinaryRowValues columns row = shownRow (parseOnly (getBinaryRow columns (length columns)) row)
@@ -210,7 +234,6 @@ shownOutcome :: Show a => Outcome a -> Maybe String
 shownOutcome decoded = case decoded of
     Decoded value     -> Just (show value)
     FieldFailed _     -> Nothing
-    Malformed _       -> Nothing
     Mismatch mismatch -> Just ("mismatch: " ++ show mismatch)
 
 viaFieldBinary :: Show a => (MySQLValue -> Either DecodeError a) -> ColumnDef -> ByteString -> Maybe String

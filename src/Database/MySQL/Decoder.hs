@@ -89,6 +89,7 @@ import           Data.Word                          (Word16, Word32, Word64,
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      MySQLValue (..),
+                                                     RowErrorKind (..),
                                                      TextFieldError (..),
                                                      ValueKind (..),
                                                      columnKind, decodeTextBit,
@@ -96,8 +97,11 @@ import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      lexDate, lexLocalTime,
                                                      lexSignedFraction,
                                                      lexSignedIntegral,
+                                                     lengthEncodedInt,
                                                      lexSignedTime)
-import           Database.MySQL.Protocol.RawRow
+import           Database.MySQL.Protocol.RawRow      hiding (binaryNullMapLength,
+                                                             isNullInMap)
+import qualified Database.MySQL.Protocol.RawRow      as RawRow
 import           GHC.Exts                           (word16ToInt16#,
                                                      word32ToInt32#,
                                                      word64ToInt64#,
@@ -452,19 +456,19 @@ data RowDecoder a = RowDecoder
     !Int
     -- ^ how many columns it reads
     (forall protocol. RowProtocol protocol
-        => V.Vector ColumnDef -> Int -> Either ColumnMismatch (PreparedRow protocol a))
+        => V.Vector ColumnDef -> Int -> Either ColumnMismatch (FieldSteps protocol a))
     -- ^ fits it to the columns from the given column number on
 
 instance Functor RowDecoder where
     fmap f (RowDecoder width prepare) =
-        RowDecoder width (\columns start -> mapPrepared f <$> prepare columns start)
+        RowDecoder width (\columns start -> mapSteps f <$> prepare columns start)
 
 instance Applicative RowDecoder where
-    pure value = RowDecoder 0 (\_ _ -> Right (constPrepared value))
+    pure value = RowDecoder 0 (\_ _ -> Right (pureSteps value))
     RowDecoder functionWidth prepareFunction <*> RowDecoder argumentWidth prepareArgument =
         RowDecoder (functionWidth + argumentWidth) (\columns start ->
-            apPrepared <$> prepareFunction columns start
-                       <*> prepareArgument columns (start + functionWidth))
+            apSteps <$> prepareFunction columns start
+                    <*> prepareArgument columns (start + functionWidth))
 
 -- | Decodes the next column with this decoder.
 --
@@ -473,28 +477,39 @@ field :: FieldDecoder a -> RowDecoder a
 field decoder = RowDecoder 1 (\columns column -> case columns V.!? column of
     Nothing -> Left (ColumnCountMismatch (column + 1) (V.length columns))
     Just definition ->
-        PreparedRow . parseFieldAt column <$> prepareFieldParser decoder column definition)
+        fieldSteps column definition <$> prepareFieldParser decoder column definition)
+
+-- | Reads fields from a row's bytes at an offset, and returns the offset after
+-- them. A row is walked once, in column order, each field parsed as it is
+-- reached, so no field bounds are stored.
+newtype FieldSteps (protocol :: Type) a = FieldSteps (ByteString -> Int -> (# FieldError | (# a, Int #) #))
+
+pureSteps :: a -> FieldSteps protocol a
+pureSteps value = FieldSteps (\_ offset -> (# | (# value, offset #) #))
+
+mapSteps :: (a -> b) -> FieldSteps protocol a -> FieldSteps protocol b
+mapSteps f (FieldSteps run) = FieldSteps (\row offset -> case run row offset of
+    (# fieldError | #)        -> (# fieldError | #)
+    (# | (# value, next #) #) -> let !mapped = f value in (# | (# mapped, next #) #))
+
+-- | Applies as soon as both sides are decoded, so a row decodes to an evaluated
+-- value instead of a chain of thunks that each later force has to update.
+apSteps :: FieldSteps protocol (a -> b) -> FieldSteps protocol a -> FieldSteps protocol b
+apSteps (FieldSteps runFunction) (FieldSteps runArgument) = FieldSteps (\row offset ->
+    case runFunction row offset of
+        (# fieldError | #) -> (# fieldError | #)
+        (# | (# function, afterFunction #) #) -> case runArgument row afterFunction of
+            (# fieldError | #) -> (# fieldError | #)
+            (# | (# argument, afterArgument #) #) ->
+                let !applied = function argument in (# | (# applied, afterArgument #) #))
 
 -- | A 'RowDecoder' fitted to a result set's columns.
 --
 -- @since 1.3.4
-newtype PreparedRow (protocol :: Type) a = PreparedRow (RawRow protocol -> (# FieldError | a #))
+data PreparedRow (protocol :: Type) a = PreparedRow (RowStart protocol) (FieldSteps protocol a)
 
-constPrepared :: a -> PreparedRow protocol a
-constPrepared value = PreparedRow (\_ -> (# | value #))
-
-mapPrepared :: (a -> b) -> PreparedRow protocol a -> PreparedRow protocol b
-mapPrepared f (PreparedRow run) = PreparedRow (\row -> case run row of
-    (# fieldError | #) -> (# fieldError | #)
-    (# | value #)      -> (# | f value #))
-
-apPrepared :: PreparedRow protocol (a -> b) -> PreparedRow protocol a -> PreparedRow protocol b
-apPrepared (PreparedRow runFunction) (PreparedRow runArgument) = PreparedRow (\row ->
-    case runFunction row of
-        (# fieldError | #) -> (# fieldError | #)
-        (# | function #) -> case runArgument row of
-            (# fieldError | #) -> (# fieldError | #)
-            (# | argument #)   -> (# | function argument #))
+-- | Where a row's first field starts, or why the row is too short to have one.
+newtype RowStart (protocol :: Type) = RowStart (ByteString -> (# FieldError | Int #))
 
 -- | Fits a 'RowDecoder' to a result set's columns. It must read exactly as many
 -- columns as there are, each of a type its decoder accepts.
@@ -505,26 +520,95 @@ prepareRowDecoder :: RowProtocol protocol
 prepareRowDecoder (RowDecoder width prepare) columns =
     if width /= V.length columns
     then Left (ColumnCountMismatch width (V.length columns))
-    else prepare columns 0
+    else PreparedRow (rowStart width) <$> prepare columns 0
 
--- | @since 1.3.4
-runPreparedRow :: PreparedRow protocol a -> RawRow protocol -> Either FieldError a
-runPreparedRow (PreparedRow run) row = case run row of
+-- | Decodes the body of a row packet of the protocol. Bytes after the last
+-- field are ignored, as 'decodeTextRow' ignores them.
+--
+-- @since 1.3.4
+runPreparedRow :: PreparedRow protocol a -> ByteString -> Either FieldError a
+runPreparedRow (PreparedRow (RowStart start) (FieldSteps run)) row = case start row of
     (# fieldError | #) -> Left fieldError
-    (# | value #)      -> Right value
+    (# | offset #) -> case run row offset of
+        (# fieldError | #)     -> Left fieldError
+        (# | (# value, _ #) #) -> Right value
 
--- | 'TextProtocol' or 'BinaryProtocol': which of a 'FieldDecoder''s parsers
--- the rows of that protocol need.
+-- | 'TextProtocol' or 'BinaryProtocol': how the rows of that protocol lay out
+-- their fields, and which of a 'FieldDecoder''s parsers they need.
 --
 -- @since 1.3.4
 class RowProtocol (protocol :: Type) where
     protocolParser :: FieldDecoder a -> ColumnKind -> Maybe (FieldParser protocol a)
+    fieldSteps     :: Int -> ColumnDef -> FieldParser protocol a -> FieldSteps protocol a
+    rowStart       :: Int -> RowStart protocol
 
 instance RowProtocol TextProtocol where
     protocolParser decoder column = FieldParser (decoderNull decoder) <$> decoderText decoder column
+    fieldSteps column _ parser = FieldSteps (textFieldStep column parser)
+    rowStart _ = RowStart textRowStart
 
 instance RowProtocol BinaryProtocol where
     protocolParser decoder column = FieldParser (decoderNull decoder) <$> decoderBinary decoder column
+    fieldSteps column definition parser =
+        FieldSteps (binaryFieldStep column (binaryWidth definition) parser)
+    rowStart columnCount = RowStart (binaryRowStart columnCount)
+
+textRowStart :: ByteString -> (# FieldError | Int #)
+textRowStart _ = (# | 0 #)
+
+-- | A text-protocol field: the NULL marker or a length-encoded value.
+textFieldStep :: Int -> FieldParser TextProtocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
+textFieldStep column parser row offset =
+    if  | offset >= B.length row -> (# FieldError column FieldRowEndsEarly | #)
+        | B.unsafeIndex row offset == 0xFB -> nullStep column parser (offset + 1)
+        | otherwise -> lengthEncodedStep column parser row offset
+
+-- | The fields of a binary-protocol row follow the 0x00 header and the NULL map.
+binaryRowStart :: Int -> ByteString -> (# FieldError | Int #)
+binaryRowStart columnCount row =
+    let start = 1 + RawRow.binaryNullMapLength columnCount
+    in if start > B.length row then (# FieldError 0 FieldRowEndsEarly | #) else (# | start #)
+
+-- | A binary-protocol field: absent when the NULL map marks it, otherwise laid
+-- out as its column's 'BinaryWidth' says.
+binaryFieldStep :: Int -> BinaryWidth -> FieldParser BinaryProtocol a -> ByteString -> Int
+                -> (# FieldError | (# a, Int #) #)
+binaryFieldStep column width parser row offset =
+    if RawRow.isNullInMap row column
+    then nullStep column parser offset
+    else case width of
+        BinaryNoBytes       -> sliceStep column parser row offset 0
+        BinaryFixed size    -> sliceStep column parser row offset size
+        BinaryLengthEncoded ->
+            if offset >= B.length row
+            then (# FieldError column FieldRowEndsEarly | #)
+            else lengthEncodedStep column parser row offset
+
+nullStep :: Int -> FieldParser protocol a -> Int -> (# FieldError | (# a, Int #) #)
+nullStep column parser next = case parserNull parser of
+    Just value -> (# | (# value, next #) #)
+    Nothing    -> (# FieldError column FieldUnexpectedNull | #)
+
+-- | A length at @offset@, which must be inside the row, then that many bytes.
+lengthEncodedStep :: Int -> FieldParser protocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
+lengthEncodedStep column parser row offset = case lengthEncodedInt row offset of
+    (# kind | #) -> (# FieldError column (lengthErrorKind kind) | #)
+    (# | (# fieldLength, fieldStart #) #) -> sliceStep column parser row fieldStart fieldLength
+
+sliceStep :: Int -> FieldParser protocol a -> ByteString -> Int -> Int -> (# FieldError | (# a, Int #) #)
+sliceStep column parser row start fieldLength =
+    if fieldLength > B.length row - start
+    then (# FieldError column FieldRowEndsEarly | #)
+    else case parserBytes parser (B.unsafeTake fieldLength (B.unsafeDrop start row)) of
+        (# kind | #)  -> (# FieldError column kind | #)
+        (# | value #) -> (# | (# value, start + fieldLength #) #)
+
+lengthErrorKind :: RowErrorKind -> FieldErrorKind
+lengthErrorKind kind = case kind of
+    RowEndsEarly                  -> FieldRowEndsEarly
+    RowInvalidLengthPrefix prefix -> FieldInvalidLengthPrefix prefix
+    RowLengthOverflow             -> FieldLengthOverflow
+    RowFieldError fieldError      -> textFieldErrorKind fieldError
 
 -- | A 'FieldDecoder' fitted to one column of a result set.
 --
@@ -545,18 +629,19 @@ prepareFieldParser decoder column definition =
         Nothing     -> Left (ColumnTypeMismatch column (columnName definition)
                                 (columnType definition) (decoderTypeName decoder))
 
--- | Decodes field @column@ of a row, passing the outcome to a continuation so
--- that no 'Either' is allocated, as a library decoding by column number needs.
+-- | Decodes field @column@ of a 'RawRow', passing the outcome to a continuation
+-- so that no 'Either' is allocated, as a library decoding by column number
+-- needs.
 --
 -- @since 1.3.4
 runFieldParser :: FieldParser protocol a -> RawRow protocol -> Int -> (FieldError -> r) -> (a -> r) -> r
-runFieldParser parser row column onError onValue = case parseFieldAt column parser row of
+runFieldParser parser row column onError onValue = case parseRawField column parser row of
     (# fieldError | #) -> onError fieldError
     (# | value #)      -> onValue value
 {-# INLINE runFieldParser #-}
 
-parseFieldAt :: Int -> FieldParser protocol a -> RawRow protocol -> (# FieldError | a #)
-parseFieldAt column parser row = case rawField row column of
+parseRawField :: Int -> FieldParser protocol a -> RawRow protocol -> (# FieldError | a #)
+parseRawField column parser row = case rawField row column of
     RawNull -> case parserNull parser of
         Just value -> (# | value #)
         Nothing    -> (# FieldError column FieldUnexpectedNull | #)
@@ -602,5 +687,11 @@ data FieldErrorKind
     | FieldUnsupportedType !FieldType
       -- ^ a column type 'mysqlValue' has no decoder for
     | FieldAbsent
-      -- ^ the row has no field with that column number
+      -- ^ the 'RawRow' has no field with that column number
+    | FieldRowEndsEarly
+      -- ^ the row ends inside or before this field
+    | FieldInvalidLengthPrefix !Word8
+      -- ^ a field starting with a byte that is neither a length nor the NULL marker
+    | FieldLengthOverflow
+      -- ^ an 8-byte length above 'maxBound' of 'Int'
     deriving (Show, Eq)

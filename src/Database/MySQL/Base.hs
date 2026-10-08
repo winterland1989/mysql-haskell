@@ -100,6 +100,7 @@ import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
 import qualified Data.ByteString.Lazy               as L
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
+import           Data.Proxy                         (Proxy (..))
 import           Database.MySQL.Connection
 import qualified Database.MySQL.Decoder             as Decoder
 import           Database.MySQL.Protocol.Auth
@@ -251,7 +252,8 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
 --
 -- @since 1.3.4
 queryRows_ :: Decoder.RowDecoder a -> MySQLConn -> Query -> IO ([ColumnDef], InputStream a)
-queryRows_ decoder conn qry = queryRawRows_ conn qry >>= decodeRawRows decoder
+queryRows_ decoder conn qry =
+    queryRowBodies_ conn qry >>= decodeRowBodies (Proxy :: Proxy TextProtocol) decoder
 
 -- | 'queryRows_' with parameters, filled in as 'query' does.
 --
@@ -267,20 +269,23 @@ queryRows decoder conn qry params = queryRows_ decoder conn (renderParams qry pa
 --
 -- @since 1.3.4
 queryStmtRows :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream a)
-queryStmtRows decoder conn stid params = queryStmtRawRows conn stid params >>= decodeRawRows decoder
+queryStmtRows decoder conn stid params =
+    queryStmtRowBodies conn stid params >>= decodeRowBodies (Proxy :: Proxy BinaryProtocol) decoder
 
-decodeRawRows :: Decoder.RowProtocol protocol
-              => Decoder.RowDecoder a -> ([ColumnDef], InputStream (RawRow protocol))
-              -> IO ([ColumnDef], InputStream a)
-decodeRawRows decoder (fields, rawRows) = case fields of
+decodeRowBodies :: forall protocol a. Decoder.RowProtocol protocol
+                => Proxy protocol -> Decoder.RowDecoder a -> ([ColumnDef], InputStream ByteString)
+                -> IO ([ColumnDef], InputStream a)
+decodeRowBodies _ decoder (fields, bodies) = case fields of
     [] -> (,) [] <$> Stream.nullInput
-    _  -> case Decoder.prepareRowDecoder decoder (V.fromList fields) of
-        Left mismatch  -> Stream.skipToEof rawRows >> throwIO mismatch
-        Right prepared -> (,) fields <$> Stream.mapM (decodePreparedRow prepared rawRows) rawRows
+    _  -> case Decoder.prepareRowDecoder @protocol decoder (V.fromList fields) of
+        Left mismatch  -> Stream.skipToEof bodies >> throwIO mismatch
+        Right prepared -> (,) fields <$> Stream.mapM (decodeRowBody prepared bodies) bodies
 
-decodePreparedRow :: Decoder.PreparedRow protocol a -> InputStream (RawRow protocol) -> RawRow protocol -> IO a
-decodePreparedRow prepared rawRows row = case Decoder.runPreparedRow prepared row of
-    Left fieldError -> Stream.skipToEof rawRows >> throwIO fieldError
+-- | A row that does not decode skips the rest first, so the connection stays
+-- usable.
+decodeRowBody :: Decoder.PreparedRow protocol a -> InputStream ByteString -> ByteString -> IO a
+decodeRowBody prepared bodies row = case Decoder.runPreparedRow prepared row of
+    Left fieldError -> Stream.skipToEof bodies >> throwIO fieldError
     Right value     -> pure value
 
 -- | 'query_' handing each row over as a 'RawRow', with the bounds of its
@@ -289,7 +294,24 @@ decodePreparedRow prepared rawRows row = case Decoder.runPreparedRow prepared ro
 --
 -- @since 1.3.4
 queryRawRows_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream (RawRow TextProtocol))
-queryRawRows_ conn@(MySQLConn is os _ consumed) (Query qry) = do
+queryRawRows_ conn qry = do
+    (fields, bodies) <- queryRowBodies_ conn qry
+    (,) fields <$> Stream.mapM (rawRowOrThrow (textRawRow (length fields))) bodies
+
+-- | 'queryStmt' handing each row over as a 'RawRow', as 'queryRawRows_' does.
+--
+-- @since 1.3.4
+queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
+queryStmtRawRows conn stid params = do
+    (fields, bodies) <- queryStmtRowBodies conn stid params
+    (,) fields <$> Stream.mapM (rawRowOrThrow (binaryRawRow (V.fromList (map binaryWidth fields)))) bodies
+
+rawRowOrThrow :: (ByteString -> Either RowError (RawRow protocol)) -> ByteString -> IO (RawRow protocol)
+rawRowOrThrow toRawRow row = either (throwRowError row) pure (toRawRow row)
+
+-- | The bodies of a text-protocol result set's row packets.
+queryRowBodies_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream ByteString)
+queryRowBodies_ conn@(MySQLConn is os _ consumed) (Query qry) = do
     guardUnconsumed conn
     writeCommand (COM_QUERY qry) os
     reply <- readQueryReply is
@@ -299,14 +321,12 @@ queryRawRows_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (textRawRowPacket len)
+            rows <- resultSetRows is consumed (pure . L.toStrict . pBody)
             return (fields, rows)
 
--- | 'queryStmt' handing each row over as a 'RawRow', as 'queryRawRows_' does.
---
--- @since 1.3.4
-queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
-queryStmtRawRows conn@(MySQLConn is os _ consumed) stid params = do
+-- | The bodies of a prepared statement's row packets.
+queryStmtRowBodies :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream ByteString)
+queryStmtRowBodies conn@(MySQLConn is os _ consumed) stid params = do
     guardUnconsumed conn
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     reply <- readQueryReply is
@@ -316,22 +336,13 @@ queryStmtRawRows conn@(MySQLConn is os _ consumed) stid params = do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (binaryRawRowPacket (V.fromList (map binaryWidth fields)))
+            rows <- resultSetRows is consumed binaryRowBody
             return (fields, rows)
 
-textRawRowPacket :: Int -> Packet -> IO (RawRow TextProtocol)
-textRawRowPacket columnCount packet = do
-    let row = L.toStrict (pBody packet)
-    either (throwRowError row) pure (textRawRow columnCount row)
-
 -- | A binary-protocol row, whose packets start with 0x00 like an OK packet.
-binaryRawRowPacket :: V.Vector BinaryWidth -> Packet -> IO (RawRow BinaryProtocol)
-binaryRawRowPacket widths packet =
-    if isOK packet
-    then do
-        let row = L.toStrict (pBody packet)
-        either (throwRowError row) pure (binaryRawRow widths row)
-    else throwIO (UnexpectedPacket packet)
+binaryRowBody :: Packet -> IO ByteString
+binaryRowBody packet =
+    if isOK packet then pure (L.toStrict (pBody packet)) else throwIO (UnexpectedPacket packet)
 
 -- | One result of a statement run through 'queryMulti_'.
 --

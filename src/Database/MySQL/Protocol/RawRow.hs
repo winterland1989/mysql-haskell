@@ -30,6 +30,9 @@ module Database.MySQL.Protocol.RawRow
   , BinaryWidth(..)
   , binaryWidth
   , binaryRawRow
+    -- * Internal utilities
+  , binaryNullMapLength
+  , isNullInMap
   ) where
 
 import           Control.Monad.ST                   (ST, runST)
@@ -172,7 +175,7 @@ binaryWidth column =
 -- @since 1.3.4
 binaryRawRow :: V.Vector BinaryWidth -> ByteString -> Either RowError (RawRow BinaryProtocol)
 binaryRawRow widths row =
-    let nullMapLength = (V.length widths + 7 + 2) `unsafeShiftR` 3
+    let nullMapLength = binaryNullMapLength (V.length widths)
     in if 1 + nullMapLength > B.length row
        then Left (RowError 0 0 RowEndsEarly)
        else runST $ do
@@ -211,7 +214,13 @@ fillBinaryBounds row widths bounds column offset =
                             writeBounds bounds column fieldStart fieldLength
                             fillBinaryBounds row widths bounds (column + 1) (fieldStart + fieldLength)
 
--- | The NULL map starts after the header byte; column @i@ is bit @i + 2@.
+-- | The bytes of a binary-protocol row's NULL map, which holds a bit per
+-- column from bit 2 on.
+binaryNullMapLength :: Int -> Int
+binaryNullMapLength columnCount = (columnCount + 7 + 2) `unsafeShiftR` 3
+
+-- | The NULL map starts after the header byte; column @i@ is bit @i + 2@. The
+-- row must be long enough to hold the map.
 isNullInMap :: ByteString -> Int -> Bool
 isNullInMap row column =
     testBit (B.unsafeIndex row (1 + ((column + 2) `unsafeShiftR` 3))) ((column + 2) .&. 7)
