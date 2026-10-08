@@ -10,6 +10,7 @@ import qualified Word24
 import qualified TCPStreams
 import qualified BoundsCheck
 import qualified FieldRoundtrip
+import qualified TextRowDecoding
 
 main :: IO ()
 main = do
@@ -30,4 +31,5 @@ main = do
       , Sha256Scramble.tests
       , BoundsCheck.tests
       , FieldRoundtrip.tests
+      , TextRowDecoding.tests
       ]

@@ -108,6 +108,13 @@ library
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
 
+  -- Decision: numeric conversions go through unwitch's named functions, which
+  -- return Maybe where a conversion can lose information, instead of
+  -- fromIntegral, which wraps silently. Its base >=4.18 matches the CI matrix
+  -- (GHC 9.6 and up).
+  build-depends:
+    unwitch ^>=3.1
+
   -- Decision: require crypton 2.0, the first release with its side-channel
   -- fixes (none backported to 1.x). Before it, P-384/P-521 point multiplication
   -- and DH exponentiation took time that followed the secret, and tls runs them
@@ -141,6 +148,7 @@ test-suite test
     Sha1Scramble
     Sha256Scramble
     TCPStreams
+    TextRowDecoding
     Word24
 
   hs-source-dirs:     test

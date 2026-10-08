@@ -86,6 +86,8 @@ import           Control.Exception                  (mask, onException, throwIO)
 import           Control.Monad
 import           Data.Binary                        (Get)
 import           Data.Bits                          ((.&.))
+import           Data.ByteString                    (ByteString)
+import qualified Data.ByteString                    as B
 import qualified Data.ByteString.Lazy               as L
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Database.MySQL.Connection
@@ -99,6 +101,7 @@ import           Database.MySQL.Query
 import           System.IO.Streams                  (InputStream)
 import qualified System.IO.Streams                  as Stream
 import qualified Data.Vector                        as V
+import qualified Unwitch.Convert.Int                as Int
 
 --------------------------------------------------------------------------------
 
@@ -203,7 +206,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (getFromPacket (getTextRow fields))
+            rows <- resultSetRows is consumed (decodeTextRowPacket (map textColumn fields))
             return (fields, rows)
 
 -- | 'V.Vector' version of 'query_'.
@@ -221,7 +224,7 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef consumed False
-            rows <- resultSetRows is consumed (getFromPacket (getTextRowVector fields))
+            rows <- resultSetRows is consumed (decodeTextRowVectorPacket (V.map textColumn fields))
             return (fields, rows)
 
 -- | One result of a statement run through 'queryMulti_'.
@@ -279,19 +282,19 @@ readResultSet is columnCountPacket = do
     columnCount <- getFromPacket getLenEncInt columnCountPacket
     fields <- replicateM columnCount ((decodeFromPacket <=< readPacket) is)
     _ <- readPacket is -- eof packet after the column definitions
-    (rows, eof) <- readTextRows fields [] is
+    (rows, eof) <- readTextRows (map textColumn fields) [] is
     pure (StatementRows fields rows, eof)
 
 -- | Read text-protocol rows up to the EOF packet that ends them; the rows read
 -- so far are kept in reverse.
-readTextRows :: [ColumnDef] -> [[MySQLValue]] -> InputStream Packet -> IO ([[MySQLValue]], EOF)
-readTextRows fields earlierRows is = do
+readTextRows :: [TextColumn] -> [[MySQLValue]] -> InputStream Packet -> IO ([[MySQLValue]], EOF)
+readTextRows columns earlierRows is = do
     q <- readPacket is
     if  | isEOF q -> (,) (reverse earlierRows) <$> decodeFromPacket q
         | isERR q -> decodeFromPacket q >>= throwIO . ERRException
         | otherwise -> do
-            row <- getFromPacket (getTextRow fields) q
-            readTextRows fields (row : earlierRows) is
+            row <- decodeTextRowPacket columns q
+            readTextRows columns (row : earlierRows) is
 
 -- | The 'OK's of a reply that should hold nothing else; a result-set among them
 -- raises 'ExtraResultSets', after the whole reply has been read.
@@ -325,6 +328,26 @@ readQueryReply is = do
             ok <- decodeFromPacket p
             if isThereMore ok then readQueryReply is else pure WithoutResultSet
         | otherwise -> ResultSetColumns <$> getFromPacket getLenEncInt p
+
+-- | A text-protocol row packet decoded with 'decodeTextRow', raising
+-- 'DecodePacketFailed' as 'getFromPacket' does.
+decodeTextRowPacket :: [TextColumn] -> Packet -> IO [MySQLValue]
+decodeTextRowPacket columns packet = do
+    let row = L.toStrict (pBody packet)
+    either (throwTextRowError row) pure (decodeTextRow columns row)
+
+-- | 'V.Vector' version of 'decodeTextRowPacket'.
+decodeTextRowVectorPacket :: V.Vector TextColumn -> Packet -> IO (V.Vector MySQLValue)
+decodeTextRowVectorPacket columns packet = do
+    let row = L.toStrict (pBody packet)
+    either (throwTextRowError row) pure (decodeTextRowVector columns row)
+
+throwTextRowError :: ByteString -> TextRowError -> IO a
+throwTextRowError row rowError =
+    throwIO (DecodePacketFailed (B.drop offset row) (Int.toInt64 offset)
+                                (describeTextRowError rowError))
+  where
+    offset = textRowErrorOffset rowError
 
 -- | The rows of a result-set, read as they are asked for, up to its EOF packet.
 --
