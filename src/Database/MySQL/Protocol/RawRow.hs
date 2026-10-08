@@ -94,8 +94,10 @@ data RawField
 --
 -- @since 1.3.4
 rawField :: RawRow protocol -> Int -> RawField
-rawField (RawRow bytes bounds) column =
-    if column < 0 || 2 * column + 1 >= VU.length bounds
+rawField row@(RawRow bytes bounds) column =
+    -- Compared with the field count, not @2 * column + 1@ with the bounds'
+    -- length: doubling a large column number overflows and passes the check.
+    if column < 0 || column >= rawRowFieldCount row
     then RawAbsent
     else
         let start       = VU.unsafeIndex bounds (2 * column)

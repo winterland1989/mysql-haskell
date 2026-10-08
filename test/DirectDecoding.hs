@@ -105,6 +105,10 @@ tests = testGroup "direct decoding"
     , testCase "a raw row knows where each field is" $
         fmap (\row -> map (Decode.rawField row) [0, 1, 6]) (Decode.textRawRow 6 employeeRow)
             @?= Right [Decode.RawBytes "10001", Decode.RawBytes "1953-09-02", Decode.RawAbsent]
+    , testCase "a column number past the row is absent, however large" $
+        fmap (\row -> map (Decode.rawField row) [6, 2 ^ (62 :: Int), 2 ^ (62 :: Int) + 1000, -1])
+             (Decode.textRawRow 6 employeeRow)
+            @?= Right (replicate 4 Decode.RawAbsent)
     , testCase "a record decoder reads the employees row" $
         decodeTextWith employeeDecoder employeeColumns employeeRow
             @?= Decoded (10001, fromGregorian 1953 9 2, "Georgi", "Facello", "M", fromGregorian 1986 6 26)
