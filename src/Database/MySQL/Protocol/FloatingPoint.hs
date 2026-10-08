@@ -52,6 +52,8 @@ readDouble :: ByteString -> Maybe Double
 readDouble bytes = do
     decimal <- scanDecimal bytes
     if  | abs (decimalExponent decimal) <= 22 ->
+            -- Right only when the significand is exact in a Double (at most
+            -- 2^53); see Note [Correctly rounded floating point text].
             case Word64.toDouble (decimalSignificand decimal) of
                 Right exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
                 Left _            -> exactly bytes
@@ -62,6 +64,7 @@ readFloat :: ByteString -> Maybe Float
 readFloat bytes = do
     decimal <- scanDecimal bytes
     if  | abs (decimalExponent decimal) <= 10 ->
+            -- Right only when the significand is exact in a Float (at most 2^24).
             case Word64.toFloat (decimalSignificand decimal) of
                 Right exactDigits -> Just (signed decimal (scaleExactly exactDigits (decimalExponent decimal)))
                 Left _            -> exactly bytes
