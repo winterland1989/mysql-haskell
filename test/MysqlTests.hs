@@ -18,6 +18,7 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 import qualified TextRow
 import qualified ExecuteMany
+import           QueryApi
 import qualified TextRowNew
 
 tests :: TestTree
@@ -77,15 +78,16 @@ tests = testCaseSteps "mysql-haskell test suit" $ \step -> do
 
     resetTestTable c
 
-    step "testing text protocol"
-    TextRow.tests c
+    forM_ queryApis $ \api -> do
+        step ("testing text protocol through the " ++ apiName api)
+        TextRow.tests api c
 
-    resetTestTable c
+        resetTestTable c
 
-    step "testing binary protocol"
-    BinaryRow.tests c
+        step ("testing binary protocol through the " ++ apiName api)
+        BinaryRow.tests api c
 
-    resetTestTable c
+        resetTestTable c
 
 
     when isNew $ do
@@ -96,15 +98,16 @@ tests = testCaseSteps "mysql-haskell test suit" $ \step -> do
                    \__time         TIME(6)\
                    \) CHARACTER SET utf8"
 
-        resetTest57Table c
+        forM_ queryApis $ \api -> do
+            resetTest57Table c
 
-        step "testing MySQL5.7 extra text protocol"
-        TextRowNew.tests c
+            step ("testing MySQL5.7 extra text protocol through the " ++ apiName api)
+            TextRowNew.tests api c
 
-        resetTest57Table c
+            resetTest57Table c
 
-        step "testing MySQL5.7 extra binary protocol"
-        BinaryRowNew.tests c
+            step ("testing MySQL5.7 extra binary protocol through the " ++ apiName api)
+            BinaryRowNew.tests api c
 
         void $ resetTest57Table c
 

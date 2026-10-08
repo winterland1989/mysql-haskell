@@ -12,6 +12,7 @@ import qualified BoundsCheck
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
 import qualified DirectDecoding
+import qualified DecoderRoundtrip
 
 main :: IO ()
 main = do
@@ -34,4 +35,5 @@ main = do
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
       , DirectDecoding.tests
+      , DecoderRoundtrip.tests
       ]

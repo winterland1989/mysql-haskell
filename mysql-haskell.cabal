@@ -141,6 +141,7 @@ test-suite test
     Aeson
     AesonBP
     BoundsCheck
+    DecoderRoundtrip
     DirectDecoding
     FieldRoundtrip
     JSON
@@ -152,6 +153,7 @@ test-suite test
     Sha256Scramble
     TCPStreams
     TextRowDecoding
+    TypedValue
     Word24
 
   hs-source-dirs:     test
@@ -196,6 +198,7 @@ test-suite integration
     ExecuteMany
     MultipleResults
     MysqlTests
+    QueryApi
     QueryWithoutResultSet
     RoundtripBit
     RowDecoderQueries
@@ -204,6 +207,7 @@ test-suite integration
     TextRow
     TLSConnection
     TextRowNew
+    TypedValue
     UnixSocket
 
   hs-source-dirs:     test
