@@ -36,12 +36,11 @@ read @1e20@ as 1, missed 2 of 243 plain decimals. Reading the text exactly as a
 
 Decision: Clinger's fast path first, then the exact way; the alternatives
 above were wrong or slow. The fast path avoids the cost: when the significant
-digits, read as an
-integer, lie in the exact integer range of a Double (below 2^53, where
-unwitch's 'Word64.toDouble' converts and every integer is exact) and the power
-of ten is at most 22 either way, that power is exact as well, so one
-multiplication or division rounds once and gives the nearest Double. A Float
-takes integers below 2^24 and powers up to 10. A number with more than 19
+digits, read as an integer, lie in the exact integer range of a Double (below
+2^53, where unwitch's 'Word64.toDouble' converts and every integer is exact)
+and the power of ten is at most 22 either way, that power is exact as well, so
+one multiplication or division rounds once and gives the nearest Double. A
+Float takes integers below 2^24 and powers up to 10. A number with more than 19
 significant digits does not fit a 'Word64' and has no significand at all, so
 it never reaches the fast path. MySQL writes most values within these bounds;
 the rest go the exact way.
