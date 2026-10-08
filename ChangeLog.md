@@ -2,7 +2,7 @@
 
 ## 1.3.4 -- 2026.10.08
 
-New functions only. Rows decode faster: the query functions resolve each
+No exported function changes its type. Rows decode faster: the query functions resolve each
 column's type once per result set and walk each row once, so an application
 decoding rows into its own types through `query_` or `queryStmt` runs up to
 22% fewer instructions and allocates 22 to 40% less. The new
@@ -11,12 +11,18 @@ decoding rows into its own types through `query_` or `queryStmt` runs up to
 exceptions from inside values; `queryRawRows_` and `queryStmtRawRows` hand over
 rows with their field bounds for libraries that decode by column number.
 
+Fixes FLOAT and DOUBLE values that MySQL writes in exponent form: through
+`query_` and the other plain queries, `1e20` came back as 1 and `1.5e300` as
+1.5. Text-protocol FLOAT and DOUBLE values are now read correctly rounded;
+prepared statements were not affected.
+
 `Database.MySQL.Base` now also exports those five functions and re-exports
 `Database.MySQL.Protocol.RawRow`, which can clash with same-named definitions
 under an unqualified import. The new `unwitch` dependency needs GHC 9.6 or
 newer; projects on older compilers keep resolving to 1.3.3.
 
-+ Faster row decoding, and decoders straight into Haskell values
++ Faster row decoding, decoders straight into Haskell values, and FLOAT and
+  DOUBLE in exponent form read correctly
   [#98](https://github.com/winterland1989/mysql-haskell/pull/98)
 + Benchmark figures re-measured on current hardware
   [#95](https://github.com/winterland1989/mysql-haskell/pull/95)
