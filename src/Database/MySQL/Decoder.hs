@@ -144,9 +144,10 @@ instance Functor FieldDecoder where
         }
 
 mapParse :: (a -> b) -> ParseBytes a -> ParseBytes b
-mapParse f parse fieldBytes = case parse fieldBytes of
+mapParse f parse = \fieldBytes -> case parse fieldBytes of
     (# kind | #)  -> (# kind | #)
     (# | value #) -> (# | f value #)
+{-# INLINE mapParse #-}
 
 -- | NULL becomes 'Nothing'; any other field is decoded as before.
 --
@@ -331,9 +332,10 @@ textFieldErrorKind fieldError = case fieldError of
 
 -- | A text field the lexer reads, evaluated.
 lexedField :: (ByteString -> Maybe a) -> ParseBytes a
-lexedField lexer fieldBytes = case lexer fieldBytes of
+lexedField lexer = \fieldBytes -> case lexer fieldBytes of
     Just !value -> (# | value #)
     Nothing     -> (# FieldUnparsable fieldBytes | #)
+{-# INLINE lexedField #-}
 
 utf8Field :: ParseBytes Text
 utf8Field fieldBytes = case T.decodeUtf8' fieldBytes of
@@ -345,10 +347,11 @@ bytesField fieldBytes = (# | fieldBytes #)
 
 -- | A binary field of exactly @width@ bytes, evaluated.
 fixedField :: Int -> (ByteString -> a) -> ParseBytes a
-fixedField width decode fieldBytes =
+fixedField width decode = \fieldBytes ->
     if B.length fieldBytes == width
     then let !value = decode fieldBytes in (# | value #)
     else (# FieldUnparsable fieldBytes | #)
+{-# INLINE fixedField #-}
 
 -- | The binary protocol sends signed integers in two's complement, so the
 -- signed value has the same bits as the unsigned one read from the wire.
@@ -443,10 +446,11 @@ binarySignedTime fieldBytes =
         | otherwise -> (# FieldUnparsable fieldBytes | #)
 
 nonNegativeTime :: ParseBytes (Word8, TimeOfDay) -> ParseBytes TimeOfDay
-nonNegativeTime parse fieldBytes = case parse fieldBytes of
+nonNegativeTime parse = \fieldBytes -> case parse fieldBytes of
     (# kind | #) -> (# kind | #)
     (# | (sign, time) #) ->
         if sign == 0 then (# | time #) else (# FieldNegativeTime fieldBytes | #)
+{-# INLINE nonNegativeTime #-}
 
 -- | Decodes a row, one 'field' per column, in order. It is checked against the
 -- result set's column definitions once, before the first row.
@@ -459,16 +463,25 @@ data RowDecoder a = RowDecoder
         => V.Vector ColumnDef -> Int -> Either ColumnMismatch (FieldSteps protocol a))
     -- ^ fits it to the columns from the given column number on
 
+-- Decision: the instance methods and the step combinators are inlined, so that
+-- a decoder written as one expression, such as @Employee \<$\> field a \<*\>
+-- field b@, compiles to one walk that applies @Employee@ to all its fields at
+-- once. Left to the closures of the run-time composition, every field paid a
+-- generic partial application of the constructor (about 1,400 of 9,300
+-- instructions per row on the employees benchmark).
 instance Functor RowDecoder where
     fmap f (RowDecoder width prepare) =
         RowDecoder width (\columns start -> mapSteps f <$> prepare columns start)
+    {-# INLINE fmap #-}
 
 instance Applicative RowDecoder where
     pure value = RowDecoder 0 (\_ _ -> Right (pureSteps value))
+    {-# INLINE pure #-}
     RowDecoder functionWidth prepareFunction <*> RowDecoder argumentWidth prepareArgument =
         RowDecoder (functionWidth + argumentWidth) (\columns start ->
             apSteps <$> prepareFunction columns start
                     <*> prepareArgument columns (start + functionWidth))
+    {-# INLINE (<*>) #-}
 
 -- | Decodes the next column with this decoder.
 --
@@ -478,6 +491,7 @@ field decoder = RowDecoder 1 (\columns column -> case columns V.!? column of
     Nothing -> Left (ColumnCountMismatch (column + 1) (V.length columns))
     Just definition ->
         fieldSteps column definition <$> prepareFieldParser decoder column definition)
+{-# INLINE field #-}
 
 -- | Reads fields from a row's bytes at an offset, and returns the offset after
 -- them. A row is walked once, in column order, each field parsed as it is
@@ -486,11 +500,13 @@ newtype FieldSteps (protocol :: Type) a = FieldSteps (ByteString -> Int -> (# Fi
 
 pureSteps :: a -> FieldSteps protocol a
 pureSteps value = FieldSteps (\_ offset -> (# | (# value, offset #) #))
+{-# INLINE pureSteps #-}
 
 mapSteps :: (a -> b) -> FieldSteps protocol a -> FieldSteps protocol b
 mapSteps f (FieldSteps run) = FieldSteps (\row offset -> case run row offset of
     (# fieldError | #)        -> (# fieldError | #)
     (# | (# value, next #) #) -> let !mapped = f value in (# | (# mapped, next #) #))
+{-# INLINE mapSteps #-}
 
 -- | Applies as soon as both sides are decoded, so a row decodes to an evaluated
 -- value instead of a chain of thunks that each later force has to update.
@@ -502,6 +518,7 @@ apSteps (FieldSteps runFunction) (FieldSteps runArgument) = FieldSteps (\row off
             (# fieldError | #) -> (# fieldError | #)
             (# | (# argument, afterArgument #) #) ->
                 let !applied = function argument in (# | (# applied, afterArgument #) #))
+{-# INLINE apSteps #-}
 
 -- | A 'RowDecoder' fitted to a result set's columns.
 --
@@ -558,10 +575,11 @@ textRowStart _ = (# | 0 #)
 
 -- | A text-protocol field: the NULL marker or a length-encoded value.
 textFieldStep :: Int -> FieldParser TextProtocol a -> ByteString -> Int -> (# FieldError | (# a, Int #) #)
-textFieldStep column parser row offset =
+textFieldStep column parser = \row offset ->
     if  | offset >= B.length row -> (# FieldError column FieldRowEndsEarly | #)
         | B.unsafeIndex row offset == 0xFB -> nullStep column parser (offset + 1)
         | otherwise -> lengthEncodedStep column parser row offset
+{-# INLINE textFieldStep #-}
 
 -- | The fields of a binary-protocol row follow the 0x00 header and the NULL map.
 binaryRowStart :: Int -> ByteString -> (# FieldError | Int #)
@@ -573,7 +591,7 @@ binaryRowStart columnCount row =
 -- out as its column's 'BinaryWidth' says.
 binaryFieldStep :: Int -> BinaryWidth -> FieldParser BinaryProtocol a -> ByteString -> Int
                 -> (# FieldError | (# a, Int #) #)
-binaryFieldStep column width parser row offset =
+binaryFieldStep column width parser = \row offset ->
     if RawRow.isNullInMap row column
     then nullStep column parser offset
     else case width of
@@ -583,6 +601,7 @@ binaryFieldStep column width parser row offset =
             if offset >= B.length row
             then (# FieldError column FieldRowEndsEarly | #)
             else lengthEncodedStep column parser row offset
+{-# INLINE binaryFieldStep #-}
 
 nullStep :: Int -> FieldParser protocol a -> Int -> (# FieldError | (# a, Int #) #)
 nullStep column parser next = case parserNull parser of

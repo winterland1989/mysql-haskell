@@ -350,11 +350,23 @@ appendBitByte bits byte = unsafeShiftL bits 8 .|. Word8.toWord64 byte
 
 lexSignedIntegral :: Integral a => ByteString -> Maybe a
 lexSignedIntegral bytes = fst <$> LexInt.readSigned LexInt.readDecimal bytes
-{-# INLINABLE lexSignedIntegral #-}
+-- Specialised here so that "Database.MySQL.Decoder", which reaches these
+-- lexers through higher-order arguments, gets the same specialised digit loops
+-- as 'decodeTextValue' instead of the dictionary-passing ones.
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int8 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word8 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int16 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word16 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int32 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word32 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int64 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word64 #-}
 
 lexSignedFraction :: Fractional a => ByteString -> Maybe a
 lexSignedFraction bytes = fst <$> LexFrac.readSigned LexFrac.readDecimal bytes
-{-# INLINABLE lexSignedFraction #-}
+{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Float #-}
+{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Double #-}
+{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Scientific #-}
 
 -- | @YYYY-MM-DD hh:mm:ss[.fraction]@, as DATETIME and TIMESTAMP fields come.
 lexLocalTime :: ByteString -> Maybe LocalTime
