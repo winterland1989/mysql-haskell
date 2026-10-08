@@ -293,8 +293,10 @@ describeTextFieldError fieldError = case fieldError of
         "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show fieldType
 
 -- | The value of a field's bytes. The lexer runs at once, so a malformed field
--- fails while the row is read; the 'MySQLValue' and any 'Text' are left lazy.
--- See Note [Text rows decoded once per result set]. Inlined so that
+-- fails while the row is read; a lexed value and any 'Text' are left lazy,
+-- while a constructor around bytes already in hand is built at once, as that
+-- is cheaper than a thunk. See Note [Text rows decoded once per result set].
+-- Inlined so that
 -- 'decodeTextFieldAt' matches the 'Right' away instead of allocating it.
 decodeTextValue :: FieldType -> TextValue -> ByteString -> Either TextFieldError MySQLValue
 decodeTextValue fieldType value bytes = case value of
