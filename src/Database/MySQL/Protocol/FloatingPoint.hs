@@ -34,7 +34,9 @@ read @1e20@ as 1, missed 2 of 243 plain decimals. Reading the text exactly as a
 'Scientific' and rounding once with 'toRealFloat' missed none, but cost about
 14,000 instructions per DOUBLE field.
 
-Clinger's fast path avoids that cost: when the significant digits, read as an
+Decision: Clinger's fast path first, then the exact way; the alternatives
+above were wrong or slow. The fast path avoids the cost: when the significant
+digits, read as an
 integer, lie in the exact integer range of a Double (below 2^53, where
 unwitch's 'Word64.toDouble' converts and every integer is exact) and the power
 of ten is at most 22 either way, that power is exact as well, so one
