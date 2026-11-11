@@ -32,6 +32,8 @@ import           Database.MySQL.Protocol.ColumnDef
 import           Control.Exception                         (throwIO)
 import           Database.MySQL.Query
 import           GHC.Generics                              (Generic)
+import qualified Unwitch.Convert.Word32                    as Word32
+import qualified Unwitch.Convert.Word8                     as Word8
 
 --------------------------------------------------------------------------------
 -- | binlog tyoe
@@ -73,7 +75,92 @@ data BinLogEventType
     | BINLOG_GTID_EVENT
     | BINLOG_ANONYMOUS_GTID_EVENT
     | BINLOG_PREVIOUS_GTIDS_EVENT
-  deriving (Show, Eq, Enum)
+    | BINLOG_UNRECOGNIZED_EVENT !Word8
+      -- ^ A type code this library has no constructor for, such as MySQL 8's
+      -- @TRANSACTION_PAYLOAD_EVENT@ (40) or MariaDB's 160 and up.
+  deriving (Show, Eq)
+
+-- | The type of the event with this code in the binlog header.
+binLogEventTypeFromCode :: Word8 -> BinLogEventType
+binLogEventTypeFromCode code = case code of
+    0 -> BINLOG_UNKNOWN_EVENT
+    1 -> BINLOG_START_EVENT_V3
+    2 -> BINLOG_QUERY_EVENT
+    3 -> BINLOG_STOP_EVENT
+    4 -> BINLOG_ROTATE_EVENT
+    5 -> BINLOG_INTVAR_EVENT
+    6 -> BINLOG_LOAD_EVENT
+    7 -> BINLOG_SLAVE_EVENT
+    8 -> BINLOG_CREATE_FILE_EVENT
+    9 -> BINLOG_APPEND_BLOCK_EVENT
+    10 -> BINLOG_EXEC_LOAD_EVENT
+    11 -> BINLOG_DELETE_FILE_EVENT
+    12 -> BINLOG_NEW_LOAD_EVENT
+    13 -> BINLOG_RAND_EVENT
+    14 -> BINLOG_USER_VAR_EVENT
+    15 -> BINLOG_FORMAT_DESCRIPTION_EVENT
+    16 -> BINLOG_XID_EVENT
+    17 -> BINLOG_BEGIN_LOAD_QUERY_EVENT
+    18 -> BINLOG_EXECUTE_LOAD_QUERY_EVENT
+    19 -> BINLOG_TABLE_MAP_EVENT
+    20 -> BINLOG_WRITE_ROWS_EVENTv0
+    21 -> BINLOG_UPDATE_ROWS_EVENTv0
+    22 -> BINLOG_DELETE_ROWS_EVENTv0
+    23 -> BINLOG_WRITE_ROWS_EVENTv1
+    24 -> BINLOG_UPDATE_ROWS_EVENTv1
+    25 -> BINLOG_DELETE_ROWS_EVENTv1
+    26 -> BINLOG_INCIDENT_EVENT
+    27 -> BINLOG_HEARTBEAT_EVENT
+    28 -> BINLOG_IGNORABLE_EVENT
+    29 -> BINLOG_ROWS_QUERY_EVENT
+    30 -> BINLOG_WRITE_ROWS_EVENTv2
+    31 -> BINLOG_UPDATE_ROWS_EVENTv2
+    32 -> BINLOG_DELETE_ROWS_EVENTv2
+    33 -> BINLOG_GTID_EVENT
+    34 -> BINLOG_ANONYMOUS_GTID_EVENT
+    35 -> BINLOG_PREVIOUS_GTIDS_EVENT
+    unrecognized -> BINLOG_UNRECOGNIZED_EVENT unrecognized
+
+-- | The code this event type has in the binlog header.
+binLogEventTypeCode :: BinLogEventType -> Word8
+binLogEventTypeCode eventType = case eventType of
+    BINLOG_UNKNOWN_EVENT -> 0
+    BINLOG_START_EVENT_V3 -> 1
+    BINLOG_QUERY_EVENT -> 2
+    BINLOG_STOP_EVENT -> 3
+    BINLOG_ROTATE_EVENT -> 4
+    BINLOG_INTVAR_EVENT -> 5
+    BINLOG_LOAD_EVENT -> 6
+    BINLOG_SLAVE_EVENT -> 7
+    BINLOG_CREATE_FILE_EVENT -> 8
+    BINLOG_APPEND_BLOCK_EVENT -> 9
+    BINLOG_EXEC_LOAD_EVENT -> 10
+    BINLOG_DELETE_FILE_EVENT -> 11
+    BINLOG_NEW_LOAD_EVENT -> 12
+    BINLOG_RAND_EVENT -> 13
+    BINLOG_USER_VAR_EVENT -> 14
+    BINLOG_FORMAT_DESCRIPTION_EVENT -> 15
+    BINLOG_XID_EVENT -> 16
+    BINLOG_BEGIN_LOAD_QUERY_EVENT -> 17
+    BINLOG_EXECUTE_LOAD_QUERY_EVENT -> 18
+    BINLOG_TABLE_MAP_EVENT -> 19
+    BINLOG_WRITE_ROWS_EVENTv0 -> 20
+    BINLOG_UPDATE_ROWS_EVENTv0 -> 21
+    BINLOG_DELETE_ROWS_EVENTv0 -> 22
+    BINLOG_WRITE_ROWS_EVENTv1 -> 23
+    BINLOG_UPDATE_ROWS_EVENTv1 -> 24
+    BINLOG_DELETE_ROWS_EVENTv1 -> 25
+    BINLOG_INCIDENT_EVENT -> 26
+    BINLOG_HEARTBEAT_EVENT -> 27
+    BINLOG_IGNORABLE_EVENT -> 28
+    BINLOG_ROWS_QUERY_EVENT -> 29
+    BINLOG_WRITE_ROWS_EVENTv2 -> 30
+    BINLOG_UPDATE_ROWS_EVENTv2 -> 31
+    BINLOG_DELETE_ROWS_EVENTv2 -> 32
+    BINLOG_GTID_EVENT -> 33
+    BINLOG_ANONYMOUS_GTID_EVENT -> 34
+    BINLOG_PREVIOUS_GTIDS_EVENT -> 35
+    BINLOG_UNRECOGNIZED_EVENT code -> code
 
 data BinLogPacket = BinLogPacket
     { blTimestamp :: !Word32
@@ -86,6 +173,11 @@ data BinLogPacket = BinLogPacket
     , blSemiAck   :: !Bool
     } deriving (Show, Eq)
 
+-- | @LOG_EVENT_IGNORABLE_F@: the server allows a reader that does not know
+-- this event's type to skip it.
+isIgnorableEvent :: BinLogPacket -> Bool
+isIgnorableEvent packet = blFlags packet .&. 0x80 /= 0
+
 putSemiAckResp :: Word32 -> ByteString -> Put
 putSemiAckResp pos fn = put pos >> put fn
 
@@ -96,7 +188,7 @@ getBinLogPacket checksum semi = do
         then getWord8 >> (== 0x01) <$> getWord8
         else return False
     ts <- getWord32le
-    typ <- toEnum . fromIntegral <$> getWord8
+    typ <- binLogEventTypeFromCode <$> getWord8
     sid <- getWord32le
     size <- getWord32le
     pos <- getWord32le
@@ -142,7 +234,7 @@ eventHeaderLen fd typ
     vec :: ByteString
     vec = fdEventHeaderLenVector fd
     idx :: Int
-    idx = fromEnum typ - 1
+    idx = Word8.toInt (binLogEventTypeCode typ) - 1
 
 data RotateEvent = RotateEvent
     { rPos :: !Word64, rFileName :: !ByteString } deriving (Show, Eq)
@@ -286,6 +378,11 @@ getUpdateRowEvent fd tme typ = do
     UpdateRowsEvent tid flgs colCnt (pmap, pmap') <$>
         untilM ((,) <$> getBinLogRow (tmColumnMeta tme) pmap <*> getBinLogRow (tmColumnMeta tme) pmap')
                isEmpty
+
+-- | The table ID that opens the body of a rows event of this type.
+getRowsEventTableId :: FormatDescription -> BinLogEventType -> Get Word64
+getRowsEventTableId fd typ =
+    if eventHeaderLen fd typ == 6 then Word32.toWord64 <$> getWord32le else getWord48le
 
 getPresentMap :: Int -> Int -> Get BitMap
 getPresentMap plen poffset = do

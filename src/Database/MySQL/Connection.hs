@@ -17,8 +17,8 @@ module Database.MySQL.Connection
     ) where
 
 import           Control.Exception               (Exception (displayException),
-                                                  bracketOnError,
-                                                  throwIO, catch, SomeException)
+                                                  bracketOnError, fromException,
+                                                  mask, throwIO, catch, SomeException)
 import           Control.Monad
 import qualified Crypto.Hash                     as Crypto
 import           Crypto.Hash.Algorithms          (SHA1(..))
@@ -39,6 +39,7 @@ import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Unsafe          as B
 import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
+import           Data.Maybe                      (isJust)
 import qualified Data.PEM                        as PEM
 import           Data.Typeable
 import           Data.Word
@@ -63,8 +64,38 @@ data MySQLConn = MySQLConn {
         mysqlRead        :: {-# UNPACK #-} !(InputStream  Packet)
     ,   mysqlWrite       :: (Packet -> IO ())
     ,   mysqlCloseSocket :: IO ()
-    ,   isConsumed       :: {-# UNPACK #-} !(IORef Bool)
+    ,   replyState       :: {-# UNPACK #-} !(IORef ReplyState)
     }
+
+-- | How far the replies to the commands sent on a connection have been read.
+-- See Note [Abandoned replies].
+--
+-- @since 1.4.0
+data ReplyState
+    = RepliesRead
+      -- ^ Every reply was read, so a command may be sent.
+    | RowsUnread
+      -- ^ A result set's rows are still to be read from its stream.
+    | ReplyAbandoned
+      -- ^ Reading a reply stopped part-way; the connection refuses commands.
+    deriving (Show, Eq)
+
+-- Note [Abandoned replies]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~
+-- The server answers commands in order on one socket, so a reply left unread
+-- is read as the reply to the next command. A timeout around query_ used to
+-- do that: interrupted before it read the column count, it left the
+-- connection looking idle, and the next SELECT returned the earlier one's
+-- rows (issue #10).
+--
+-- Decision: a command's exchange runs with the state at ReplyAbandoned until
+-- its reply is read, so an exception part-way leaves the connection refusing
+-- commands with AbandonedReply, and the caller reconnects. Draining the rest
+-- of the reply instead would block on the server for as long as the
+-- interrupted statement runs, which defeats the timeout. ERRException and
+-- ExtraResultSets are only raised after a reply was read in full, so they
+-- leave the connection usable, as does a DecodePacketException on a row,
+-- whose packet was read before it failed to decode.
 
 -- | Everything you need to establish a MySQL connection.
 --
@@ -125,7 +156,7 @@ connectDetail = fmap withoutNegotiated . connectDetailExtended noExtendedCapabil
 -- returning those the server agreed to. Asking for none gives exactly
 -- 'connectDetail'. See Note [MariaDB extended capabilities].
 --
--- @since 1.4.1
+-- @since 1.4.0
 connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectDetailExtended requested ci =
     bracketOnError
@@ -148,7 +179,7 @@ connectUnixSocketDetail socketPath =
 -- | 'connectUnixSocketDetail' asking for extended capabilities, as
 -- 'connectDetailExtended' does.
 --
--- @since 1.4.1
+-- @since 1.4.0
 connectUnixSocketDetailExtended :: ExtendedCapabilities -> FilePath -> ConnectInfo
                                 -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectUnixSocketDetailExtended requested socketPath ci =
@@ -183,14 +214,14 @@ handshakePlain requested (ConnectInfo _host _port db user pass charset) c = do
 
 -- | The 'MySQLConn' over a connection whose handshake completed.
 --
--- @since 1.4.1
+-- @since 1.4.0
 authenticatedConnection :: InputStream Packet -> TCP.Connection a -> IO MySQLConn
 authenticatedConnection is' c = do
-    consumed <- newIORef True
+    state <- newIORef RepliesRead
     return $ MySQLConn is'
         (sendPacket c)
         (writeCommand COM_QUIT (sendPacket c) >> quitReply is' >> TCP.close c)
-        consumed
+        state
 
 -- | After COM_QUIT the server either replies an OK packet or closes the
 -- connection, so a failed read is not an error here.
@@ -207,7 +238,7 @@ sendPacket c = TCP.send c . Binary.runPut . Binary.put
 -- request). With 'noExtendedCapabilities' it is the packet mysql-haskell sent
 -- before extended capabilities existed.
 --
--- @since 1.4.1
+-- @since 1.4.0
 handshakeResponsePacket :: Word8 -> ExtendedCapabilities -> ByteString -> ByteString -> ByteString
                         -> Word8 -> Greeting -> Packet
 handshakeResponsePacket seqN negotiated db user pass charset greet =
@@ -216,7 +247,7 @@ handshakeResponsePacket seqN negotiated db user pass charset greet =
 -- | The SSL request for a connection using the negotiated extended
 -- capabilities, as 'handshakeResponsePacket'.
 --
--- @since 1.4.1
+-- @since 1.4.0
 sslRequestPacket :: ExtendedCapabilities -> Word8 -> Packet
 sslRequestPacket negotiated charset =
     putToPacket 1 (putSSLRequestExtended negotiated (sslRequestFor negotiated charset))
@@ -226,7 +257,7 @@ mkAuth = mkAuthFor noExtendedCapabilities
 
 -- | 'mkAuth' for a connection using these extended capabilities.
 --
--- @since 1.4.1
+-- @since 1.4.0
 mkAuthFor :: ExtendedCapabilities -> ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
 mkAuthFor negotiated db user pass charset greet =
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
@@ -422,8 +453,7 @@ ping = flip command COM_PING
 -- | Send a 'Command' which don't return a resultSet.
 --
 command :: MySQLConn -> Command -> IO OK
-command conn@(MySQLConn is os _ _) cmd = do
-    guardUnconsumed conn
+command conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
     writeCommand cmd os
     waitCommandReply is
 {-# INLINE command #-}
@@ -479,11 +509,38 @@ writeCommand a writePacket = let bs = Binary.runPut (putCommand a) in
             seqN' `seq` len' `seq` go len' seqN' rest writePacket'
 {-# INLINE writeCommand #-}
 
+-- | Throws unless a command may be sent, see 'ReplyState'.
 guardUnconsumed :: MySQLConn -> IO ()
-guardUnconsumed (MySQLConn _ _ _ consumed) = do
-    c <- readIORef consumed
-    unless c (throwIO UnconsumedResultSet)
+guardUnconsumed (MySQLConn _ _ _ state) = do
+    current <- readIORef state
+    case current of
+        RepliesRead -> pure ()
+        RowsUnread -> throwIO UnconsumedResultSet
+        ReplyAbandoned -> throwIO AbandonedReply
 {-# INLINE guardUnconsumed #-}
+
+-- | Send a command and read its reply, the @exchange@, leaving the connection
+-- at 'ReplyAbandoned' if an exception stops it part-way. An exchange that hands
+-- out a row stream sets 'RowsUnread' itself. See Note [Abandoned replies].
+runCommand :: MySQLConn -> IO a -> IO a
+runCommand conn@(MySQLConn _ _ _ state) exchange = mask $ \restore -> do
+    guardUnconsumed conn
+    writeIORef state ReplyAbandoned
+    result <- restore exchange `catch` settleFailedExchange state
+    settled <- readIORef state
+    when (settled == ReplyAbandoned) (writeIORef state RepliesRead)
+    pure result
+
+settleFailedExchange :: IORef ReplyState -> SomeException -> IO a
+settleFailedExchange state failure = do
+    when (endsReply failure) (writeIORef state RepliesRead)
+    throwIO failure
+
+-- | Raised only once the reply it came in was read to the end.
+endsReply :: SomeException -> Bool
+endsReply failure =
+    isJust (fromException failure :: Maybe ERRException)
+    || isJust (fromException failure :: Maybe ExtraResultSets)
 
 writeIORef' :: IORef a -> a -> IO ()
 writeIORef' ref x = x `seq` writeIORef ref x
@@ -497,6 +554,19 @@ instance Exception NetworkException
 
 data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
 instance Exception UnconsumedResultSet
+
+-- | Reading the reply to an earlier command on this connection stopped part-way,
+-- for example on a 'System.Timeout.timeout'. The rest of that reply is still
+-- unread and would be taken for the reply to the next command, so the
+-- connection refuses commands: close it and connect again.
+--
+-- @since 1.4.0
+data AbandonedReply = AbandonedReply deriving (Typeable, Show)
+instance Exception AbandonedReply where
+    displayException AbandonedReply =
+        "mysql-haskell: reading the reply to an earlier command on this connection stopped "
+        ++ "part-way (for example on a timeout), so the rest of it is still unread and "
+        ++ "would be taken for this command's reply. Close the connection and connect again."
 
 data ERRException = ERRException ERR deriving (Typeable, Show)
 instance Exception ERRException

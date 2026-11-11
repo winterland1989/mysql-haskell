@@ -11,6 +11,11 @@ import qualified TCPStreams
 import qualified BoundsCheck
 import qualified FieldRoundtrip
 import qualified HandshakeGolden
+import qualified BinLogEventCodes
+import qualified PacketClassification
+import qualified Placeholders
+import qualified ResultCharsets
+import qualified ZeroDates
 
 main :: IO ()
 main = do
@@ -32,4 +37,9 @@ main = do
       , BoundsCheck.tests
       , FieldRoundtrip.tests
       , HandshakeGolden.tests
+      , PacketClassification.tests
+      , Placeholders.tests
+      , ZeroDates.tests
+      , ResultCharsets.tests
+      , BinLogEventCodes.tests
       ]

@@ -4,9 +4,17 @@ import qualified Data.ByteString as B
 import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
 import           Test.Tasty (defaultMain, testGroup)
+import qualified AbandonedReplies
+import qualified BinLogRowEvents
+import qualified CABundle
 import qualified CachingSha2
 import qualified MariaDBNegotiation
 import           Database.MySQL.MariaDB (serverFlavour)
+import qualified LargeRows
+import qualified Latin1Results
+import qualified PlaceholderLiterals
+import qualified UnsignedInsertId
+import qualified ZeroDateRoundtrip
 import qualified MultipleResults
 import qualified MysqlTests
 import qualified QueryWithoutResultSet
@@ -39,10 +47,20 @@ main = do
         , QueryWithoutResultSet.tests
         , MultipleResults.tests
         , MariaDBNegotiation.tests (serverFlavour greet)
+        , LargeRows.tests
+        , UnsignedInsertId.tests
+        , PlaceholderLiterals.tests
+        , ZeroDateRoundtrip.tests
+        , Latin1Results.tests
+        , AbandonedReplies.tests
+        , BinLogRowEvents.tests
+        , CABundle.tests
         ]
         -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
         -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
         ++ [ CachingSha2.tests | isMySql80 ]
+        -- binlog_transaction_compression is MySQL 8.0.20+ only.
+        ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]
         -- Unix socket tests are included only when a socket file is found.
         ++ [ UnixSocket.tests p | Just p <- [mSockPath] ]
         -- TLS tests are included only when a CA certificate path is provided.
