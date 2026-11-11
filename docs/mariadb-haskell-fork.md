@@ -133,7 +133,7 @@ master. The integration suite already runs in two NixOS VMs from
 `integrated-checks-mysql80` on MySQL 8.0, so every fix is tested against
 both.
 
-### 2. A `Database.MySQL.MariaDB` module
+### 2. A `Database.MariaDB` module
 
 Most MariaDB features can live in their own module, but the handshake
 needs a hook in the core:

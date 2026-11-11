@@ -16,13 +16,14 @@ and the Mozilla CA bundle is installed with the library. `query_` and
 errors through `queryRows_`, `queryRows` and `queryStmtRows`, or by column
 number through `queryRawRows_` and `queryStmtRawRows`.
 
-New in `Database.MySQL.MariaDB`: connecting with a request for capabilities
-only MariaDB has, and learning which ones the server agreed to. The first is
-extended column metadata, which names JSON, UUID, INET6 and geometry columns
-through `prepareStmtMetadata`. `executeBulk` runs a prepared statement for many
-parameter rows in one round trip, several times faster than `executeMany`.
-Connections that ask for nothing, and every connection to MySQL, send the same
-handshake as before.
+New in `Database.MariaDB`, for MariaDB servers only: connections that ask for
+capabilities only MariaDB has. Extended column metadata names JSON, UUID, INET6
+and geometry columns through `prepareStmtMetadata`, and `executeBulk` runs a
+prepared statement for many parameter rows in one round trip, several times
+faster than `executeMany`. Its connect functions refuse a MySQL server with
+`NotMariaDB`; `mysqlConnection` gives the underlying connection for everything
+in `Database.MySQL.Base`. Connections made with `Database.MySQL.Base` send the
+same handshake as before.
 
 Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
 `MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
@@ -51,6 +52,8 @@ It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
   [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
 * MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
   [#101](https://github.com/winterland1989/mysql-haskell/pull/101)
+* `Database.MariaDB` for MariaDB servers only, with `mysqlConnection` for the
+  MySQL functions [#104](https://github.com/winterland1989/mysql-haskell/pull/104)
 * Allow crypton 2.2 and tls 2.5
   [#105](https://github.com/winterland1989/mysql-haskell/pull/105)
 * A comparison with the mariadb-haskell fork and a plan to adopt its

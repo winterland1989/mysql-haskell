@@ -6,6 +6,7 @@ import qualified Data.ByteString            as B
 import qualified Data.ByteString.Base16     as Hex
 import qualified Data.ByteString.Char8      as BC
 import qualified Data.ByteString.Lazy       as L
+import           Database.MariaDB           (ServerFlavour (..), serverFlavour)
 import           Database.MySQL.Connection  (handshakeResponsePacket, sslRequestPacket)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet (Packet, getFromPacket, putToPacket)
@@ -55,6 +56,13 @@ tests = testGroup "handshake"
         (_, mysqlOffer) <- parseGreeting mysqlGreeting
         mariadbOffer @?= ExtendedCapabilities 0x1d
         mysqlOffer @?= noExtendedCapabilities
+    , testCase "MariaDB is told apart by its greeting's capabilities, not its version string" $ do
+        (mariadb, _) <- parseGreeting mariadbGreeting
+        (mysql, _) <- parseGreeting mysqlGreeting
+        serverFlavour mariadb @?= MariaDBServer
+        serverFlavour mysql @?= MySQLServer
+        -- mariadbd --version=8.0.36 sends exactly this greeting.
+        serverFlavour mariadb {greetingVersion = "8.0.36"} @?= MariaDBServer
     , testCase "MySQL: 1.3.3's bytes whatever is requested" $ do
         greeting <- parseGreeting mysqlGreeting
         let master = (masterSSLRequest, masterTLSAuthMySQL, masterAuthMySQL)

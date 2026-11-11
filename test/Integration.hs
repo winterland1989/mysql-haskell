@@ -10,7 +10,7 @@ import qualified CABundle
 import qualified CachingSha2
 import qualified FloatingPoint
 import qualified MariaDBNegotiation
-import           Database.MySQL.MariaDB (serverFlavour)
+import           Database.MariaDB (serverFlavour)
 import qualified LargeRows
 import qualified Latin1Results
 import qualified PlaceholderLiterals
