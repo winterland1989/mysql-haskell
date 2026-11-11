@@ -7,8 +7,8 @@ Portability : PORTABLE
 
 Features only MariaDB servers have, such as extended column metadata and bulk
 execution. They rely on MariaDB's own protocol extensions, so this module
-works with MariaDB servers only: its connect functions refuse a MySQL server
-with 'NotMariaDB'.
+works with MariaDB servers only: its connect functions refuse a server that
+does not speak them, MySQL or MariaDB before 10.2, with 'NotMariaDB'.
 
 The functions here take a 'MariaDBConn', so they cannot be given a connection
 to MySQL. A 'MariaDBConn' wraps an ordinary 'MySQLConn': use
@@ -57,7 +57,6 @@ import           Data.Binary.Put                (Put, putLazyByteString, putWord
 import           Data.Binary.Parser             (parseOnly)
 import           Data.Bits                      ((.&.), (.|.))
 import           Data.ByteString                (ByteString)
-import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
 import           Data.List                      (nub, transpose)
 import           Data.List.NonEmpty             (NonEmpty ((:|)))
@@ -95,11 +94,13 @@ negotiatedCapabilities (ExtendedCapabilities bits) =
 -- | Which server answered.
 data ServerFlavour = MySQLServer | MariaDBServer deriving (Show, Eq)
 
--- | Every MariaDB release names itself in its version string, for example
--- @11.4.9-MariaDB-log@ or @5.5.5-10.6.12-MariaDB@.
+-- | 'MariaDBServer' when the greeting announces MariaDB's protocol extensions,
+-- which MariaDB 10.2 and later do; MySQL and older MariaDB count as
+-- 'MySQLServer'. The version string is not consulted: @mariadbd --version@
+-- can set it to anything, @8.0.36@ included.
 serverFlavour :: Greeting -> ServerFlavour
 serverFlavour greeting =
-    if "MariaDB" `B.isInfixOf` greetingVersion greeting then MariaDBServer else MySQLServer
+    if offersExtendedCapabilities greeting then MariaDBServer else MySQLServer
 
 -- | A connection together with the MariaDB capabilities it negotiated.
 data MariaDBConn = MariaDBConn
@@ -115,7 +116,8 @@ hasCapability :: MariaDBCapability -> MariaDBConn -> Bool
 hasCapability capability conn = capability `elem` mariadbCapabilities conn
 
 -- | 'Database.MySQL.Base.connect' asking for these capabilities. Raises
--- 'NotMariaDB', after closing the connection, when the server is MySQL.
+-- 'NotMariaDB', after closing the connection, when the server does not speak
+-- MariaDB's protocol extensions (MySQL, or MariaDB before 10.2).
 connectMariaDB :: [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
 connectMariaDB requested ci =
     Connection.connectDetailExtended (capabilityBits requested) ci >>= mariadbConn
@@ -336,15 +338,15 @@ instance Exception CapabilityNotNegotiated where
         ++ ", which the connection did not negotiate. Ask for it in connectMariaDB,"
         ++ " on a MariaDB version that offers it."
 
--- | A connect function of this module reached a MySQL server, whose version
--- string this carries. The module relies on MariaDB protocol extensions that
--- MySQL does not have.
+-- | A connect function of this module reached a server that does not speak
+-- MariaDB's protocol extensions: MySQL, or MariaDB before 10.2. Carries the
+-- server's version string.
 newtype NotMariaDB = NotMariaDB ByteString
     deriving Show
 
 instance Exception NotMariaDB where
     displayException (NotMariaDB version) =
-        "mysql-haskell: Database.MariaDB connects to MariaDB servers only, but this"
-        ++ " server is MySQL " ++ show version ++ ". Its features rely on MariaDB"
-        ++ " protocol extensions that MySQL does not have; connect with"
-        ++ " Database.MySQL.Base.connect for MySQL."
+        "mysql-haskell: Database.MariaDB needs a server speaking MariaDB's protocol"
+        ++ " extensions, but server " ++ show version ++ " set CLIENT_MYSQL in its"
+        ++ " greeting, as MySQL servers and MariaDB before 10.2 do. Connect with"
+        ++ " Database.MySQL.Base for those servers, or upgrade to MariaDB 10.2 or later."
