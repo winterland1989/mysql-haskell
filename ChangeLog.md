@@ -2,11 +2,11 @@
 
 ## 1.4.2 -- unreleased
 
-New function and a fix; existing code is unaffected. `resetConnection` returns
-a connection's session to that of a new one without reconnecting, so a pool can
-hand it to its next user (MySQL 5.7.3 or MariaDB 10.2.4 and newer), and
-`makeClientParams'` now sends its client certificate, so a `REQUIRE X509`
-account can log in.
+A new function and a fix. `resetConnection` returns a connection's session to
+that of a new one without reconnecting, so a pool can hand it to its next user
+(MySQL 5.7.3 or MariaDB 10.2.4 and newer). `makeClientParams'` now sends its
+client certificate, so a `REQUIRE X509` account can log in; a certificate the
+server cannot verify now fails the TLS handshake, where 1.4.1 never sent it.
 
 * Reset a pooled connection's session without reconnecting
   [#109](https://github.com/winterland1989/mysql-haskell/pull/109)
