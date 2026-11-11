@@ -1,31 +1,34 @@
 {-|
-Module      : Database.MySQL.MariaDB
+Module      : Database.MariaDB
 Description : MariaDB-only protocol features
 License     : BSD
 Stability   : experimental
 Portability : PORTABLE
 
-Connections that ask a MariaDB server for the capabilities only MariaDB has.
-A 'MariaDBConn' wraps an ordinary 'MySQLConn', so everything in
-"Database.MySQL.Base" works on 'mariadbConnection' as before; the functions
-here add what the negotiated capabilities make available.
+Features only MariaDB servers have, such as extended column metadata and bulk
+execution. They rely on MariaDB's own protocol extensions, so this module
+works with MariaDB servers only: its connect functions refuse a MySQL server
+with 'NotMariaDB'.
 
-Asking a MySQL server, or a MariaDB server that does not offer a capability,
-is not an error: the connection is made without it, exactly as
-'Database.MySQL.Base.connect' makes it, and 'mariadbCapabilities' says what
-was agreed. Functions that need a capability raise 'CapabilityNotNegotiated'
-when it is missing.
+The functions here take a 'MariaDBConn', so they cannot be given a connection
+to MySQL. A 'MariaDBConn' wraps an ordinary 'MySQLConn': use
+'mysqlConnection' for everything in "Database.MySQL.Base".
+
+A MariaDB server that does not offer a requested capability is not an error.
+The connection is made without it, 'mariadbCapabilities' says what was agreed,
+and a function that needs the missing capability raises
+'CapabilityNotNegotiated'.
 
 @since 1.4.0
 -}
-module Database.MySQL.MariaDB
+module Database.MariaDB
     ( -- * Capabilities
       MariaDBCapability(..)
     , ServerFlavour(..)
     , serverFlavour
       -- * Connections
     , MariaDBConn
-    , mariadbConnection
+    , mysqlConnection
     , mariadbGreeting
     , mariadbCapabilities
     , hasCapability
@@ -42,6 +45,7 @@ module Database.MySQL.MariaDB
     , executeBulk
     , BulkExecuteError(..)
       -- * Exceptions
+    , NotMariaDB(..)
     , CapabilityNotNegotiated(..)
     ) where
 
@@ -99,9 +103,9 @@ serverFlavour greeting =
 
 -- | A connection together with the MariaDB capabilities it negotiated.
 data MariaDBConn = MariaDBConn
-    { mariadbConnection   :: !MySQLConn
-      -- ^ For everything in "Database.MySQL.Base"; closing it closes the
-      -- 'MariaDBConn'.
+    { mysqlConnection     :: !MySQLConn
+      -- ^ The underlying connection, for everything in "Database.MySQL.Base";
+      -- closing it closes the 'MariaDBConn'.
     , mariadbGreeting     :: !Greeting
     , mariadbCapabilities :: ![MariaDBCapability]
       -- ^ Those asked for that the server offered.
@@ -110,24 +114,30 @@ data MariaDBConn = MariaDBConn
 hasCapability :: MariaDBCapability -> MariaDBConn -> Bool
 hasCapability capability conn = capability `elem` mariadbCapabilities conn
 
--- | 'Database.MySQL.Base.connect' asking for these capabilities.
+-- | 'Database.MySQL.Base.connect' asking for these capabilities. Raises
+-- 'NotMariaDB', after closing the connection, when the server is MySQL.
 connectMariaDB :: [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
 connectMariaDB requested ci =
-    mariadbConn <$> Connection.connectDetailExtended (capabilityBits requested) ci
+    Connection.connectDetailExtended (capabilityBits requested) ci >>= mariadbConn
 
--- | 'Database.MySQL.Base.connectUnixSocket' asking for these capabilities.
+-- | 'Database.MySQL.Base.connectUnixSocket' asking for these capabilities, and
+-- refusing a MySQL server as 'connectMariaDB' does.
 connectMariaDBUnixSocket :: [MariaDBCapability] -> FilePath -> ConnectInfo -> IO MariaDBConn
 connectMariaDBUnixSocket requested socketPath ci =
-    mariadbConn <$> Connection.connectUnixSocketDetailExtended (capabilityBits requested) socketPath ci
+    Connection.connectUnixSocketDetailExtended (capabilityBits requested) socketPath ci >>= mariadbConn
 
--- | 'Database.MySQL.TLS.connect' asking for these capabilities.
+-- | 'Database.MySQL.TLS.connect' asking for these capabilities, and refusing a
+-- MySQL server as 'connectMariaDB' does.
 connectMariaDBTLS :: [MariaDBCapability] -> ConnectInfo -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
 connectMariaDBTLS requested ci tlsParams =
-    mariadbConn <$> TLS.connectDetailExtended (capabilityBits requested) ci tlsParams
+    TLS.connectDetailExtended (capabilityBits requested) ci tlsParams >>= mariadbConn
 
-mariadbConn :: (Greeting, ExtendedCapabilities, MySQLConn) -> MariaDBConn
-mariadbConn (greeting, negotiated, conn) =
-    MariaDBConn conn greeting (negotiatedCapabilities negotiated)
+mariadbConn :: (Greeting, ExtendedCapabilities, MySQLConn) -> IO MariaDBConn
+mariadbConn (greeting, negotiated, conn) = case serverFlavour greeting of
+    MariaDBServer -> pure (MariaDBConn conn greeting (negotiatedCapabilities negotiated))
+    MySQLServer -> do
+        close conn
+        throwIO (NotMariaDB (greetingVersion greeting))
 
 -- | A column definition with the MariaDB extended metadata the server sent
 -- for it.
@@ -184,7 +194,7 @@ extendedEntry kind = if
 prepareStmtMetadata :: MariaDBConn -> Query -> IO (StmtPrepareOK, [ColumnMetadata], [ColumnMetadata])
 prepareStmtMetadata conn (Query stmt) = do
     requireCapability MariaDBExtendedMetadata conn
-    let mysqlConn = mariadbConnection conn
+    let mysqlConn = mysqlConnection conn
         is = Connection.mysqlRead mysqlConn
     Connection.guardUnconsumed mysqlConn
     Connection.writeCommand (COM_STMT_PREPARE stmt) (Connection.mysqlWrite mysqlConn)
@@ -247,7 +257,7 @@ executeBulk :: MariaDBConn -> StmtID -> NonEmpty [BulkParam] -> IO OK
 executeBulk conn stid rows = do
     requireCapability MariaDBBulkOperations conn
     types <- either throwIO pure (bulkParamTypes rows)
-    let mysqlConn = mariadbConnection conn
+    let mysqlConn = mysqlConnection conn
         is = Connection.mysqlRead mysqlConn
     Connection.guardUnconsumed mysqlConn
     Connection.writePayload (runPut (putBulkExecute stid types rows)) (Connection.mysqlWrite mysqlConn)
@@ -315,13 +325,26 @@ requireCapability capability conn =
     unless (hasCapability capability conn) (throwIO (CapabilityNotNegotiated capability))
 
 -- | A function needed a capability the connection did not negotiate, because
--- it was not asked for in 'connectMariaDB' or the server does not offer it
--- (MySQL servers offer none).
+-- it was not asked for in 'connectMariaDB' or the server's MariaDB version
+-- does not offer it.
 newtype CapabilityNotNegotiated = CapabilityNotNegotiated MariaDBCapability
     deriving Show
 
 instance Exception CapabilityNotNegotiated where
     displayException (CapabilityNotNegotiated capability) =
         "mysql-haskell: this function needs the MariaDB capability " ++ show capability
-        ++ ", which the connection did not negotiate. Ask for it in connectMariaDB; "
-        ++ "MySQL servers offer no MariaDB capabilities."
+        ++ ", which the connection did not negotiate. Ask for it in connectMariaDB,"
+        ++ " on a MariaDB version that offers it."
+
+-- | A connect function of this module reached a MySQL server, whose version
+-- string this carries. The module relies on MariaDB protocol extensions that
+-- MySQL does not have.
+newtype NotMariaDB = NotMariaDB ByteString
+    deriving Show
+
+instance Exception NotMariaDB where
+    displayException (NotMariaDB version) =
+        "mysql-haskell: Database.MariaDB connects to MariaDB servers only, but this"
+        ++ " server is MySQL " ++ show version ++ ". Its features rely on MariaDB"
+        ++ " protocol extensions that MySQL does not have; connect with"
+        ++ " Database.MySQL.Base.connect for MySQL."

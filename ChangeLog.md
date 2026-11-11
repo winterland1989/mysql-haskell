@@ -10,13 +10,14 @@ string or a comment is no longer taken for a placeholder; dates such as
 decode; the binlog row decoder no longer drops a statement's rows events after
 its first; and the Mozilla CA bundle is installed with the library.
 
-New in `Database.MySQL.MariaDB`: connecting with a request for capabilities
-only MariaDB has, and learning which ones the server agreed to. The first is
-extended column metadata, which names JSON, UUID, INET6 and geometry columns
-through `prepareStmtMetadata`. `executeBulk` runs a prepared statement for many
-parameter rows in one round trip, several times faster than `executeMany`.
-Connections that ask for nothing, and every connection to MySQL, send the same
-handshake as before.
+New in `Database.MariaDB`, for MariaDB servers only: connections that ask for
+capabilities only MariaDB has. Extended column metadata names JSON, UUID, INET6
+and geometry columns through `prepareStmtMetadata`, and `executeBulk` runs a
+prepared statement for many parameter rows in one round trip, several times
+faster than `executeMany`. Its connect functions refuse a MySQL server with
+`NotMariaDB`; `mysqlConnection` gives the underlying connection for everything
+in `Database.MySQL.Base`. Connections made with `Database.MySQL.Base` send the
+same handshake as before.
 
 Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
 `MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`

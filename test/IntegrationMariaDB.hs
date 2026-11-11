@@ -1,4 +1,4 @@
--- | Tests of "Database.MySQL.MariaDB" that need a MariaDB server; nix/ci.nix
+-- | Tests of "Database.MariaDB" that need a MariaDB server; nix/ci.nix
 -- runs them in the MariaDB VM only. Capability negotiation against MySQL is
 -- covered by the shared integration suite.
 module Main (main) where
