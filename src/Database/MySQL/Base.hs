@@ -125,8 +125,9 @@ import qualified Unwitch.Convert.Int                as Int
 -- | Execute a MySQL query with parameters which don't return a result-set.
 --
 -- The query may contain placeholders @?@, for filling up parameters, the parameters
--- will be escaped before get filled into the query, please DO NOT enable @NO_BACKSLASH_ESCAPES@,
--- and you should consider using prepared statement if this's not an one shot query.
+-- will be escaped before get filled into the query. Under @NO_BACKSLASH_ESCAPES@
+-- a backslash in a parameter is stored twice, see "Database.MySQL.Protocol.Escape".
+-- You should consider using prepared statement if this's not an one shot query.
 --
 execute :: QueryParam p => MySQLConn -> Query -> [p] -> IO OK
 execute conn qry params = execute_ conn (renderParams qry params)

@@ -1,5 +1,18 @@
 # Revision history for mysql-haskell
 
+## 1.4.2 -- unreleased
+
+No API change. A text or bytes parameter of `query`, `execute` or
+`executeMany` can no longer end its string literal when the session's
+sql_mode includes `NO_BACKSLASH_ESCAPES`, which let the rest of the value run
+as SQL; in that mode a backslash in a parameter is still stored twice.
+`escapeText` and `escapeBytes` now double a quote and keep control characters
+and the double quote as they are, so their result is only safe between single
+quotes.
+
+* Parameters escaped safely under `NO_BACKSLASH_ESCAPES`
+  [#PR](https://github.com/winterland1989/mysql-haskell/pulls)
+
 ## 1.4.1 -- 2026.11.11
 
 Faster decoding. No type changes beyond one new exception, but one change of

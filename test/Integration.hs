@@ -13,6 +13,7 @@ import qualified MariaDBNegotiation
 import qualified LargeRows
 import qualified Latin1Results
 import qualified NonUtf8Results
+import qualified ParameterEscaping
 import qualified PlaceholderLiterals
 import qualified UnsignedInsertId
 import qualified ZeroDateRoundtrip
@@ -71,6 +72,7 @@ apiTests isMySql80 mSockPath mTlsCaPath api = testGroup (apiName api) $
     , FloatingPoint.tests api
     , LargeRows.tests api
     , PlaceholderLiterals.tests api
+    , ParameterEscaping.tests api
     , Latin1Results.tests api
     , AbandonedReplies.tests api
     ]

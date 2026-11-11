@@ -162,6 +162,7 @@ test-suite test
     ResultCharsets
     Sha1Scramble
     Sha256Scramble
+    StringLiterals
     TCPStreams
     TextRowDecoding
     TypedValue
@@ -218,6 +219,7 @@ test-suite integration
     MultipleResults
     MysqlTests
     NonUtf8Results
+    ParameterEscaping
     PlaceholderLiterals
     QueryApi
     QueryWithoutResultSet
