@@ -4,13 +4,16 @@
 
 New functions only; existing code is unaffected. `Database.MySQL.MariaDB`
 connects asking a MariaDB server for capabilities only MariaDB has and says
-which ones the server agreed to; the first is extended column metadata, which
-names JSON, UUID, INET6 and geometry columns through `prepareStmtMetadata`.
-Connections that ask for nothing, and every connection to MySQL, send the same
-handshake as before.
+which ones the server agreed to. Extended column metadata names JSON, UUID,
+INET6 and geometry columns through `prepareStmtMetadata`, and `executeBulk`
+runs a prepared statement for many parameter rows in one round trip, several
+times faster than `executeMany`. Connections that ask for nothing, and every
+connection to MySQL, send the same handshake as before.
 
 + A MariaDB module with capability negotiation and extended column metadata
   [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
++ MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
+  [#101](https://github.com/winterland1989/mysql-haskell/pull/101)
 
 ## 1.3.3 -- 2026.10.07
 
