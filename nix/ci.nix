@@ -17,6 +17,10 @@ in
       server.succeed("mysql -u root -e \"CREATE DATABASE testMySQLHaskell;\"")
       server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"GRANT BINLOG MONITOR, REPLICATION SLAVE, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
+      # Account for the ed25519 authentication tests of integration-mariadb.
+      server.succeed("mysql -u root -e \"INSTALL SONAME 'auth_ed25519';\"")
+      server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskellEd25519'@'localhost' IDENTIFIED VIA ed25519 USING PASSWORD('ed25519Pass123');\"")
+      server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskellEd25519'@'localhost';\"")
       server.succeed("mysql -u root -e \"SHOW VARIABLES LIKE 'have_ssl'\" | grep YES")
       print(server.succeed("MYSQL_TLS_CA_PATH=${package}/test/cert/ca.pem ${package}/bin/integration/integration"))
       # Decision: MariaDB-only tests are a separate suite run in this VM alone,

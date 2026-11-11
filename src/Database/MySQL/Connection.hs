@@ -37,6 +37,8 @@ module Database.MySQL.Connection
     , scrambleForPlugin
     , scrambleSHA1
     , scrambleSHA256
+    , scrambleEd25519
+    , ed25519PublicKey
     , completeAuth
     , plainFullAuth
     , parseRSAPublicKey
@@ -72,6 +74,8 @@ import           Control.Exception               (Exception (displayException),
                                                   bracketOnError, fromException,
                                                   mask, throwIO, catch, SomeException)
 import           Control.Monad
+import qualified Crypto.ECC.Edwards25519         as Ed
+import           Crypto.Error                    (CryptoFailable (..))
 import qualified Crypto.Hash                     as Crypto
 import           Crypto.Hash.Algorithms          (SHA1(..))
 import qualified Crypto.Number.Serialize         as Serialize
@@ -320,9 +324,72 @@ mkAuthFor negotiated db user pass charset greet =
 
 -- | Dispatch scramble based on the authentication plugin name.
 scrambleForPlugin :: ByteString -> ByteString -> ByteString -> ByteString
-scrambleForPlugin plugin salt pass
-    | plugin == "caching_sha2_password" = scrambleSHA256 salt pass
-    | otherwise                         = scrambleSHA1 salt pass
+scrambleForPlugin plugin salt pass = if
+    | plugin == "caching_sha2_password" -> scrambleSHA256 salt pass
+    | plugin == ed25519Plugin           -> scrambleEd25519 salt pass
+    | otherwise                         -> scrambleSHA1 salt pass
+
+-- | The client plugin a MariaDB account @IDENTIFIED VIA ed25519@ switches to.
+ed25519Plugin :: ByteString
+ed25519Plugin = "client_ed25519"
+
+-- | The nonce MariaDB's ed25519 plugin sends; libmariadb refuses any other
+-- length.
+ed25519NonceLength :: Int
+ed25519NonceLength = 32
+
+-- | The @client_ed25519@ reply to a nonce: an Ed25519 signature of the nonce,
+-- valid for the key 'ed25519PublicKey' derives from the password. An empty
+-- password is signed like any other, as libmariadb does.
+--
+-- @since 1.4.2
+scrambleEd25519 :: ByteString -> ByteString -> ByteString
+scrambleEd25519 nonce pass =
+    let digest = sha512 pass
+        secret = secretScalar digest
+        ephemeral = reducedScalar (sha512 (B.drop 32 digest <> nonce))
+        commitment = Ed.pointEncode (Ed.toPoint ephemeral)
+        challenge = reducedScalar (sha512 (B.concat [commitment, publicKey secret, nonce]))
+    in commitment <> Ed.scalarEncode (Ed.scalarAdd ephemeral (Ed.scalarMul challenge secret))
+
+-- | The 32-byte public key MariaDB stores for an ed25519 account with this
+-- password; @ed25519_password@ and @mysql.global_priv@ show it base64 encoded
+-- without the padding.
+--
+-- @since 1.4.2
+ed25519PublicKey :: ByteString -> ByteString
+ed25519PublicKey = publicKey . secretScalar . sha512
+
+-- | The secret scalar of a password's SHA-512 digest. MariaDB's plugin
+-- departs from Ed25519 only here: Ed25519 hashes a 32-byte seed, MariaDB the
+-- whole password.
+secretScalar :: ByteString -> Ed.Scalar
+secretScalar digest = reducedScalar (B.pack (zipWith clampByte [0 ..] (B.unpack (B.take 32 digest))))
+
+-- | Ed25519's clamping of the secret scalar's bytes, as MariaDB's ref10
+-- @crypto_sign_keypair@ does it.
+clampByte :: Int -> Word8 -> Word8
+clampByte index byte = if
+    | index == 0  -> byte .&. 248
+    | index == 31 -> (byte .&. 63) .|. 64
+    | otherwise   -> byte
+
+publicKey :: Ed.Scalar -> ByteString
+publicKey = Ed.pointEncode . Ed.toPoint
+
+-- | A little-endian number of at most 64 bytes, modulo the group order.
+--
+-- Decision: crash on a longer input instead of returning an Either. Every
+-- caller passes a SHA-512 digest or half of one, and an Either would have to
+-- reach 'scrambleForPlugin', whose exported type has no room for a failure.
+reducedScalar :: ByteString -> Ed.Scalar
+reducedScalar bytes = case Ed.scalarDecodeLong bytes of
+    CryptoPassed scalar  -> scalar
+    CryptoFailed failure -> error ("reducedScalar: " ++ show (B.length bytes)
+        ++ " bytes is more than the 64 an Ed25519 scalar is decoded from: " ++ show failure)
+
+sha512 :: ByteString -> ByteString
+sha512 = BA.convert . (Crypto.hash :: ByteString -> Crypto.Digest Crypto.SHA512)
 
 -- | SHA1-based scramble for @mysql_native_password@.
 scrambleSHA1 :: ByteString -> ByteString -> ByteString
@@ -376,19 +443,27 @@ completeAuth is writePacket pass p fullAuth
         let body = L.toStrict (pBody p)
             rest = B.drop 1 body  -- skip 0xFE
             (newPlugin, rest') = B.break (== 0) rest
-            newSalt = B.drop 1 rest'  -- skip NUL; trailing NUL may or may not be present
-            -- Remove trailing NUL from salt if present
-            newSalt' = if not (B.null newSalt) && B.last newSalt == 0
-                       then B.init newSalt
-                       else newSalt
+            newSalt' = switchSalt newPlugin (B.drop 1 rest')
             scrambled = scrambleForPlugin newPlugin newSalt' pass
             seqN = pSeqN p + 1
             responseBody = L.fromStrict scrambled
             responsePacket = Packet (fromIntegral (B.length scrambled)) seqN responseBody
+        when (newPlugin == ed25519Plugin && B.length newSalt' /= ed25519NonceLength)
+            (throwIO (UnexpectedPacket p))
         writePacket responsePacket
         q <- readPacket is
         completeAuth is writePacket pass q fullAuth
     | otherwise = throwIO (UnexpectedPacket p)
+
+-- | The salt in the plugin data of an AuthSwitchRequest. The native and
+-- SHA-256 scrambles may end in a NUL that is no part of the salt, but
+-- MariaDB's ed25519 nonce is random bytes, so a last byte of 0 belongs to it.
+switchSalt :: ByteString -> ByteString -> ByteString
+switchSalt plugin pluginData = if
+    | plugin == ed25519Plugin -> pluginData
+    | otherwise -> case B.unsnoc pluginData of
+        Just (salt, lastByte) -> if lastByte == 0 then salt else pluginData
+        Nothing               -> pluginData
 
 -- | Full auth handler for plain TCP connections using RSA encryption.
 --
