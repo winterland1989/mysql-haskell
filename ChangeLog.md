@@ -1,5 +1,11 @@
 # Revision history for mysql-haskell
 
+## 1.4.2 -- unreleased
+
+* `makeClientParams'` sends its client certificate, so an account created
+  `REQUIRE X509` can log in through `Database.MySQL.TLS`
+  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+
 ## 1.4.1 -- 2026.11.11
 
 Faster decoding. No type changes beyond one new exception, but one change of
