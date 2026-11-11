@@ -5,33 +5,38 @@
 module QueryWithoutResultSet (tests) where
 
 import           Database.MySQL.Base
+import           QueryApi
 import qualified Data.Vector       as V
 import qualified System.IO.Streams as Stream
 import           System.Timeout    (timeout)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-tests :: TestTree
-tests = testGroup "query functions given an INSERT"
+tests :: QueryApi -> TestTree
+tests api = testGroup "query functions given an INSERT"
     [ testCase "query_" $ assertEmptyResultSet $ \c -> do
-        (columns, rows) <- query_ c "INSERT INTO without_result_set VALUES (1)"
+        (columns, rows) <- apiQuery_ api noColumns c "INSERT INTO without_result_set VALUES (1)"
         rowList <- Stream.toList rows
         pure (length columns, length rowList)
     , testCase "queryVector_" $ assertEmptyResultSet $ \c -> do
-        (columns, rows) <- queryVector_ c "INSERT INTO without_result_set VALUES (1)"
+        (columns, rows) <- apiQueryVector_ api noColumns c "INSERT INTO without_result_set VALUES (1)"
         rowList <- Stream.toList rows
         pure (V.length columns, length rowList)
     , testCase "queryStmt" $ assertEmptyResultSet $ \c -> do
         stmt <- prepareStmt c "INSERT INTO without_result_set VALUES (?)"
-        (columns, rows) <- queryStmt c stmt [MySQLInt32 1]
+        (columns, rows) <- apiQueryStmt api noColumns c stmt [MySQLInt32 1]
         rowList <- Stream.toList rows
         pure (length columns, length rowList)
     , testCase "queryStmtVector" $ assertEmptyResultSet $ \c -> do
         stmt <- prepareStmt c "INSERT INTO without_result_set VALUES (?)"
-        (columns, rows) <- queryStmtVector c stmt [MySQLInt32 1]
+        (columns, rows) <- apiQueryStmtVector api noColumns c stmt [MySQLInt32 1]
         rowList <- Stream.toList rows
         pure (V.length columns, length rowList)
     ]
+
+-- | An INSERT has no result set, so a row decoder for it reads no columns.
+noColumns :: ColumnCount
+noColumns = ColumnCount 0
 
 -- | Generous for one INSERT into an empty temporary table, and short enough
 -- that a hang fails the suite instead of stalling CI.

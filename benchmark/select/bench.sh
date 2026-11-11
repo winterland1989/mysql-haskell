@@ -40,6 +40,14 @@ time ./dist/build/bench/bench 4          +RTS -N4 -RTS
 time ./dist/build/bench/bench 10         +RTS -N4 -RTS
 echo "=============== benchmark haskell client end ================"
 
+echo "=============== start benchmark haskell client, values used ============="
+time ./dist/build/bench-values/bench-values 1          +RTS -N4 -RTS
+time ./dist/build/bench-values/bench-values 2          +RTS -N4 -RTS
+time ./dist/build/bench-values/bench-values 3          +RTS -N4 -RTS
+time ./dist/build/bench-values/bench-values 4          +RTS -N4 -RTS
+time ./dist/build/bench-values/bench-values 10         +RTS -N4 -RTS
+echo "=============== benchmark haskell client end, values used ================"
+
 echo "=============== start benchmark haskell client openssl ============="
 time ./dist/build/bench-openssl/bench-openssl 1          +RTS -N4 -RTS
 time ./dist/build/bench-openssl/bench-openssl 2          +RTS -N4 -RTS

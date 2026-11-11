@@ -3,6 +3,7 @@
 module CachingSha2 (tests) where
 
 import Database.MySQL.Base
+import QueryApi
 import qualified System.IO.Streams as Stream
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -23,8 +24,8 @@ import Test.Tasty.HUnit
 --   sends a SHA256 scramble. The server then responds with AuthSwitchRequest
 --   (0xFE) telling the client to re-authenticate using @mysql_native_password@
 --   with a new salt. The client re-scrambles with SHA1 and sends the response.
-tests :: TestTree
-tests = testGroup "caching_sha2_password"
+tests :: QueryApi -> TestTree
+tests api = testGroup "caching_sha2_password"
     [ testCaseSteps "SHA256 fast auth" $ \step -> do
         step "connecting as testMySQLHaskellSha2 (caching_sha2_password)..."
         (_, c) <- connectDetail defaultConnectInfo
@@ -34,7 +35,7 @@ tests = testGroup "caching_sha2_password"
             }
 
         step "executing SELECT 1..."
-        (_, is) <- query_ c "SELECT 1"
+        (_, is) <- apiQuery_ api (ColumnCount 1) c "SELECT 1"
         Just row <- Stream.read is
         assertBool "SELECT 1 returns 1" (row == [MySQLInt32 1] || row == [MySQLInt64 1])
         Stream.skipToEof is
@@ -50,7 +51,7 @@ tests = testGroup "caching_sha2_password"
             }
 
         step "executing SELECT 1..."
-        (_, is) <- query_ c "SELECT 1"
+        (_, is) <- apiQuery_ api (ColumnCount 1) c "SELECT 1"
         Just row <- Stream.read is
         assertBool "SELECT 1 returns 1" (row == [MySQLInt32 1] || row == [MySQLInt64 1])
         Stream.skipToEof is

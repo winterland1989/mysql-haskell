@@ -8,7 +8,13 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Database.MySQL.Protocol.ColumnDef
-import           Database.MySQL.Protocol.MySQLValue (getTextField, MySQLValue)
+import           Data.Bifunctor              (first)
+import qualified Data.Vector                 as V
+import qualified Database.MySQL.Decoder      as Decode
+import           Database.MySQL.Protocol.MySQLValue (ColumnKind, ColumnNumber (..),
+                                                     MySQLValue, columnKind,
+                                                     getTextField)
+import           TypedValue                  (typedDecoder)
 import           Database.MySQL.Protocol.Packet (putLenEncInt)
 import           Database.MySQL.BinLogProtocol.BinLogEvent
                     (FormatDescription(..), eventHeaderLen, BinLogEventType(..))
@@ -17,7 +23,7 @@ import           Database.MySQL.BinLogProtocol.BinLogMeta (BinLogMeta(..))
 
 tests :: TestTree
 tests = testGroup "bounds-check"
-    [ testGroup "text-protocol" textProtocolTests
+    [ testGroup "text-protocol" (map textProtocolTests textFieldApis)
     , testGroup "binlog-value" binlogValueTests
     , testGroup "binlog-event" binlogEventTests
     ]
@@ -40,14 +46,43 @@ mkColumnDef ft = ColumnDef
     , columnDecimals  = 0
     }
 
--- | Encode a length-prefixed ByteString as the MySQL wire protocol does,
--- then run the given Get parser on it.
+-- | Encode a length-prefixed ByteString as the MySQL wire protocol does.
+lenEncoded :: B.ByteString -> B.ByteString
+lenEncoded payload = L.toStrict . runPut $ do
+    putLenEncInt (B.length payload)
+    mapM_ putWord8 (B.unpack payload)
+
+-- | Encode a length-prefixed field, then run 'getTextField' on it.
 parseLenEncField :: ColumnDef -> B.ByteString -> Either String MySQLValue
-parseLenEncField cd payload =
-    let encoded = L.toStrict . runPut $ do
-            putLenEncInt (B.length payload)
-            mapM_ putWord8 (B.unpack payload)
-    in parseOnly (getTextField cd) encoded
+parseLenEncField cd payload = parseOnly (getTextField cd) (lenEncoded payload)
+
+-- | A text-protocol field decoded through the old 'getTextField' or one of the
+-- paths of "Database.MySQL.Decoder"; every text-protocol case runs through each.
+data TextFieldApi = TextFieldApi String (ColumnDef -> B.ByteString -> Either String MySQLValue)
+
+textFieldApis :: [TextFieldApi]
+textFieldApis =
+    [ TextFieldApi "getTextField" parseLenEncField
+    , TextFieldApi "RowDecoder" rowDecoderField
+    , TextFieldApi "RawRow" (rawRowField (const Decode.mysqlValue))
+    , TextFieldApi "typed decoders" (rawRowField typedDecoder)
+    ]
+
+-- | A one-column row decoded by a 'Decode.RowDecoder' with 'Decode.mysqlValue'.
+rowDecoderField :: ColumnDef -> B.ByteString -> Either String MySQLValue
+rowDecoderField cd payload = do
+    prepared <- first show (Decode.prepareRowDecoder @Decode.TextProtocol
+                                (Decode.field Decode.mysqlValue) (V.singleton cd))
+    first show (Decode.runPreparedRow prepared (lenEncoded payload))
+
+-- | A one-column 'Decode.RawRow' read by column number with the decoder for
+-- the column's kind.
+rawRowField :: (ColumnKind -> Decode.FieldDecoder MySQLValue) -> ColumnDef -> B.ByteString
+            -> Either String MySQLValue
+rawRowField decoderFor cd payload = do
+    raw <- first show (Decode.textRawRow 1 (lenEncoded payload))
+    parser <- first show (Decode.prepareFieldParser (decoderFor (columnKind cd)) (ColumnNumber 0) cd)
+    Decode.runFieldParser parser raw (ColumnNumber 0) (Left . show) Right
 
 -- | Check that parsing yields a Left (failure), not a crash or garbage.
 assertParseFailure :: String -> Either String a -> Assertion
@@ -58,15 +93,15 @@ assertParseFailure label result = case result of
 --------------------------------------------------------------------------------
 -- Text protocol tests
 
-textProtocolTests :: [TestTree]
-textProtocolTests =
+textProtocolTests :: TextFieldApi -> TestTree
+textProtocolTests (TextFieldApi name parseField) = testGroup name
     [ testCase "timestamp: date-only no time part" $ do
         -- "2024-01-01" is 10 bytes. dateParser succeeds, then
         -- unsafeDrop 11 on a 10-byte string is UB.
         -- With "abc" this wouldn't trigger because readDecimal "abc" → Nothing
         -- short-circuits via Maybe's Applicative before unsafeDrop is forced.
         let cd = mkColumnDef mySQLTypeTimestamp
-            result = parseLenEncField cd "2024-01-01"
+            result = parseField cd "2024-01-01"
         assertParseFailure "timestamp no time" result
 
     , testCase "timestamp: truncated time" $ do
@@ -74,34 +109,34 @@ textProtocolTests =
         -- gives "1", timeParser reads hour=1, rest="", then unsafeTail
         -- on empty remainder is UB.
         let cd = mkColumnDef mySQLTypeTimestamp
-            result = parseLenEncField cd "2024-01-01 1"
+            result = parseField cd "2024-01-01 1"
         assertParseFailure "timestamp truncated time" result
 
     , testCase "datetime: date-only no time part" $ do
         -- Same as timestamp: dateParser succeeds on "2024-01-01",
         -- then unsafeDrop 11 on 10-byte string is UB.
         let cd = mkColumnDef mySQLTypeDateTime
-            result = parseLenEncField cd "2024-01-01"
+            result = parseField cd "2024-01-01"
         assertParseFailure "datetime no time" result
 
     , testCase "time: empty input" $ do
         -- TIME parser does unsafeIndex 0 on the payload; empty = UB
         let cd = mkColumnDef mySQLTypeTime
-            result = parseLenEncField cd ""
+            result = parseField cd ""
         assertParseFailure "time empty" result
 
     , testCase "date: missing separator" $ do
         -- "2024" has no '-' separator; readDecimal consumes everything,
         -- then unsafeTail is called on an empty remainder
         let cd = mkColumnDef mySQLTypeDate
-            result = parseLenEncField cd "2024"
+            result = parseField cd "2024"
         assertParseFailure "date missing sep" result
 
     , testCase "time: missing separator" $ do
         -- "12" has no ':' separator; readDecimal consumes it,
         -- then unsafeTail is called on empty remainder
         let cd = mkColumnDef mySQLTypeTime
-            result = parseLenEncField cd "12"
+            result = parseField cd "12"
         assertParseFailure "time missing sep" result
     ]
 

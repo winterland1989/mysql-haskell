@@ -3,11 +3,12 @@ module Main (main) where
 import qualified Data.ByteString as B
 import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
-import           Test.Tasty (defaultMain, testGroup)
+import           Test.Tasty (TestTree, defaultMain, testGroup)
 import qualified AbandonedReplies
 import qualified BinLogRowEvents
 import qualified CABundle
 import qualified CachingSha2
+import qualified FloatingPoint
 import qualified MariaDBNegotiation
 import           Database.MySQL.MariaDB (serverFlavour)
 import qualified LargeRows
@@ -17,9 +18,11 @@ import qualified UnsignedInsertId
 import qualified ZeroDateRoundtrip
 import qualified MultipleResults
 import qualified MysqlTests
+import           QueryApi
 import qualified QueryWithoutResultSet
 import qualified RoundtripBit
 import qualified RoundtripYear
+import qualified RowDecoderQueries
 import qualified SelectOne
 import qualified TLSConnection
 import qualified UnixSocket
@@ -40,28 +43,40 @@ main = do
     mTlsCaPath <- lookupEnv "MYSQL_TLS_CA_PATH"
 
     defaultMain $ testGroup "mysql-integration" $
-        [ SelectOne.tests
-        , RoundtripBit.tests
-        , RoundtripYear.tests
-        , MysqlTests.tests
-        , QueryWithoutResultSet.tests
+        [ MysqlTests.tests
         , MultipleResults.tests
+        , RowDecoderQueries.tests
         , MariaDBNegotiation.tests (serverFlavour greet)
-        , LargeRows.tests
         , UnsignedInsertId.tests
-        , PlaceholderLiterals.tests
-        , ZeroDateRoundtrip.tests
-        , Latin1Results.tests
-        , AbandonedReplies.tests
         , BinLogRowEvents.tests
         , CABundle.tests
+        , ZeroDateRoundtrip.typedDecoderTests
         ]
-        -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
-        -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
-        ++ [ CachingSha2.tests | isMySql80 ]
         -- binlog_transaction_compression is MySQL 8.0.20+ only.
         ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]
-        -- Unix socket tests are included only when a socket file is found.
-        ++ [ UnixSocket.tests p | Just p <- [mSockPath] ]
-        -- TLS tests are included only when a CA certificate path is provided.
-        ++ [ TLSConnection.tests p | Just p <- [mTlsCaPath] ]
+        ++ map (apiTests isMySql80 mSockPath mTlsCaPath) queryApis
+        -- The typed decoders give a date a 'Day' cannot hold as an error instead
+        -- of a value to write back, which 'ZeroDateRoundtrip.typedDecoderTests' checks.
+        ++ map ZeroDateRoundtrip.tests mysqlValueApis
+
+-- | The suites that read rows, through one of the 'QueryApi's.
+apiTests :: Bool -> Maybe FilePath -> Maybe FilePath -> QueryApi -> TestTree
+apiTests isMySql80 mSockPath mTlsCaPath api = testGroup (apiName api) $
+    [ SelectOne.tests api
+    , RoundtripBit.tests api
+    , RoundtripYear.tests api
+    , QueryWithoutResultSet.tests api
+    , MultipleResults.rowTests api
+    , FloatingPoint.tests api
+    , LargeRows.tests api
+    , PlaceholderLiterals.tests api
+    , Latin1Results.tests api
+    , AbandonedReplies.tests api
+    ]
+    -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
+    -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
+    ++ [ CachingSha2.tests api | isMySql80 ]
+    -- Unix socket tests are included only when a socket file is found.
+    ++ maybe [] (\p -> [UnixSocket.tests api p]) mSockPath
+    -- TLS tests are included only when a CA certificate path is provided.
+    ++ maybe [] (\p -> [TLSConnection.tests api p]) mTlsCaPath

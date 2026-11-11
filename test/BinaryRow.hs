@@ -9,17 +9,22 @@ import           Control.Monad
 import           Data.Time.Calendar  (fromGregorian)
 import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
+import           QueryApi
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
 import qualified Data.Text as T
 import qualified Data.ByteString as B
 import qualified Data.Vector as V
 
-tests :: MySQLConn -> Assertion
-tests c = do
+-- | The columns of the @test@ table.
+testColumns :: ColumnCount
+testColumns = ColumnCount 30
+
+tests :: QueryApi -> MySQLConn -> Assertion
+tests api c = do
     selStmt <- prepareStmt c "SELECT * FROM test"
 
-    (f, is) <- queryStmt c selStmt []
+    (f, is) <- apiQueryStmt api testColumns c selStmt []
     assertEqual "decode Field types" (columnType <$> f)
         [ mySQLTypeLong
         , mySQLTypeBit
@@ -122,7 +127,7 @@ tests c = do
                 \__enum       = 'foo'                                  ,\
                 \__set        = 'foo,bar' WHERE __id=0"
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol" v
@@ -158,7 +163,7 @@ tests c = do
         , MySQLText "foo,bar"]
     Stream.skipToEof is
 
-    (_, is') <- queryStmtVector c selStmt []
+    (_, is') <- apiQueryStmtVector api testColumns c selStmt []
     Just v' <- Stream.read is'
     Stream.skipToEof is'
 
@@ -231,7 +236,7 @@ tests c = do
 
 
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "roundtrip binary protocol" v
@@ -274,7 +279,7 @@ tests c = do
         \__double     = null         ,\
         \__text = null WHERE __id=0"
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol with null" v
@@ -318,7 +323,7 @@ tests c = do
         \__timestamp = ? WHERE __id=0"
     executeStmt c updStmt1 [MySQLNull, MySQLNull, MySQLNull]
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api testColumns c selStmt []
     Just v <- Stream.read is
 
     assertEqual "roundtrip binary protocol with null" v
@@ -360,7 +365,7 @@ tests c = do
         \__year       = 0  WHERE __id=0"
 
     selStmt2 <- prepareStmt c "SELECT __time, __year FROM test"
-    (_, is) <- queryStmt c selStmt2 []
+    (_, is) <- apiQueryStmt api (ColumnCount 2) c selStmt2 []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol 2" v
@@ -376,7 +381,7 @@ tests c = do
 
     executeStmt c updStmt2 [ MySQLTime 0 (TimeOfDay 00 00 00), MySQLYear 2055]
 
-    (_, is) <- queryStmt c selStmt2 []
+    (_, is) <- apiQueryStmt api (ColumnCount 2) c selStmt2 []
     Just v <- Stream.read is
     assertEqual "roundtrip binary protocol 2" v
             [ MySQLTime 0 (TimeOfDay 00 00 00)
@@ -390,7 +395,7 @@ tests c = do
         \__blob       = ''  WHERE __id=0"
 
     selStmt3 <- prepareStmt c "SELECT __text, __blob FROM test"
-    (_, is) <- queryStmt c selStmt3 []
+    (_, is) <- apiQueryStmt api (ColumnCount 2) c selStmt3 []
     Just v <- Stream.read is
 
     assertEqual "decode binary protocol 3" v
@@ -409,7 +414,7 @@ tests c = do
         , MySQLBytes (B.replicate 1000000 64)
         ]
 
-    (_, is) <- queryStmt c selStmt3 []
+    (_, is) <- apiQueryStmt api (ColumnCount 2) c selStmt3 []
     Just v <- Stream.read is
     assertEqual "roundtrip binary protocol 3" v
         [ MySQLText (T.replicate 100000 "xyz")

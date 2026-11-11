@@ -5,14 +5,15 @@ module TLSConnection (tests) where
 import qualified Data.ByteString       as B
 import qualified Data.Text             as T
 import           Database.MySQL.Base
+import           QueryApi
 import qualified Database.MySQL.TLS    as TLS
 import           Database.MySQL.TLS    (makeClientParams, TrustedCAStore(..))
 import qualified System.IO.Streams     as Stream
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-tests :: FilePath -> TestTree
-tests caPath = testGroup "tls-connection"
+tests :: QueryApi -> FilePath -> TestTree
+tests api caPath = testGroup "tls-connection"
     [ testCaseSteps "TLS connectDetail: SELECT 1" $ \step -> do
         step "creating TLS client params..."
         cparams <- makeClientParams (CustomCAStore caPath)
@@ -27,7 +28,7 @@ tests caPath = testGroup "tls-connection"
         assertBool "greeting version is not empty" (not $ B.null ver)
 
         step "executing SELECT 1..."
-        (_, is) <- query_ conn "SELECT 1"
+        (_, is) <- apiQuery_ api (ColumnCount 1) conn "SELECT 1"
         Just row <- Stream.read is
         assertBool "SELECT 1 returns 1"
             (row == [MySQLInt32 1] || row == [MySQLInt64 1])
@@ -45,7 +46,7 @@ tests caPath = testGroup "tls-connection"
             (cparams, "Winter")
 
         step "checking SSL cipher..."
-        (_, is) <- query_ conn "SHOW STATUS LIKE 'Ssl_cipher'"
+        (_, is) <- apiQuery_ api (ColumnCount 2) conn "SHOW STATUS LIKE 'Ssl_cipher'"
         Just row <- Stream.read is
         case row of
             [_name, MySQLText cipher] ->
@@ -66,7 +67,7 @@ tests caPath = testGroup "tls-connection"
 
         step "executing prepared statement..."
         stmt <- prepareStmt conn "SELECT ? + 1"
-        (_, is) <- queryStmt conn stmt [MySQLInt32 41]
+        (_, is) <- apiQueryStmt api (ColumnCount 1) conn stmt [MySQLInt32 41]
         Just row <- Stream.read is
         assertBool "41 + 1 = 42"
             (row == [MySQLInt32 42] || row == [MySQLInt64 42])

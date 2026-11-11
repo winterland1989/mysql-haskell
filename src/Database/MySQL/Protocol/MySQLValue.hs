@@ -1,4 +1,6 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
+{-# LANGUAGE UnboxedSums   #-}
+{-# LANGUAGE UnboxedTuples #-}
 
 {-|
 Module      : Database.MySQL.Protocol.MySQLValue
@@ -22,12 +24,36 @@ module Database.MySQL.Protocol.MySQLValue
   , putTextField
   , getTextRow
   , getTextRowVector
+    -- * Text rows with the column types resolved once per result set
+  , ColumnKind(..)
+  , ValueKind(..)
+  , columnKind
+  , decodeTextRow
+  , decodeTextRowVector
+  , ColumnNumber(..)
+  , nextColumn
+  , RowError(..)
+  , RowErrorKind(..)
+  , TextFieldError(..)
+  , describeRowError
   , getBinaryField
   , putBinaryField
   , getBinaryRow
   , getBinaryRowVector
   , decodeMySQLLatin1
   -- * Internal utilities
+  , decodeTextValue
+  , decodeTextBit
+  , lengthEncodedInt
+  , lexSignedIntegral
+  , lexSignedFraction
+  , textDateParts
+  , lexDateTimeParts
+  , calendarDate
+  , dateValue
+  , dateTimeValue
+  , timeStampValue
+  , lexSignedTime
   , getBits
   , BitMap(..)
   , isColumnSet
@@ -64,6 +90,7 @@ import           Data.Time.LocalTime                (LocalTime (..),
 import           Data.Word
 import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.Escape
+import           Database.MySQL.Protocol.FloatingPoint (readDouble, readFloat)
 import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                       (Generic)
 import           Text.Printf                        (printf)
@@ -71,6 +98,7 @@ import qualified Data.Text                          as T
 import qualified Data.Vector                        as V
 import qualified Unwitch.Convert.Int                as Int
 import qualified Unwitch.Convert.Word16             as Word16
+import qualified Unwitch.Convert.Word64             as Word64
 import qualified Unwitch.Convert.Word8              as Word8
 
 --------------------------------------------------------------------------------
@@ -188,67 +216,373 @@ putParamMySQLType MySQLNull              = putFieldType mySQLTypeNull     >> put
 --------------------------------------------------------------------------------
 -- | Text protocol decoder
 getTextField :: ColumnDef -> Get MySQLValue
-getTextField f
-    | t == mySQLTypeNull            = pure MySQLNull
-    | t == mySQLTypeDecimal
-        || t == mySQLTypeNewDecimal = feedLenEncBytes t MySQLDecimal fracLexer
-    | t == mySQLTypeTiny            = if isUnsigned then feedLenEncBytes t MySQLInt8U intLexer
-                                                    else feedLenEncBytes t MySQLInt8 intLexer
-    | t == mySQLTypeShort           = if isUnsigned then feedLenEncBytes t MySQLInt16U intLexer
-                                                    else feedLenEncBytes t MySQLInt16 intLexer
-    | t == mySQLTypeLong
-        || t == mySQLTypeInt24      = if isUnsigned then feedLenEncBytes t MySQLInt32U intLexer
-                                                    else feedLenEncBytes t MySQLInt32 intLexer
-    | t == mySQLTypeLongLong        = if isUnsigned then feedLenEncBytes t MySQLInt64U intLexer
-                                                    else feedLenEncBytes t MySQLInt64 intLexer
-    | t == mySQLTypeFloat           = feedLenEncBytes t MySQLFloat fracLexer
-    | t == mySQLTypeDouble          = feedLenEncBytes t MySQLDouble fracLexer
-    | t == mySQLTypeYear            = feedLenEncBytes t MySQLYear intLexer
-    | t == mySQLTypeTimestamp
-        || t == mySQLTypeTimestamp2 = feedLenEncBytes t (uncurry timeStampValue) $ \ bs ->
-                                          guard (B.length bs >= 12) >>
-                                          (,) <$> textDateParts bs <*> timeParser (B.drop 11 bs)
-    | t == mySQLTypeDateTime
-        || t == mySQLTypeDateTime2  = feedLenEncBytes t (uncurry dateTimeValue) $ \ bs ->
-                                          guard (B.length bs >= 12) >>
-                                          (,) <$> textDateParts bs <*> timeParser (B.drop 11 bs)
-    | t == mySQLTypeDate
-        || t == mySQLTypeNewDate    = feedLenEncBytes t dateValue textDateParts
-    | t == mySQLTypeTime
-        || t == mySQLTypeTime2      = feedLenEncBytes t id $ \ bs ->
-                                          guard (not (B.null bs)) >>
-                                          if B.index bs 0 == 45  -- '-'
-                                               then MySQLTime 1 <$> timeParser (B.drop 1 bs)
-                                               else MySQLTime 0 <$> timeParser bs
+getTextField f = case columnKind f of
+    NullColumn -> pure MySQLNull
+    ValueColumn fieldType value -> do
+        bytes <- getLenEncBytes
+        case decodeTextValue fieldType value bytes of
+            Left fieldError -> fail (describeTextFieldError fieldError)
+            Right decoded   -> pure decoded
 
-    | t == mySQLTypeGeometry        = MySQLGeometry <$> getLenEncBytes
-    | t == mySQLTypeVarChar
-        || t == mySQLTypeEnum
-        || t == mySQLTypeSet
-        || t == mySQLTypeTinyBlob
-        || t == mySQLTypeMediumBlob
-        || t == mySQLTypeLongBlob
-        || t == mySQLTypeBlob
-        || t == mySQLTypeVarString
-        || t == mySQLTypeString     = getLenEncBytes >>= stringColumnValue f
+{- Note [Text rows decoded once per result set]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'getTextRow' runs 'getTextField' for every field of every row, which compares
+the column type against two dozen constants before it reads a byte, inside
+binary's continuation-based 'Get' over a lazy packet body. Decoding text rows
+was 47.5% of select CPU (benchmark/cpu-profile-1.3.3.md).
 
-    | t == mySQLTypeBit             = MySQLBit <$> (getBits =<< getLenEncInt)
+The query functions in "Database.MySQL.Base" instead resolve each column to a
+'ColumnKind' once, when the column definitions arrive, and decode every row
+with 'decodeTextRow': a walk over the row as one strict 'ByteString' that
+returns unboxed sums, so no 'Either' or tuple is allocated per field.
 
-    | otherwise                     = fail $ "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show t
+Decision: values stay as lazy as 'getTextField' leaves them. Evaluating every
+value while decoding saved 3% of the instructions when a caller uses every
+value, and cost 2.75 times the instructions when it uses none
+(docs/direct-row-decoding.md). Only a string's bytes are checked at once, as
+UTF-8, so bytes that are not fail the row with a 'TextFieldInvalidUtf8' rather
+than raise an exception from pure code when the value is used.
+
+'getTextField' and 'getTextRow' keep their 'Get' interface and share
+'columnKind' and 'decodeTextValue', so both paths turn the same bytes into the
+same values. They differ only on rows a server does not send: an 8-byte length
+above 'maxBound' of 'Int', which 'decodeTextRow' rejects, and a zero-length
+BIT field, which is now 0 instead of the byte after it.
+-}
+
+-- | How a column's fields decode, in either protocol, resolved once per result
+-- set by 'columnKind'. See Note [Text rows decoded once per result set].
+--
+-- @since 1.4.0
+data ColumnKind
+    = NullColumn
+      -- ^ a column of type NULL: every field of it is NULL, so no bytes of a
+      -- text-protocol row belong to it beyond the NULL marker
+    | ValueColumn !FieldType !ValueKind
+      -- ^ a column with values; the column type is kept for error messages
+    deriving (Show, Eq)
+
+-- | The 'MySQLValue' constructor a column's non-NULL fields become.
+--
+-- @since 1.4.0
+data ValueKind
+    = KindDecimal
+    | KindInt8U
+    | KindInt8
+    | KindInt16U
+    | KindInt16
+    | KindInt32U
+    | KindInt32
+    | KindInt64U
+    | KindInt64
+    | KindFloat
+    | KindDouble
+    | KindYear
+    | KindTimeStamp
+    | KindDateTime
+    | KindDate
+    | KindTime
+    | KindGeometry
+    | KindText !Word16
+      -- ^ a string column in a character set other than binary or latin1, read
+      -- as UTF-8; the character set id is kept for error messages
+    | KindLatin1Text   -- ^ a string column in latin1, which MySQL means as Windows-1252
+    | KindBytes        -- ^ a string column in the binary character set
+    | KindBit
+    | KindUnsupported  -- ^ a column type without a decoder
+    deriving (Show, Eq)
+
+-- | How a column's fields decode.
+--
+-- @since 1.4.0
+columnKind :: ColumnDef -> ColumnKind
+columnKind f =
+    if  | t == mySQLTypeNull -> NullColumn
+        | t == mySQLTypeDecimal || t == mySQLTypeNewDecimal -> ValueColumn t KindDecimal
+        | t == mySQLTypeTiny ->
+            ValueColumn t (if isUnsigned then KindInt8U else KindInt8)
+        | t == mySQLTypeShort ->
+            ValueColumn t (if isUnsigned then KindInt16U else KindInt16)
+        | t == mySQLTypeLong || t == mySQLTypeInt24 ->
+            ValueColumn t (if isUnsigned then KindInt32U else KindInt32)
+        | t == mySQLTypeLongLong ->
+            ValueColumn t (if isUnsigned then KindInt64U else KindInt64)
+        | t == mySQLTypeFloat -> ValueColumn t KindFloat
+        | t == mySQLTypeDouble -> ValueColumn t KindDouble
+        | t == mySQLTypeYear -> ValueColumn t KindYear
+        | t == mySQLTypeTimestamp || t == mySQLTypeTimestamp2 -> ValueColumn t KindTimeStamp
+        | t == mySQLTypeDateTime || t == mySQLTypeDateTime2 -> ValueColumn t KindDateTime
+        | t == mySQLTypeDate || t == mySQLTypeNewDate -> ValueColumn t KindDate
+        | t == mySQLTypeTime || t == mySQLTypeTime2 -> ValueColumn t KindTime
+        | t == mySQLTypeGeometry -> ValueColumn t KindGeometry
+        | t == mySQLTypeVarChar
+            || t == mySQLTypeEnum
+            || t == mySQLTypeSet
+            || t == mySQLTypeTinyBlob
+            || t == mySQLTypeMediumBlob
+            || t == mySQLTypeLongBlob
+            || t == mySQLTypeBlob
+            || t == mySQLTypeVarString
+            || t == mySQLTypeString ->
+            ValueColumn t (stringKind (columnCharSet f))
+        | t == mySQLTypeBit -> ValueColumn t KindBit
+        | otherwise -> ValueColumn t KindUnsupported
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
-    intLexer bs = fst <$> LexInt.readSigned LexInt.readDecimal bs
-    fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
 
-    timeParser bs = do
-        (hh, rest) <- LexInt.readDecimal bs
-        guard (not (B.null rest))
-        (mm, rest') <- LexInt.readDecimal (B.tail rest)
-        guard (not (B.null rest'))
-        (ss, _) <- LexFrac.readDecimal (B.tail rest')
-        return (TimeOfDay hh mm ss)
+-- | Why the bytes of a text-protocol field did not decode.
+--
+-- @since 1.4.0
+data TextFieldError
+    = TextFieldUnparsable !FieldType !ByteString
+      -- ^ the bytes are not a value of the column's type
+    | TextFieldBitTooWide !Int
+      -- ^ a BIT field longer than the 8 bytes of a 'Word64'
+    | TextFieldUnsupportedType !FieldType
+      -- ^ a column type without a text decoder
+    | TextFieldInvalidUtf8 !Word16 !ByteString
+      -- ^ a string in this character set id whose bytes are not UTF-8
+    deriving (Show, Eq)
 
+-- | The message 'getTextField' fails with.
+describeTextFieldError :: TextFieldError -> String
+describeTextFieldError fieldError = case fieldError of
+    TextFieldUnparsable fieldType bytes ->
+        "Database.MySQL.Protocol.MySQLValue: parsing " ++ show fieldType
+            ++ " failed, input: " ++ BC.unpack bytes
+    TextFieldBitTooWide width ->
+        "Database.MySQL.Protocol.MySQLValue: wrong bit length size: " ++ show width
+    TextFieldUnsupportedType fieldType ->
+        "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show fieldType
+    TextFieldInvalidUtf8 charsetId _ ->
+        "Database.MySQL.Protocol.MySQLValue: a string column arrived in character set id "
+            ++ show charsetId ++ ", which mysql-haskell can only decode as UTF-8 or latin1,"
+            ++ " and its bytes are not valid UTF-8. Use a UTF-8 connection charset such as"
+            ++ " defaultConnectInfoMB4's, or select the column as BINARY to get its bytes."
+
+-- | The value of a field's bytes. The lexer runs at once, so a malformed field
+-- fails while the row is read; a lexed value and the 'Text' of a string are left lazy,
+-- while a constructor around bytes already in hand is built at once, as that
+-- is cheaper than a thunk. See Note [Text rows decoded once per result set].
+-- Inlined so that 'decodeTextFieldAt' matches the 'Right' away instead of
+-- allocating it.
+decodeTextValue :: FieldType -> ValueKind -> ByteString -> Either TextFieldError MySQLValue
+decodeTextValue fieldType value bytes = case value of
+    KindDecimal     -> lexedValue fieldType MySQLDecimal lexSignedFraction bytes
+    KindInt8U       -> lexedValue fieldType MySQLInt8U lexSignedIntegral bytes
+    KindInt8        -> lexedValue fieldType MySQLInt8 lexSignedIntegral bytes
+    KindInt16U      -> lexedValue fieldType MySQLInt16U lexSignedIntegral bytes
+    KindInt16       -> lexedValue fieldType MySQLInt16 lexSignedIntegral bytes
+    KindInt32U      -> lexedValue fieldType MySQLInt32U lexSignedIntegral bytes
+    KindInt32       -> lexedValue fieldType MySQLInt32 lexSignedIntegral bytes
+    KindInt64U      -> lexedValue fieldType MySQLInt64U lexSignedIntegral bytes
+    KindInt64       -> lexedValue fieldType MySQLInt64 lexSignedIntegral bytes
+    KindFloat       -> lexedValue fieldType MySQLFloat readFloat bytes
+    KindDouble      -> lexedValue fieldType MySQLDouble readDouble bytes
+    KindYear        -> lexedValue fieldType MySQLYear lexSignedIntegral bytes
+    KindTimeStamp   -> lexedValue fieldType (uncurry timeStampValue) lexDateTimeParts bytes
+    KindDateTime    -> lexedValue fieldType (uncurry dateTimeValue) lexDateTimeParts bytes
+    KindDate        -> lexedValue fieldType dateValue textDateParts bytes
+    KindTime        -> lexedValue fieldType id lexTime bytes
+    KindGeometry    -> Right $! MySQLGeometry bytes
+    KindText charsetId -> utf8Value charsetId bytes
+    KindLatin1Text  -> Right (MySQLText (decodeMySQLLatin1 bytes))
+    KindBytes       -> Right $! MySQLBytes bytes
+    KindBit         -> decodeTextBit bytes
+    KindUnsupported -> Left (TextFieldUnsupportedType fieldType)
+{-# INLINE decodeTextValue #-}
+
+-- | Checked by 'B.isValidUtf8' at once, so the lazy 'T.decodeUtf8' cannot fail
+-- when the value is used. See Note [Text rows decoded once per result set].
+utf8Value :: Word16 -> ByteString -> Either TextFieldError MySQLValue
+utf8Value charsetId bytes =
+    if B.isValidUtf8 bytes
+    then Right (MySQLText (T.decodeUtf8 bytes))
+    else Left (TextFieldInvalidUtf8 charsetId bytes)
+{-# INLINE utf8Value #-}
+
+lexedValue :: FieldType -> (a -> MySQLValue) -> (ByteString -> Maybe a) -> ByteString
+           -> Either TextFieldError MySQLValue
+lexedValue fieldType construct lexer bytes = case lexer bytes of
+    Just lexed -> Right (construct lexed)
+    Nothing    -> Left (TextFieldUnparsable fieldType bytes)
+{-# INLINE lexedValue #-}
+
+-- | A BIT field's bytes, most significant first.
+decodeTextBit :: ByteString -> Either TextFieldError MySQLValue
+decodeTextBit bytes =
+    if B.length bytes > 8
+    then Left (TextFieldBitTooWide (B.length bytes))
+    else Right $! MySQLBit (B.foldl' appendBitByte 0 bytes)
+
+appendBitByte :: Word64 -> Word8 -> Word64
+appendBitByte bits byte = unsafeShiftL bits 8 .|. Word8.toWord64 byte
+
+lexSignedIntegral :: Integral a => ByteString -> Maybe a
+lexSignedIntegral bytes = fst <$> LexInt.readSigned LexInt.readDecimal bytes
+-- Specialised here so that "Database.MySQL.Decoder", which reaches these
+-- lexers through higher-order arguments, gets the same specialised digit loops
+-- as 'decodeTextValue' instead of the dictionary-passing ones.
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int8 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word8 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int16 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word16 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int32 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word32 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Int64 #-}
+{-# SPECIALIZE lexSignedIntegral :: ByteString -> Maybe Word64 #-}
+
+lexSignedFraction :: Fractional a => ByteString -> Maybe a
+lexSignedFraction bytes = fst <$> LexFrac.readSigned LexFrac.readDecimal bytes
+{-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Scientific #-}
+
+
+-- | @YYYY-MM-DD hh:mm:ss[.fraction]@, as DATETIME and TIMESTAMP fields come;
+-- the date may be one a 'Day' cannot hold.
+lexDateTimeParts :: ByteString -> Maybe (RawDate, TimeOfDay)
+lexDateTimeParts bytes = do
+    guard (B.length bytes >= 12)
+    (,) <$> textDateParts bytes <*> lexTimeOfDay (B.drop 11 bytes)
+
+lexTime :: ByteString -> Maybe MySQLValue
+lexTime bytes = uncurry MySQLTime <$> lexSignedTime bytes
+
+-- | A TIME field: an optional minus sign before @hh:mm:ss[.fraction]@, where the
+-- hours may exceed 24. The sign is 1 for negative, as in 'MySQLTime'.
+lexSignedTime :: ByteString -> Maybe (Word8, TimeOfDay)
+lexSignedTime bytes = do
+    guard (not (B.null bytes))
+    if B.index bytes 0 == 45  -- '-'
+    then (,) 1 <$> lexTimeOfDay (B.drop 1 bytes)
+    else (,) 0 <$> lexTimeOfDay bytes
+
+-- | @hh:mm:ss[.fraction]@.
+lexTimeOfDay :: ByteString -> Maybe TimeOfDay
+lexTimeOfDay bytes = do
+    (hh, rest) <- LexInt.readDecimal bytes
+    guard (not (B.null rest))
+    (mm, rest') <- LexInt.readDecimal (B.tail rest)
+    guard (not (B.null rest'))
+    (ss, _) <- LexFrac.readDecimal (B.tail rest')
+    return (TimeOfDay hh mm ss)
+
+-- | A column's position in a result set, counting from 0.
+--
+-- @since 1.4.0
+newtype ColumnNumber = ColumnNumber Int
+    deriving (Show, Eq, Ord)
+
+-- | @since 1.4.0
+nextColumn :: ColumnNumber -> ColumnNumber
+nextColumn (ColumnNumber column) = ColumnNumber (column + 1)
+
+-- | Where and why a text-protocol row did not decode.
+--
+-- @since 1.4.0
+data RowError = RowError
+    { rowErrorColumn :: !ColumnNumber
+    , rowErrorOffset :: !Int               -- ^ byte offset of that column's field in the row
+    , rowErrorKind   :: !RowErrorKind
+    } deriving (Show, Eq)
+
+-- | @since 1.4.0
+data RowErrorKind
+    = RowEndsEarly
+      -- ^ the row ends before this column's field does
+    | RowInvalidLengthPrefix !Word8
+      -- ^ a field starting with a byte that is neither a length nor the NULL marker
+    | RowLengthOverflow
+      -- ^ an 8-byte length above 'maxBound' of 'Int'
+    | RowFieldError !TextFieldError
+      -- ^ the field's bytes did not decode
+    deriving (Show, Eq)
+
+-- | @since 1.4.0
+describeRowError :: RowError -> String
+describeRowError (RowError (ColumnNumber column) offset kind) =
+    "Database.MySQL.Protocol.MySQLValue: column " ++ show column ++ " at byte "
+        ++ show offset ++ ": " ++ kindDescription
+  where
+    kindDescription = case kind of
+        RowEndsEarly                  -> "the row ends inside this field"
+        RowInvalidLengthPrefix prefix -> "invalid length prefix " ++ show prefix
+        RowLengthOverflow             -> "length does not fit an Int"
+        RowFieldError fieldError      -> describeTextFieldError fieldError
+
+-- | The values of a text-protocol row, one per 'ColumnKind'. Bytes after the
+-- last column are ignored, as 'getTextRow' ignores them.
+-- See Note [Text rows decoded once per result set].
+--
+-- @since 1.4.0
+decodeTextRow :: [ColumnKind] -> ByteString -> Either RowError [MySQLValue]
+decodeTextRow columns row = case decodeTextFields row (ColumnNumber 0) 0 columns of
+    (# rowError | #) -> Left rowError
+    (# | values #)   -> Right values
+
+-- | 'V.Vector' version of 'decodeTextRow'.
+--
+-- @since 1.4.0
+decodeTextRowVector :: V.Vector ColumnKind -> ByteString -> Either RowError (V.Vector MySQLValue)
+decodeTextRowVector columns row =
+    V.fromListN (V.length columns) <$> decodeTextRow (V.toList columns) row
+
+-- | The fields of @columns@, the first of which is @column@ and starts at byte
+-- @offset@ of the row.
+decodeTextFields :: ByteString -> ColumnNumber -> Int -> [ColumnKind] -> (# RowError | [MySQLValue] #)
+decodeTextFields row columnNumber offset columns = case columns of
+    [] -> (# | [] #)
+    column : laterColumns -> case decodeTextFieldAt row columnNumber offset column of
+        (# rowError | #) -> (# rowError | #)
+        (# | (# value, nextOffset #) #) ->
+            case decodeTextFields row (nextColumn columnNumber) nextOffset laterColumns of
+                (# rowError | #) -> (# rowError | #)
+                (# | values #)   -> (# | value : values #)
+
+-- | The field at byte @offset@ and the offset after it. The NULL marker is
+-- checked before the column, as 'getTextRow' does.
+decodeTextFieldAt :: ByteString -> ColumnNumber -> Int -> ColumnKind
+                  -> (# RowError | (# MySQLValue, Int #) #)
+decodeTextFieldAt row columnNumber offset column =
+    if  | offset >= B.length row ->
+            (# RowError columnNumber offset RowEndsEarly | #)
+        | B.unsafeIndex row offset == 0xFB -> (# | (# MySQLNull, offset + 1 #) #)
+        | otherwise -> case column of
+            NullColumn -> (# | (# MySQLNull, offset #) #)
+            ValueColumn fieldType value -> case lengthEncodedInt row offset of
+                (# kind | #) -> (# RowError columnNumber offset kind | #)
+                (# | (# fieldLength, fieldStart #) #) ->
+                    if fieldLength > B.length row - fieldStart
+                    then (# RowError columnNumber offset RowEndsEarly | #)
+                    else case decodeTextValue fieldType value
+                                (B.unsafeTake fieldLength (B.unsafeDrop fieldStart row)) of
+                        Left fieldError ->
+                            (# RowError columnNumber offset (RowFieldError fieldError) | #)
+                        Right decoded -> (# | (# decoded, fieldStart + fieldLength #) #)
+
+-- | The length-encoded integer at byte @offset@, which must be inside the row,
+-- and the offset after it.
+lengthEncodedInt :: ByteString -> Int -> (# RowErrorKind | (# Int, Int #) #)
+lengthEncodedInt row offset =
+    let prefix = B.unsafeIndex row offset
+    in if  | prefix < 0xFB  -> (# | (# Word8.toInt prefix, offset + 1 #) #)
+           | prefix == 0xFC -> littleEndianLength row (offset + 1) 2
+           | prefix == 0xFD -> littleEndianLength row (offset + 1) 3
+           | prefix == 0xFE -> littleEndianLength row (offset + 1) 8
+           | otherwise      -> (# RowInvalidLengthPrefix prefix | #)
+
+-- | The little-endian length of @width@ bytes at byte @start@, and the offset after it.
+littleEndianLength :: ByteString -> Int -> Int -> (# RowErrorKind | (# Int, Int #) #)
+littleEndianLength row start width =
+    if width > B.length row - start
+    then (# RowEndsEarly | #)
+    else case Word64.toInt (B.foldr' prependLittleEndianByte 0
+                                (B.unsafeTake width (B.unsafeDrop start row))) of
+        Nothing          -> (# RowLengthOverflow | #)
+        Just fieldLength -> (# | (# fieldLength, start + width #) #)
+
+prependLittleEndianByte :: Word8 -> Word64 -> Word64
+prependLittleEndianByte byte higherBytes = unsafeShiftL higherBytes 8 .|. Word8.toWord64 byte
 
 -- | The @YYYY-MM-DD@ that starts a text-protocol date, which may be zero.
 textDateParts :: ByteString -> Maybe RawDate
@@ -262,16 +596,11 @@ textDateParts bs = do
 
 -- | How the bytes of a string column decode, by the character set id the
 -- server sent them in. See Note [Result character sets].
-data ResultCharset
-    = BinaryCharset
-    | Latin1Charset
-    | Utf8OrOtherCharset
-
-resultCharset :: Word16 -> ResultCharset
-resultCharset charsetId =
-    if  | charsetId == 63 -> BinaryCharset
-        | charsetId `elem` latin1Collations -> Latin1Charset
-        | otherwise -> Utf8OrOtherCharset
+stringKind :: Word16 -> ValueKind
+stringKind charsetId =
+    if  | charsetId == 63 -> KindBytes
+        | charsetId `elem` latin1Collations -> KindLatin1Text
+        | otherwise -> KindText charsetId
 
 -- | The ids of @information_schema.collations@ whose character set is latin1,
 -- in MySQL 8.0 and MariaDB 11.4 (which adds the two nopad ones).
@@ -285,20 +614,15 @@ latin1Collations = [5, 8, 15, 31, 47, 48, 49, 94, 1032, 1071]
 -- set to another charset, as after @SET NAMES latin1@, gets that charset's
 -- bytes. latin1 is decoded here; any other charset is read as UTF-8, which
 -- keeps ASCII-only values working as they always did, and fails with a
--- DecodePacketException naming the charset and column on bytes that are not
--- UTF-8, rather than return mangled text.
+-- 'TextFieldInvalidUtf8' naming the charset on bytes that are not UTF-8,
+-- rather than return mangled text.
 
 stringColumnValue :: ColumnDef -> ByteString -> Get MySQLValue
-stringColumnValue column bytes = case resultCharset (columnCharSet column) of
-    BinaryCharset -> pure (MySQLBytes bytes)
-    Latin1Charset -> pure (MySQLText (decodeMySQLLatin1 bytes))
-    Utf8OrOtherCharset -> case T.decodeUtf8' bytes of
-        Right text -> pure (MySQLText text)
-        Left _ -> fail $ "Database.MySQL.Protocol.MySQLValue: column "
-            ++ show (columnName column) ++ " arrived in character set id "
-            ++ show (columnCharSet column) ++ ", which mysql-haskell can only decode as UTF-8 or latin1,"
-            ++ " and its bytes are not valid UTF-8. Use a UTF-8 connection charset such as"
-            ++ " defaultConnectInfoMB4's, or select the column as BINARY to get its bytes."
+stringColumnValue column bytes =
+    case decodeTextValue (columnType column) (stringKind (columnCharSet column)) bytes of
+        Right value -> pure value
+        Left fieldError ->
+            fail (describeTextFieldError fieldError ++ " Column: " ++ show (columnName column))
 
 -- | MySQL's latin1, which is Windows-1252 with its five unassigned bytes
 -- (0x81, 0x8D, 0x8F, 0x90, 0x9D) mapped to the C1 controls of the same number.

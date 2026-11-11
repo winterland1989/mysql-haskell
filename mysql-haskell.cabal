@@ -72,14 +72,17 @@ library
     Database.MySQL.BinLogProtocol.BinLogMeta
     Database.MySQL.BinLogProtocol.BinLogValue
     Database.MySQL.Connection
+    Database.MySQL.Decoder
     Database.MySQL.Field
     Database.MySQL.MariaDB
     Database.MySQL.Protocol.Auth
     Database.MySQL.Protocol.ColumnDef
     Database.MySQL.Protocol.Command
     Database.MySQL.Protocol.Escape
+    Database.MySQL.Protocol.FloatingPoint
     Database.MySQL.Protocol.MySQLValue
     Database.MySQL.Protocol.Packet
+    Database.MySQL.Protocol.RawRow
     Database.MySQL.TLS
     System.IO.Streams.TCP
     System.IO.Streams.TLS
@@ -93,7 +96,8 @@ library
     asn1-types >=0.3 && <0.4,
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
-    bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
+    -- 0.11.2 added isValidUtf8, which checks a string column's bytes.
+    bytestring >=0.11.2 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
     crypton-x509 >=1.5 && <2.0,
     crypton-x509-store >=1.5 && <2.0,
@@ -143,7 +147,10 @@ test-suite test
     AesonBP
     BinLogEventCodes
     BoundsCheck
+    DecoderRoundtrip
+    DirectDecoding
     FieldRoundtrip
+    FloatingPointText
     HandshakeGolden
     JSON
     PacketClassification
@@ -156,6 +163,8 @@ test-suite test
     Sha1Scramble
     Sha256Scramble
     TCPStreams
+    TextRowDecoding
+    TypedValue
     Word24
     ZeroDates
 
@@ -202,20 +211,24 @@ test-suite integration
     CABundle
     CachingSha2
     ExecuteMany
+    FloatingPoint
     LargeRows
     Latin1Results
     MariaDBNegotiation
     MultipleResults
     MysqlTests
     PlaceholderLiterals
+    QueryApi
     QueryWithoutResultSet
     RoundtripBit
+    RowDecoderQueries
     RoundtripYear
     SelectOne
     TestUser
     TextRow
     TLSConnection
     TextRowNew
+    TypedValue
     UnixSocket
     UnsignedInsertId
     ZeroDateRoundtrip
@@ -227,6 +240,7 @@ test-suite integration
     directory,
     io-streams,
     mysql-haskell,
+    scientific,
     tasty >=0.11 && <2.0,
     tasty-hunit < 1.0,
     text,
@@ -246,6 +260,8 @@ test-suite integration-mariadb
   other-modules:
     MariaDBBulk
     MariaDBExtendedMetadata
+    QueryApi
+    TypedValue
     UnixSocket
 
   hs-source-dirs:     test
@@ -257,7 +273,8 @@ test-suite integration-mariadb
     mysql-haskell,
     tasty >=0.11 && <2.0,
     tasty-hunit < 1.0,
-    text
+    text,
+    vector
 
   default-extensions:
     MultiWayIf
