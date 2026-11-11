@@ -56,6 +56,8 @@ It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
   MySQL functions [#104](https://github.com/winterland1989/mysql-haskell/pull/104)
 * Allow crypton 2.2 and tls 2.5
   [#105](https://github.com/winterland1989/mysql-haskell/pull/105)
+* Examples for `executeBulk` and the functions that decode rows without
+  `MySQLValue` [#106](https://github.com/winterland1989/mysql-haskell/pull/106)
 * A comparison with the mariadb-haskell fork and a plan to adopt its
   features, in `docs/`
   [#99](https://github.com/winterland1989/mysql-haskell/pull/99)
