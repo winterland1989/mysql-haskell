@@ -2,13 +2,15 @@
 
 ## 1.4.2 -- unreleased
 
-No API change. A text or bytes parameter of `query`, `execute` or
-`executeMany` can no longer end its string literal when the session's
-sql_mode includes `NO_BACKSLASH_ESCAPES`, which let the rest of the value run
-as SQL; in that mode a backslash in a parameter is still stored twice.
-`escapeText` and `escapeBytes` now double a quote and keep control characters
-and the double quote as they are, so their result is only safe between single
-quotes.
+Security fixes, no API change: a text or bytes parameter of `query`,
+`execute` or `executeMany` can no longer end its string literal under
+`NO_BACKSLASH_ESCAPES`, and `makeClientParams'` now sends its client
+certificate, so a `REQUIRE X509` account can log in. `escapeText` and
+`escapeBytes` now double a quote and leave control characters as they are, so
+their output is only safe between single quotes, and under
+`NO_BACKSLASH_ESCAPES` a backslash in a parameter is still stored twice. On a
+gbk, big5, sjis, cp932 or gb18030 connection text parameters remain unsafe; use
+prepared statements there.
 
 * Parameters escaped safely under `NO_BACKSLASH_ESCAPES`
   [#110](https://github.com/winterland1989/mysql-haskell/pull/110)
