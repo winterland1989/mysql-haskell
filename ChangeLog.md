@@ -1,5 +1,16 @@
 # Revision history for mysql-haskell
 
+## 1.4.1 -- 2026.11.11
+
+Faster decoding, no API change beyond one new exception. `query_` and
+`queryStmt` decode rows with dates and text up to a third faster than 1.4.0:
+a date in a common range is computed without `Integer` arithmetic, and a
+string is decoded as UTF-8 once, when its value is used, instead of checked
+while the row is read and decoded again later. A string whose bytes are not
+UTF-8, as a connection in another charset can send, now raises
+`InvalidUtf8Text` when the value is used, where 1.4.0 refused the whole row;
+the decoders of `Database.MySQL.Decoder` still refuse it while reading.
+
 ## 1.4.0 -- 2026.11.11
 
 Fixes for MySQL and MariaDB alike, found comparing mysql-haskell with the
@@ -41,7 +52,8 @@ query functions and re-exports `Database.MySQL.Protocol.RawRow`, which can clash
 with same-named definitions under an unqualified import.
 
 It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
-0.11.2; projects on older compilers keep resolving to 1.3.3.
+0.11.2; projects on older compilers keep resolving to 1.3.2, the last release
+before this on Hackage (1.3.3 was never uploaded).
 
 * Fix eight defects for MySQL and MariaDB, each with a reproducer
   [#102](https://github.com/winterland1989/mysql-haskell/pull/102)

@@ -269,6 +269,51 @@ bytestring's C code are about 9.6% of the merge's instructions and the per-row `
 (`B.all (< 0x80)` before `isValidUtf8`) saved about 100 instructions per row on
 employees and cost about 190 on mixed_types, so it was left out.
 
+## 1.4.1: text checked when used, common dates in Int
+
+The profiles above showed where 1.4.0's fixes cost the most, and 1.4.1 takes
+two of those costs out without giving up what the fixes protect against.
+
+A string's UTF-8 is no longer checked while the row is read. `query_`,
+`queryStmt` and the `Get` decoders leave a `MySQLText` to be decoded, in one
+pass with `decodeUtf8'`, when its value is used, and bytes that are not UTF-8
+raise `InvalidUtf8Text` then, as 1.3 did with a less helpful message. 1.4.0
+ran `isValidUtf8` on every string and `decodeUtf8` validated it again when it
+was used. The decoders of `Database.MySQL.Decoder`, `mysqlValue` included,
+still check as they read, for callers who want the error up front.
+
+A date whose month is 1 to 12 and day 1 to 28 exists in every year, so
+`calendarDate` computes its `Day` in `Int` (Howard Hinnant's days_from_civil)
+and leaves `fromGregorianValid`, with its `Integer` arithmetic, to the rest:
+days 29 to 31 and the zero and partial dates that become `MySQLDateRaw`. A
+unit test compares the two on every month 0 to 13 and day 0 to 32 of two
+400-year cycles and the ends of `Word16`.
+
+Measured as above on MySQL 8.0.45, 1 thread, `perf stat -e instructions:u -r 5`,
+median of three rounds, master (1.4.0, `0e4dd87`) against this change; the
+`records` rows are `MySQLHaskellRecords`:
+
+| table | path | instructions/row, master | 1.4.1 branch | change | wall, master | 1.4.1 branch |
+|-------|------|------|------|------|------|------|
+| employees | query_, values unused | 3,314 | 2,949 | -11.0% | 82 ms | 82 ms |
+| employees | query_, values used | 7,900 | 5,124 | -35.1% | 151 ms | 94 ms |
+| employees | records field | 8,088 | 5,313 | -34.3% | 142 ms | 105 ms |
+| employees | records typed | 8,116 | 5,398 | -33.5% | 142 ms | 97 ms |
+| employees | records field-stmt | 8,224 | 5,483 | -33.3% | 146 ms | 90 ms |
+| employees | records typed-stmt | 7,786 | 5,068 | -34.9% | 136 ms | 89 ms |
+| mixed_types | query_, values unused | 15,205 | 14,099 | -7.3% | 615 ms | 605 ms |
+| mixed_types | query_, values used | 17,678 | 16,194 | -8.4% | 601 ms | 613 ms |
+| mixed_types | records field | 17,928 | 16,418 | -8.4% | 602 ms | 601 ms |
+| mixed_types | records typed | 16,998 | 16,499 | -2.9% | 600 ms | 603 ms |
+| mixed_types | records field-stmt | 11,275 | 9,765 | -13.4% | 509 ms | 501 ms |
+| mixed_types | records typed-stmt | 10,114 | 9,620 | -4.9% | 507 ms | 524 ms |
+
+Wall time follows the instructions on employees, whose rows are small and
+carry two dates: 151 to 94 ms with values used, 142 to 105 ms through `query_`
+and `Field`, 146 to 90 ms through `queryStmt` and `Field`. On mixed_types it
+stays within noise. With values unused the change is the UTF-8 pass no longer
+made on text nobody reads.
+
 ## Step 3: persistent-mysql-haskell
 
 persistent-mysql-haskell would implement the RFC's classes on top of step 2:
