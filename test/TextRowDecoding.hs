@@ -180,7 +180,9 @@ genValueBytes value = case value of
     KindDate        -> renderedOrArbitrary (arbitrary :: Gen Day)
     KindTime        -> oneof [genTime, renderedOrArbitrary (arbitrary :: Gen TimeOfDay)]
     KindGeometry    -> arbitrary
-    KindText _      -> frequency [(9, T.encodeUtf8 <$> arbitrary), (1, arbitrary)]
+    -- Valid UTF-8 only: invalid bytes raise when the value is used, while the
+    -- typed decoders refuse the row, which ResultCharsets and DirectDecoding test.
+    KindText _      -> T.encodeUtf8 <$> arbitrary
     KindLatin1Text  -> arbitrary
     KindBytes       -> frequency [(9, arbitrary), (1, genLongBytes)]
     KindBit         -> B.pack <$> (choose (1, 10) >>= vector)

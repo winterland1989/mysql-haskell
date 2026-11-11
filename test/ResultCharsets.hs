@@ -1,8 +1,10 @@
 -- | String columns in the character set the server sent them in. latin1 bytes
--- used to go through a UTF-8 decoder that threw an impure exception.
+-- used to go through a UTF-8 decoder that threw an impure exception. Bytes
+-- that are not UTF-8 in any other charset raise 'InvalidUtf8Text' when the
+-- value is used, not while the row is read (1.4.0 refused the row).
 module ResultCharsets (tests) where
 
-import           Control.Exception              (SomeException, evaluate, try)
+import           Control.Exception              (evaluate, try)
 import           Data.Binary.Parser             (parseOnly)
 import           Data.Binary.Put                (runPut)
 import qualified Data.ByteString                as B
@@ -19,21 +21,24 @@ tests = testGroup "result character sets"
     [ testCase "latin1 (collation 8) is Windows-1252" $
         assertEqual "value" (Right (MySQLText "\x20AC\x00E9\x0081"))
             (parseOnly (getTextField (varchar latin1SwedishCi)) (lenEnc "\x80\xE9\x81"))
-    , testCase "another charset decodes ASCII and fails to parse other bytes" $ do
+    , testCase "another charset decodes ASCII, and other bytes raise when the value is used" $ do
         assertEqual "ASCII value" (Right (MySQLText "abc"))
             (parseOnly (getBinaryField (varchar gbkChineseCi)) (lenEnc "abc"))
-        parsed <- try (evaluate (forced (parseOnly (getTextField (varchar gbkChineseCi)) (lenEnc "\xC4\xE3"))))
-        case parsed of
-            Right (Left _) -> pure ()
-            Right (Right value) -> assertFailure ("decoded as " <> show value)
-            Left (failure :: SomeException) -> assertFailure ("threw instead of failing the parse: " <> show failure)
+        text <- either (assertFailure . ("refused the field: " <>)) pure
+            (parseOnly (getTextField (varchar gbkChineseCi)) (lenEnc "\xC4\xE3"))
+        used <- try (evaluate text)
+        used @?= Left (InvalidUtf8Text gbkChineseCi "\xC4\xE3")
+    , testCase "a text row with one invalid string decodes, and only that value raises" $ do
+        let kinds = map columnKind [varchar gbkChineseCi, varchar gbkChineseCi]
+        values <- either (assertFailure . ("refused the row: " <>) . show) pure
+            (decodeTextRow kinds (lenEnc "ok" <> lenEnc "\xC4\xE3"))
+        case values of
+            [ok, invalid] -> do
+                ok @?= MySQLText "ok"
+                used <- try (evaluate invalid)
+                used @?= Left (InvalidUtf8Text gbkChineseCi "\xC4\xE3")
+            other -> assertFailure ("expected two values, got " <> show (length other))
     ]
-
--- | The value itself evaluated, so a decoder that throws does so here.
-forced :: Either String MySQLValue -> Either String MySQLValue
-forced parsed = case parsed of
-    Left failure -> Left failure
-    Right value -> value `seq` Right value
 
 latin1SwedishCi, gbkChineseCi :: Word16
 latin1SwedishCi = 8

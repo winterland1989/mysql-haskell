@@ -35,6 +35,7 @@ module Database.MySQL.Protocol.MySQLValue
   , RowError(..)
   , RowErrorKind(..)
   , TextFieldError(..)
+  , InvalidUtf8Text(..)
   , describeRowError
   , getBinaryField
   , putBinaryField
@@ -62,6 +63,7 @@ module Database.MySQL.Protocol.MySQLValue
   ) where
 
 import qualified Blaze.Text                         as Textual
+import           Control.Exception                  (Exception (displayException), throw)
 import           Control.Monad
 import           Data.Binary.Put
 import           Data.Binary.Parser
@@ -81,7 +83,8 @@ import           Data.Int
 import           Data.Scientific                    (Scientific)
 import           Data.Text                          (Text)
 import qualified Data.Text.Encoding                 as T
-import           Data.Time.Calendar                 (Day, fromGregorianValid,
+import           Data.Time.Calendar                 (Day (ModifiedJulianDay),
+                                                     fromGregorianValid,
                                                      toGregorian)
 import           Data.Time.Format                   (defaultTimeLocale,
                                                      formatTime)
@@ -171,8 +174,29 @@ data RawDate = RawDate
 -- | 'Right' when a 'Day' can hold the date.
 calendarDate :: RawDate -> Either RawDate Day
 calendarDate raw@(RawDate year month day) =
-    maybe (Left raw) Right
+    -- Every month has 28 days, so these dates exist in every year and need no
+    -- check; only the rest go through 'fromGregorianValid', whose Integer
+    -- arithmetic was most of a date row's cost (docs/direct-row-decoding.md).
+    if month >= 1 && month <= 12 && day >= 1 && day <= 28
+    then Right (dayOfCommonDate (Word16.toInt year) (Word8.toInt month) (Word8.toInt day))
+    else maybe (Left raw) Right
         (fromGregorianValid (Word16.toInteger year) (Word8.toInt month) (Word8.toInt day))
+
+-- | The 'Day' of a date that exists, computed in 'Int': Howard Hinnant's
+-- days_from_civil (http://howardhinnant.github.io/date_algorithms.html),
+-- counted from the Modified Julian Day epoch, 1858-11-17. The year counts from
+-- March, so that February's leap day falls at its end.
+dayOfCommonDate :: Int -> Int -> Int -> Day
+dayOfCommonDate year month day =
+    let marchYear = if month <= 2 then year - 1 else year
+        era = marchYear `div` 400
+        yearOfEra = marchYear - era * 400
+        dayOfEra = yearOfEra * 365 + yearOfEra `div` 4 - yearOfEra `div` 100 + marchDayOfYear month day
+    in ModifiedJulianDay (Int.toInteger (era * 146097 + dayOfEra - 678881))
+
+-- | The day's number in a year that starts on 1 March, from 0.
+marchDayOfYear :: Int -> Int -> Int
+marchDayOfYear month day = (153 * (if month > 2 then month - 3 else month + 9) + 2) `div` 5 + day - 1
 
 dateValue :: RawDate -> MySQLValue
 dateValue = either MySQLDateRaw MySQLDate . calendarDate
@@ -239,9 +263,12 @@ returns unboxed sums, so no 'Either' or tuple is allocated per field.
 Decision: values stay as lazy as 'getTextField' leaves them. Evaluating every
 value while decoding saved 3% of the instructions when a caller uses every
 value, and cost 2.75 times the instructions when it uses none
-(docs/direct-row-decoding.md). Only a string's bytes are checked at once, as
-UTF-8, so bytes that are not fail the row with a 'TextFieldInvalidUtf8' rather
-than raise an exception from pure code when the value is used.
+(docs/direct-row-decoding.md). A string is decoded as UTF-8 only when its
+value is used, as in 1.3: bytes that are not UTF-8 raise 'InvalidUtf8Text'
+from pure code then. 1.4.0 checked every string while reading the row
+instead, which cost a validation pass on text nobody looked at and a second
+pass on text that was used; callers who want the check up front use the
+typed decoders of "Database.MySQL.Decoder", which check as they read.
 
 'getTextField' and 'getTextRow' keep their 'Get' interface and share
 'columnKind' and 'decodeTextValue', so both paths turn the same bytes into the
@@ -342,8 +369,24 @@ data TextFieldError
     | TextFieldUnsupportedType !FieldType
       -- ^ a column type without a text decoder
     | TextFieldInvalidUtf8 !Word16 !ByteString
-      -- ^ a string in this character set id whose bytes are not UTF-8
+      -- ^ a string in this character set id whose bytes are not UTF-8. Not
+      -- raised since 1.4.1, where such a string raises 'InvalidUtf8Text' when
+      -- its value is used; kept so that matches on it still compile.
     deriving (Show, Eq)
+
+-- | A string value, in the character set with this id, whose bytes are not
+-- UTF-8. Raised when the 'MySQLText' is evaluated, not while its row is read.
+--
+-- @since 1.4.1
+data InvalidUtf8Text = InvalidUtf8Text !Word16 !ByteString
+    deriving (Show, Eq)
+
+instance Exception InvalidUtf8Text where
+    displayException (InvalidUtf8Text charsetId _) =
+        "Database.MySQL.Protocol.MySQLValue: a string value arrived in character set id "
+            ++ show charsetId ++ ", which mysql-haskell can only decode as UTF-8 or latin1,"
+            ++ " and its bytes are not valid UTF-8. Use a UTF-8 connection charset such as"
+            ++ " defaultConnectInfoMB4's, or select the column as BINARY to get its bytes."
 
 -- | The message 'getTextField' fails with.
 describeTextFieldError :: TextFieldError -> String
@@ -393,14 +436,16 @@ decodeTextValue fieldType value bytes = case value of
     KindUnsupported -> Left (TextFieldUnsupportedType fieldType)
 {-# INLINE decodeTextValue #-}
 
--- | Checked by 'B.isValidUtf8' at once, so the lazy 'T.decodeUtf8' cannot fail
--- when the value is used. See Note [Text rows decoded once per result set].
+-- | Always 'Right': the 'MySQLText' is decoded, in one UTF-8 pass, when it is
+-- used. See Note [Text rows decoded once per result set].
 utf8Value :: Word16 -> ByteString -> Either TextFieldError MySQLValue
-utf8Value charsetId bytes =
-    if B.isValidUtf8 bytes
-    then Right (MySQLText (T.decodeUtf8 bytes))
-    else Left (TextFieldInvalidUtf8 charsetId bytes)
+utf8Value charsetId bytes = Right (lazyUtf8Text charsetId bytes)
 {-# INLINE utf8Value #-}
+
+lazyUtf8Text :: Word16 -> ByteString -> MySQLValue
+lazyUtf8Text charsetId bytes = case T.decodeUtf8' bytes of
+    Right decoded -> MySQLText decoded
+    Left _        -> throw (InvalidUtf8Text charsetId bytes)
 
 lexedValue :: FieldType -> (a -> MySQLValue) -> (ByteString -> Maybe a) -> ByteString
            -> Either TextFieldError MySQLValue
@@ -613,8 +658,8 @@ latin1Collations = [5, 8, 15, 31, 47, 48, 49, 94, 1032, 1071]
 -- UTF-8 connection charset every text column arrives as UTF-8. A connection
 -- set to another charset, as after @SET NAMES latin1@, gets that charset's
 -- bytes. latin1 is decoded here; any other charset is read as UTF-8, which
--- keeps ASCII-only values working as they always did, and fails with a
--- 'TextFieldInvalidUtf8' naming the charset on bytes that are not UTF-8,
+-- keeps ASCII-only values working as they always did. Bytes that are not
+-- UTF-8 raise an 'InvalidUtf8Text' naming the charset when the value is used,
 -- rather than return mangled text.
 
 stringColumnValue :: ColumnDef -> ByteString -> Get MySQLValue

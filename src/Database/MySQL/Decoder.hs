@@ -340,6 +340,11 @@ mysqlValue = FieldDecoder
 textMySQLValue :: ColumnKind -> ParseBytes MySQLValue
 textMySQLValue column fieldBytes = case column of
     NullColumn -> (# | MySQLNull #)
+    -- 'decodeTextValue' leaves a string's UTF-8 to be checked when the value is
+    -- used; a decoder checks while it reads the row, see the module header.
+    ValueColumn _ (KindText _) -> case utf8Field fieldBytes of
+        (# fieldError | #) -> (# fieldError | #)
+        (# | decoded #)    -> (# | MySQLText decoded #)
     ValueColumn fieldType kind -> case decodeTextValue fieldType kind fieldBytes of
         Left fieldError -> (# textFieldErrorKind fieldError | #)
         Right value     -> (# | value #)
