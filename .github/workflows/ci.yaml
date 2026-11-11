@@ -89,6 +89,7 @@ jobs:
       fail-fast: true
       matrix:
         crypton:
+          - '^>=2.2'
           - '^>=2.1'
           - '^>=2.0'
 

@@ -111,7 +111,7 @@ library
     scientific >=0.3 && <0.4,
     text >=1.1 && <2.1 || ^>=2.1,
     time >=1.5.0 && <1.12 || ^>=1.12.2 || ^>=1.14,
-    tls >=1.7.0 && <1.8 || ^>=1.8.0 || ^>=1.9.0 || ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0 || ^>=2.3.0 || ^>=2.4.0,
+    tls >=1.7.0 && <1.8 || ^>=1.8.0 || ^>=1.9.0 || ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0 || ^>=2.3.0 || ^>=2.4.0 || ^>=2.5.0,
     vector >=0.8 && <0.13 || ^>=0.13.0,
     word-compat >=0.0 && <0.1
 
@@ -128,7 +128,7 @@ library
   -- on the client's ephemeral key whenever the server picks such a group. 2.0
   -- rather than 2.1.x, as 2.0 has every fix we reach.
   build-depends:
-    crypton ^>=2.0.0 || ^>=2.1.0,
+    crypton ^>=2.0.0 || ^>=2.1.0 || ^>=2.2.0,
     ram >=0.20 && <0.23
 
   default-extensions:
