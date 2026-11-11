@@ -51,6 +51,8 @@ It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
   [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
 * MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
   [#101](https://github.com/winterland1989/mysql-haskell/pull/101)
+* Allow crypton 2.2 and tls 2.5
+  [#105](https://github.com/winterland1989/mysql-haskell/pull/105)
 * A comparison with the mariadb-haskell fork and a plan to adopt its
   features, in `docs/`
   [#99](https://github.com/winterland1989/mysql-haskell/pull/99)
