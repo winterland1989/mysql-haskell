@@ -1,18 +1,41 @@
 # Revision history for mysql-haskell
 
-## 1.4.1 -- unreleased
+## 1.4.0 -- 2026.11.11
 
-New functions only; existing code is unaffected. `Database.MySQL.MariaDB`
-connects asking a MariaDB server for capabilities only MariaDB has and says
-which ones the server agreed to. Extended column metadata names JSON, UUID,
-INET6 and geometry columns through `prepareStmtMetadata`, and `executeBulk`
-runs a prepared statement for many parameter rows in one round trip, several
-times faster than `executeMany`. Connections that ask for nothing, and every
-connection to MySQL, send the same handshake as before.
+Fixes for MySQL and MariaDB alike, found comparing mysql-haskell with the
+mariadb-haskell fork. A text query no longer loses a row whose first value is
+16 MiB or longer; insert IDs above 2^63 come back intact; a `?` inside a quoted
+string or a comment is no longer taken for a placeholder; dates such as
+`0000-00-00` round-trip instead of turning into `0000-01-01`; latin1 results
+decode; the binlog row decoder no longer drops a statement's rows events after
+its first; and the Mozilla CA bundle is installed with the library.
 
-+ A MariaDB module with capability negotiation and extended column metadata
+New in `Database.MySQL.MariaDB`: connecting with a request for capabilities
+only MariaDB has, and learning which ones the server agreed to. The first is
+extended column metadata, which names JSON, UUID, INET6 and geometry columns
+through `prepareStmtMetadata`. `executeBulk` runs a prepared statement for many
+parameter rows in one round trip, several times faster than `executeMany`.
+Connections that ask for nothing, and every connection to MySQL, send the same
+handshake as before.
+
+Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
+`MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
+cannot hold, `DecodeError` gains `DecodeUnrepresentableDate`, and
+`BinLogEventType` gains `BINLOG_UNRECOGNIZED_EVENT` and loses its `Enum`
+instance (use `binLogEventTypeCode`). A connection whose reply was interrupted,
+for example by a timeout, now refuses further commands with `AbandonedReply`
+instead of handing the rest of that reply to the next query (#10); discard it
+and reconnect. `resetStmt` with rows still unread raises `UnconsumedResultSet`,
+`withTransaction` rethrows the procedure's own exception, and
+`decodeRowBinLogEvent` raises `RowEventDecodeException` on an event that may
+hold rows it cannot decode, such as MySQL's compressed transactions, where it
+used to crash or skip it.
+
+* Fix eight defects for MySQL and MariaDB, each with a reproducer
+  [#102](https://github.com/winterland1989/mysql-haskell/pull/102)
+* A MariaDB module with capability negotiation and extended column metadata
   [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
-+ MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
+* MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
   [#101](https://github.com/winterland1989/mysql-haskell/pull/101)
 
 ## 1.3.3 -- 2026.10.07

@@ -48,7 +48,7 @@ connectDetail c cp = fmap withoutNegotiated (connectDetailExtended noExtendedCap
 -- returning those the server agreed to. Asking for none gives exactly
 -- 'connectDetail'. See Note [MariaDB extended capabilities].
 --
--- @since 1.4.1
+-- @since 1.4.0
 connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String)
                       -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectDetailExtended requested ci tlsParams =
