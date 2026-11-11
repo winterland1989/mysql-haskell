@@ -77,12 +77,12 @@ existed. A MySQL server always sets CLIENT_MYSQL, so it never sees the change.
 -- | MariaDB's capabilities above bit 31, shifted down by 32, so bit 0 here is
 -- MARIADB_CLIENT_PROGRESS. See Note [MariaDB extended capabilities].
 --
--- @since 1.4.1
+-- @since 1.4.0
 newtype ExtendedCapabilities = ExtendedCapabilities Word32 deriving (Show, Eq)
 
 -- | What every connection sent before extended capabilities existed.
 --
--- @since 1.4.1
+-- @since 1.4.0
 noExtendedCapabilities :: ExtendedCapabilities
 noExtendedCapabilities = ExtendedCapabilities 0
 
@@ -90,7 +90,7 @@ noExtendedCapabilities = ExtendedCapabilities 0
 -- that the server offered, or none when the server is not a MariaDB server
 -- reading them.
 --
--- @since 1.4.1
+-- @since 1.4.0
 negotiateExtended :: ExtendedCapabilities  -- ^ requested by the client
                   -> Greeting
                   -> ExtendedCapabilities  -- ^ offered in that greeting
@@ -138,7 +138,7 @@ getGreeting = fst <$> getGreetingExtended
 -- | 'getGreeting' together with the extended capabilities a MariaDB server
 -- offers; MySQL servers send zeroes there.
 --
--- @since 1.4.1
+-- @since 1.4.0
 getGreetingExtended :: Get (Greeting, ExtendedCapabilities)
 getGreetingExtended = do
     pv <- getWord8
@@ -196,7 +196,7 @@ putAuth = putAuthExtended noExtendedCapabilities
 -- | 'putAuth' carrying negotiated extended capabilities; 'authCaps' must then
 -- leave CLIENT_MYSQL out, see 'clientCapFor'.
 --
--- @since 1.4.1
+-- @since 1.4.0
 putAuthExtended :: ExtendedCapabilities -> Auth -> Put
 putAuthExtended (ExtendedCapabilities extended) (Auth cap m c n p s plugin) = do
     putWord32le cap
@@ -231,7 +231,7 @@ putSSLRequest = putSSLRequestExtended noExtendedCapabilities
 -- | 'putSSLRequest' carrying negotiated extended capabilities. MariaDB reads
 -- them from the SSL request too, before the TLS handshake.
 --
--- @since 1.4.1
+-- @since 1.4.0
 putSSLRequestExtended :: ExtendedCapabilities -> SSLRequest -> Put
 putSSLRequestExtended (ExtendedCapabilities extended) (SSLRequest cap m c) = do
     putWord32le cap
@@ -261,7 +261,7 @@ clientCap =  CLIENT_LONG_PASSWORD
 
 -- | 'clientCap' for a connection using these extended capabilities.
 --
--- @since 1.4.1
+-- @since 1.4.0
 clientCapFor :: ExtendedCapabilities -> Word32
 clientCapFor negotiated =
     if negotiated == noExtendedCapabilities
@@ -281,7 +281,7 @@ sslRequest = sslRequestFor noExtendedCapabilities
 -- | 'sslRequest' for a connection using these extended capabilities; encode
 -- it with 'putSSLRequestExtended'.
 --
--- @since 1.4.1
+-- @since 1.4.0
 sslRequestFor :: ExtendedCapabilities -> Word8 -> SSLRequest
 sslRequestFor negotiated charset =
     SSLRequest (clientCapFor negotiated .|. CLIENT_SSL) clientMaxPacketSize charset

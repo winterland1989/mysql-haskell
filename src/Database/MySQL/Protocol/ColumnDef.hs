@@ -50,7 +50,7 @@ getField = fst <$> getFieldExtended
 -- | 'getField' together with the raw MariaDB extended metadata, empty when the
 -- server sent none. See Note [Extended column metadata].
 --
--- @since 1.4.1
+-- @since 1.4.0
 getFieldExtended :: Get (ColumnDef, ByteString)
 getFieldExtended = do
     skipN 4                         -- const "def"

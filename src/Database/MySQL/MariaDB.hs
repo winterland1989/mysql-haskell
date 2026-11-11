@@ -16,7 +16,7 @@ is not an error: the connection is made without it, exactly as
 was agreed. Functions that need a capability raise 'CapabilityNotNegotiated'
 when it is missing.
 
-@since 1.4.1
+@since 1.4.0
 -}
 module Database.MySQL.MariaDB
     ( -- * Capabilities
