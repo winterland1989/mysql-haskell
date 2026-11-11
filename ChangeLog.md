@@ -7,6 +7,7 @@ connection's session to that of a new one without reconnecting, so a pool can
 hand it to its next user (MySQL 5.7.3 or MariaDB 10.2.4 and newer).
 
 * Reset a pooled connection's session without reconnecting
+  [#109](https://github.com/winterland1989/mysql-haskell/pull/109)
 
 ## 1.4.1 -- 2026.11.11
 
