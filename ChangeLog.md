@@ -24,7 +24,7 @@ hold rows it cannot decode, such as MySQL's compressed transactions, where it
 used to crash or skip it.
 
 * Fix eight defects for MySQL and MariaDB, each with a reproducer
-  [#PRNUMBER](https://github.com/winterland1989/mysql-haskell/pull/PRNUMBER)
+  [#102](https://github.com/winterland1989/mysql-haskell/pull/102)
 
 ## 1.3.3 -- 2026.10.07
 
