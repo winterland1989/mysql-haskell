@@ -2,11 +2,16 @@
 
 ## 1.4.2 -- unreleased
 
-MariaDB accounts identified via ed25519 can log in, and `makeClientParams'` now
-sends its client certificate, so a `REQUIRE X509` account can log in; a
-certificate the server cannot verify now fails the TLS handshake, where 1.4.1
-never sent it. No API change.
+No API change beyond new functions and one new exception. MariaDB accounts
+identified via ed25519 can log in, and the binlog dump checks the CRC32
+checksum of every event when the server's `binlog_checksum` is `CRC32`, the
+default, raising `BinLogChecksumMismatch` on a corrupted event it used to
+decode as if it were intact. `makeClientParams'` now sends its client
+certificate, so a `REQUIRE X509` account can log in; a certificate the server
+cannot verify now fails the TLS handshake, where 1.4.1 never sent it.
 
+* Binlog event checksums checked instead of skipped
+  [#112](https://github.com/winterland1989/mysql-haskell/pull/112)
 * MariaDB accounts identified via ed25519 can log in
   [#111](https://github.com/winterland1989/mysql-haskell/pull/111)
 * `makeClientParams'` sends its client certificate, so an account created
