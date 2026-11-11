@@ -5,7 +5,9 @@
 Security fixes, no API change: a text or bytes parameter of `query`,
 `execute` or `executeMany` can no longer end its string literal under
 `NO_BACKSLASH_ESCAPES`, and `makeClientParams'` now sends its client
-certificate, so a `REQUIRE X509` account can log in. `escapeText` and
+certificate, so a `REQUIRE X509` account can log in (a certificate the server
+cannot verify now fails the TLS handshake, where 1.4.1 never sent it).
+`escapeText` and
 `escapeBytes` now double a quote and leave control characters as they are, so
 their output is only safe between single quotes, and under
 `NO_BACKSLASH_ESCAPES` a backslash in a parameter is still stored twice. On a
