@@ -24,14 +24,11 @@ and a function that needs the missing capability raises
 module Database.MariaDB
     ( -- * Capabilities
       MariaDBCapability(..)
-    , ServerFlavour(..)
-    , serverFlavour
       -- * Connections
     , MariaDBConn
     , mysqlConnection
     , mariadbGreeting
     , mariadbCapabilities
-    , hasCapability
     , connectMariaDB
     , connectMariaDBUnixSocket
     , connectMariaDBTLS
@@ -39,7 +36,6 @@ module Database.MariaDB
     , ColumnMetadata(..)
     , ExtendedMetadata(..)
     , prepareStmtMetadata
-    , getColumnMetadata
       -- * Bulk execution
     , BulkParam(..)
     , executeBulk
@@ -91,17 +87,6 @@ negotiatedCapabilities :: ExtendedCapabilities -> [MariaDBCapability]
 negotiatedCapabilities (ExtendedCapabilities bits) =
     filter (\capability -> bits .&. capabilityBit capability /= 0) [minBound .. maxBound]
 
--- | Which server answered.
-data ServerFlavour = MySQLServer | MariaDBServer deriving (Show, Eq)
-
--- | 'MariaDBServer' when the greeting announces MariaDB's protocol extensions,
--- which MariaDB 10.2 and later do; MySQL and older MariaDB count as
--- 'MySQLServer'. The version string is not consulted: @mariadbd --version@
--- can set it to anything, @8.0.36@ included.
-serverFlavour :: Greeting -> ServerFlavour
-serverFlavour greeting =
-    if offersExtendedCapabilities greeting then MariaDBServer else MySQLServer
-
 -- | A connection together with the MariaDB capabilities it negotiated.
 data MariaDBConn = MariaDBConn
     { mysqlConnection     :: !MySQLConn
@@ -134,10 +119,14 @@ connectMariaDBTLS :: [MariaDBCapability] -> ConnectInfo -> (Network.TLS.ClientPa
 connectMariaDBTLS requested ci tlsParams =
     TLS.connectDetailExtended (capabilityBits requested) ci tlsParams >>= mariadbConn
 
+-- | Refuses a server whose greeting does not announce MariaDB's protocol
+-- extensions, after closing the connection. The greeting's capabilities decide
+-- this, not its version string, which @mariadbd --version@ can set to anything.
 mariadbConn :: (Greeting, ExtendedCapabilities, MySQLConn) -> IO MariaDBConn
-mariadbConn (greeting, negotiated, conn) = case serverFlavour greeting of
-    MariaDBServer -> pure (MariaDBConn conn greeting (negotiatedCapabilities negotiated))
-    MySQLServer -> do
+mariadbConn (greeting, negotiated, conn) =
+    if offersExtendedCapabilities greeting
+    then pure (MariaDBConn conn greeting (negotiatedCapabilities negotiated))
+    else do
         close conn
         throwIO (NotMariaDB (greetingVersion greeting))
 
@@ -255,6 +244,19 @@ instance Exception BulkExecuteError where
 --
 -- The rows travel in one command, which the server's @max_allowed_packet@
 -- limits; split larger inputs over several calls.
+--
+-- > import Data.List.NonEmpty (NonEmpty ((:|)))
+-- >
+-- > conn <- connectMariaDB [MariaDBBulkOperations] defaultConnectInfo
+-- > let mysqlConn = mysqlConnection conn
+-- > _ <- execute_ mysqlConn "CREATE TABLE people (name VARCHAR(20), age INT DEFAULT 18)"
+-- > insert <- prepareStmt mysqlConn "INSERT INTO people (name, age) VALUES (?, ?)"
+-- > ok <- executeBulk conn insert
+-- >     (  [BulkValue (MySQLText "Ada"),   BulkValue (MySQLInt32 36)]
+-- >     :| [ [BulkValue (MySQLText "Alan"),  BulkValue MySQLNull]  -- age NULL
+-- >        , [BulkValue (MySQLText "Grace"), BulkDefault]          -- age 18
+-- >        ])
+-- > okAffectedRows ok  -- 3
 executeBulk :: MariaDBConn -> StmtID -> NonEmpty [BulkParam] -> IO OK
 executeBulk conn stid rows = do
     requireCapability MariaDBBulkOperations conn

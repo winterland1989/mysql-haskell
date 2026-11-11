@@ -10,7 +10,6 @@ import qualified CABundle
 import qualified CachingSha2
 import qualified FloatingPoint
 import qualified MariaDBNegotiation
-import           Database.MariaDB (serverFlavour)
 import qualified LargeRows
 import qualified Latin1Results
 import qualified PlaceholderLiterals
@@ -46,7 +45,7 @@ main = do
         [ MysqlTests.tests
         , MultipleResults.tests
         , RowDecoderQueries.tests
-        , MariaDBNegotiation.tests (serverFlavour greet)
+        , MariaDBNegotiation.tests greet
         , UnsignedInsertId.tests
         , BinLogRowEvents.tests
         , CABundle.tests

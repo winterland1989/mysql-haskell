@@ -13,18 +13,16 @@ import           Test.Tasty.HUnit
 testConnectInfo :: ConnectInfo
 testConnectInfo = defaultConnectInfo {ciUser = "testMySQLHaskell", ciDatabase = "testMySQLHaskell"}
 
--- | Runs on both servers: a MariaDB server negotiates what it offers, and a
--- MySQL server is refused.
-tests :: ServerFlavour -> TestTree
-tests flavour = testGroup "MariaDB capability negotiation" $ case flavour of
-    MariaDBServer -> mariadbTests
-    MySQLServer   -> mysqlTests
+-- | Runs on both servers, given the greeting of a plain connection: a MariaDB
+-- server negotiates what it offers, and a MySQL server is refused.
+tests :: Greeting -> TestTree
+tests greeting = testGroup "MariaDB capability negotiation" $
+    if offersExtendedCapabilities greeting then mariadbTests else mysqlTests
 
 mariadbTests :: [TestTree]
 mariadbTests =
     [ testCase "extended metadata is negotiated, and the MySQL functions work on it" $ do
         conn <- connectMariaDB [MariaDBExtendedMetadata] testConnectInfo
-        serverFlavour (mariadbGreeting conn) @?= MariaDBServer
         mariadbCapabilities conn @?= [MariaDBExtendedMetadata]
         (_, rows) <- query_ (mysqlConnection conn) "SELECT 'probe'"
         values <- Stream.toList rows
