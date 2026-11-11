@@ -2,8 +2,16 @@
 
 ## 1.4.2 -- unreleased
 
+MariaDB accounts identified via ed25519 can log in, and `makeClientParams'` now
+sends its client certificate, so a `REQUIRE X509` account can log in; a
+certificate the server cannot verify now fails the TLS handshake, where 1.4.1
+never sent it. No API change.
+
 * MariaDB accounts identified via ed25519 can log in
   [#111](https://github.com/winterland1989/mysql-haskell/pull/111)
+* `makeClientParams'` sends its client certificate, so an account created
+  `REQUIRE X509` can log in through `Database.MySQL.TLS`
+  [#108](https://github.com/winterland1989/mysql-haskell/pull/108)
 
 ## 1.4.1 -- 2026.11.11
 
