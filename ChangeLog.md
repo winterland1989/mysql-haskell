@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 1.4.2 -- unreleased
+
+* MariaDB accounts identified via ed25519 can log in
+  [#111](https://github.com/winterland1989/mysql-haskell/pull/111)
+
 ## 1.4.1 -- 2026.11.11
 
 Faster decoding. No type changes beyond one new exception, but one change of
