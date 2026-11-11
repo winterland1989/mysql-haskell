@@ -6,6 +6,7 @@ import Test.Tasty (defaultMain, testGroup)
 import qualified JSON
 import qualified Sha1Scramble
 import qualified Sha256Scramble
+import qualified Ed25519Scramble
 import qualified StringLiterals
 import qualified Word24
 import qualified TCPStreams
@@ -16,6 +17,7 @@ import qualified DirectDecoding
 import qualified DecoderRoundtrip
 import qualified FloatingPointText
 import qualified HandshakeGolden
+import qualified BinLogChecksum
 import qualified BinLogEventCodes
 import qualified PacketClassification
 import qualified Placeholders
@@ -39,6 +41,7 @@ main = do
          ]
       , Sha1Scramble.tests
       , Sha256Scramble.tests
+      , Ed25519Scramble.tests
       , BoundsCheck.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
@@ -52,4 +55,5 @@ main = do
       , ZeroDates.tests
       , ResultCharsets.tests
       , BinLogEventCodes.tests
+      , BinLogChecksum.tests
       ]
