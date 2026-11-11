@@ -18,6 +18,8 @@ extra-source-files:
   README.md
   test/cert/ca-key.pem
   test/cert/ca.pem
+  test/cert/client-cert.pem
+  test/cert/client-key.pem
   test/cert/server-cert.pem
   test/cert/server-key.pem
   test/cert/server-req.pem
@@ -153,6 +155,7 @@ test-suite test
     BoundsCheck
     DecoderRoundtrip
     DirectDecoding
+    Ed25519Scramble
     FieldRoundtrip
     FloatingPointText
     HandshakeGolden
@@ -178,6 +181,7 @@ test-suite test
     base16-bytestring >=1.0 && <2.0,
     binary >=0.8,
     bytestring >=0.10,
+    crypton,
     deepseq,
     directory < 2.0,
     filepath < 2.0,
@@ -186,6 +190,7 @@ test-suite test
     network,
     QuickCheck >=2.7 && <3.0,
     quickcheck-instances < 1.0,
+    ram,
     scientific >=0.3.0,
     tasty >=0.11 && <2.0,
     tasty-expected-failure < 1.0,
@@ -231,6 +236,7 @@ test-suite integration
     SelectOne
     TestUser
     TextRow
+    TLSClientCertificate
     TLSConnection
     TextRowNew
     TypedValue
@@ -243,6 +249,7 @@ test-suite integration
     base,
     bytestring >=0.10,
     directory,
+    filepath,
     io-streams,
     mysql-haskell,
     scientific,
@@ -264,6 +271,7 @@ test-suite integration-mariadb
   main-is:            IntegrationMariaDB.hs
   other-modules:
     MariaDBBulk
+    MariaDBEd25519
     MariaDBExtendedMetadata
     QueryApi
     TypedValue
