@@ -18,6 +18,8 @@ extra-source-files:
   README.md
   test/cert/ca-key.pem
   test/cert/ca.pem
+  test/cert/client-cert.pem
+  test/cert/client-key.pem
   test/cert/server-cert.pem
   test/cert/server-key.pem
   test/cert/server-req.pem
@@ -228,6 +230,7 @@ test-suite integration
     SelectOne
     TestUser
     TextRow
+    TLSClientCertificate
     TLSConnection
     TextRowNew
     TypedValue
@@ -240,6 +243,7 @@ test-suite integration
     base,
     bytestring >=0.10,
     directory,
+    filepath,
     io-streams,
     mysql-haskell,
     scientific,
