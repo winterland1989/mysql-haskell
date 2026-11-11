@@ -25,6 +25,7 @@ import qualified RoundtripBit
 import qualified RoundtripYear
 import qualified RowDecoderQueries
 import qualified SelectOne
+import qualified TLSClientCertificate
 import qualified TLSConnection
 import qualified UnixSocket
 
@@ -56,6 +57,7 @@ main = do
         ]
         -- binlog_transaction_compression is MySQL 8.0.20+ only.
         ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]
+        ++ maybe [] (pure . TLSClientCertificate.tests) mTlsCaPath
         ++ map (apiTests isMySql80 mSockPath mTlsCaPath) queryApis
         -- The typed decoders give a date a 'Day' cannot hold as an error instead
         -- of a value to write back, which 'ZeroDateRoundtrip.typedDecoderTests' checks.

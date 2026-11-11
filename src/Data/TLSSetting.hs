@@ -81,7 +81,9 @@ makeClientParams tca = do
 
 -- | make a simple tls 'TLS.ClientParams' that will validate server and use tls connection
 -- while providing client's own certificate as well. suitable for connecting server which
--- validate clients.
+-- validate clients, such as a MySQL account created with @REQUIRE X509@.
+--
+-- The certificate is sent to every server that asks for one.
 --
 -- Also only accept v3 certificate.
 --
@@ -96,14 +98,23 @@ makeClientParams' pub certs priv tca = do
     p <- makeClientParams tca
     c <- TLS.credentialLoadX509Chain pub certs priv
     case c of
-        Right c' ->
+        Right credential ->
             return p
-                {   TLS.clientShared = (TLS.clientShared p)
-                    {
-                        TLS.sharedCredentials = TLS.Credentials [c']
+                {   TLS.clientHooks = (TLS.clientHooks p)
+                    {   TLS.onCertificateRequest = answerCertificateRequest credential
                     }
                 }
         Left err -> error err
+
+-- | Answers every certificate request with the client's credential.
+--
+-- Decision: send it whatever certificate types and issuers the server lists,
+-- rather than send none on a mismatch, so a credential the server cannot
+-- accept fails the handshake instead of failing the login as a vaguer access
+-- denied. A client must answer through this hook: tls reads
+-- 'TLS.sharedCredentials' on servers only.
+answerCertificateRequest :: TLS.Credential -> request -> IO (Maybe TLS.Credential)
+answerCertificateRequest credential _request = pure (Just credential)
 
 -- | make a simple tls 'TLS.ServerParams' without validating client's certificate.
 --

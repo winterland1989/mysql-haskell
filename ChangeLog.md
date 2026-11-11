@@ -12,6 +12,9 @@ quotes.
 
 * Parameters escaped safely under `NO_BACKSLASH_ESCAPES`
   [#110](https://github.com/winterland1989/mysql-haskell/pull/110)
+* `makeClientParams'` sends its client certificate, so an account created
+  `REQUIRE X509` can log in through `Database.MySQL.TLS`
+  [#108](https://github.com/winterland1989/mysql-haskell/pull/108)
 
 ## 1.4.1 -- 2026.11.11
 
