@@ -14,6 +14,7 @@ import qualified TextRowDecoding
 import qualified DirectDecoding
 import qualified DecoderRoundtrip
 import qualified FloatingPointText
+import qualified HandshakeGolden
 import qualified BinLogEventCodes
 import qualified PacketClassification
 import qualified Placeholders
@@ -43,6 +44,7 @@ main = do
       , DirectDecoding.tests
       , DecoderRoundtrip.tests
       , FloatingPointText.tests
+      , HandshakeGolden.tests
       , PacketClassification.tests
       , Placeholders.tests
       , ZeroDates.tests

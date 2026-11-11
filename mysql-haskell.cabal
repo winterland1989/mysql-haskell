@@ -74,6 +74,7 @@ library
     Database.MySQL.Connection
     Database.MySQL.Decoder
     Database.MySQL.Field
+    Database.MySQL.MariaDB
     Database.MySQL.Protocol.Auth
     Database.MySQL.Protocol.ColumnDef
     Database.MySQL.Protocol.Command
@@ -150,6 +151,7 @@ test-suite test
     DirectDecoding
     FieldRoundtrip
     FloatingPointText
+    HandshakeGolden
     JSON
     PacketClassification
     Placeholders
@@ -212,6 +214,7 @@ test-suite integration
     FloatingPoint
     LargeRows
     Latin1Results
+    MariaDBNegotiation
     MultipleResults
     MysqlTests
     PlaceholderLiterals
@@ -242,6 +245,33 @@ test-suite integration
     tasty-hunit < 1.0,
     text,
     time,
+    vector
+
+  default-extensions:
+    MultiWayIf
+    OverloadedStrings
+
+  ghc-options:        -threaded
+  default-language:   Haskell2010
+
+test-suite integration-mariadb
+  type:               exitcode-stdio-1.0
+  main-is:            IntegrationMariaDB.hs
+  other-modules:
+    MariaDBExtendedMetadata
+    QueryApi
+    TypedValue
+    UnixSocket
+
+  hs-source-dirs:     test
+  build-depends:
+    base,
+    bytestring >=0.10,
+    directory,
+    io-streams,
+    mysql-haskell,
+    tasty >=0.11 && <2.0,
+    tasty-hunit < 1.0,
     vector
 
   default-extensions:

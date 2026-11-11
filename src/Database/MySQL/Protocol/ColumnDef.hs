@@ -22,6 +22,7 @@ import           Data.Binary.Parser
 import           Data.Binary.Put
 import           Data.Bits                      ((.&.))
 import           Data.ByteString                (ByteString)
+import qualified Data.ByteString                as B
 import           Database.MySQL.Protocol.Packet
 
 --------------------------------------------------------------------------------
@@ -43,21 +44,63 @@ data ColumnDef = ColumnDef
     } deriving (Show, Eq)
 
 getField :: Get ColumnDef
-getField = ColumnDef
-        <$> (skipN 4                 -- const "def"
-         *> getLenEncBytes)         -- db
-        <*> getLenEncBytes          -- table
-        <*> getLenEncBytes          -- origTable
-        <*> getLenEncBytes          -- name
-        <*> getLenEncBytes          -- origName
-        <*  skipN 1                  -- const 0x0c
-        <*> getWord16le             -- charset
+getField = fst <$> getFieldExtended
+{-# INLINE getField #-}
+
+-- | 'getField' together with the raw MariaDB extended metadata, empty when the
+-- server sent none. See Note [Extended column metadata].
+--
+-- @since 1.4.0
+getFieldExtended :: Get (ColumnDef, ByteString)
+getFieldExtended = do
+    skipN 4                         -- const "def"
+    db        <- getLenEncBytes
+    table     <- getLenEncBytes
+    origTable <- getLenEncBytes
+    name      <- getLenEncBytes
+    origName  <- getLenEncBytes
+    extended  <- getExtendedMetadataBlock
+    skipN 1                         -- const 0x0c
+    column <- ColumnDef db table origTable name origName
+        <$> getWord16le             -- charset
         <*> getWord32le             -- length
         <*> getFieldType            -- type
         <*> getWord16le             -- flags
         <*> getWord8                -- decimals
-        <* skipN 2                   -- const 0x00 0x00
-{-# INLINE getField #-}
+    skipN 2                         -- const 0x00 0x00
+    pure (column, extended)
+{-# INLINE getFieldExtended #-}
+
+{- Note [Extended column metadata]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A MariaDB connection that negotiated MARIADB_CLIENT_EXTENDED_METADATA gets a
+length-encoded string between the column names and the fixed fields, holding
+type names such as "json" or "uuid". The connection does not record what it
+negotiated (MySQLConn's fields are public), so the parser recognises the block
+from the packet instead: without it, the 0x0c that starts the fixed fields is
+followed by exactly 12 bytes, which is how both MySQL and MariaDB end every
+column definition of a result set or a prepared statement. A block of 12 bytes
+also starts with 0x0c, but then 25 bytes follow. Column definitions from the
+deprecated COM_FIELD_LIST carry default values after the fixed fields; this
+library never sends that command.
+-}
+
+-- Decision: detect the block from the packet length rather than carry the
+-- negotiated capabilities to every parser. Carrying them needs a new field in
+-- MySQLConn, whose constructor callers pattern match on, and threads a flag
+-- through each query function; the length test changes nothing for
+-- connections that did not negotiate the block.
+getExtendedMetadataBlock :: Get ByteString
+getExtendedMetadataBlock = do
+    fixedFieldsNext <- lookAhead startsFixedFields
+    if fixedFieldsNext then pure B.empty else getLenEncBytes
+
+startsFixedFields :: Get Bool
+startsFixedFields = do
+    marker <- getWord8
+    if marker == 0x0c
+    then skipN 12 *> isEmpty
+    else pure False
 
 putField :: ColumnDef -> Put
 putField (ColumnDef db tbl otbl name oname charset len typ flags dec) = do

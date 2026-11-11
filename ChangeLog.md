@@ -16,6 +16,12 @@ and the Mozilla CA bundle is installed with the library. `query_` and
 errors through `queryRows_`, `queryRows` and `queryStmtRows`, or by column
 number through `queryRawRows_` and `queryStmtRawRows`.
 
+New in `Database.MySQL.MariaDB`: connecting with a request for capabilities
+only MariaDB has, and learning which ones the server agreed to. The first is
+extended column metadata, which names JSON, UUID, INET6 and geometry columns
+through `prepareStmtMetadata`. Connections that ask for nothing, and every
+connection to MySQL, send the same handshake as before.
+
 Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
 `MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
 cannot hold, `DecodeError` gains `DecodeUnrepresentableDate`, and
@@ -39,6 +45,8 @@ It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
 * Faster row decoding, decoders straight into Haskell values, and FLOAT and
   DOUBLE in exponent form read correctly
   [#98](https://github.com/winterland1989/mysql-haskell/pull/98)
+* A MariaDB module with capability negotiation and extended column metadata
+  [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
 * A comparison with the mariadb-haskell fork and a plan to adopt its
   features, in `docs/`
   [#99](https://github.com/winterland1989/mysql-haskell/pull/99)
