@@ -1,12 +1,13 @@
 module RoundtripBit (tests) where
 
 import Database.MySQL.Base
+import QueryApi
 import qualified System.IO.Streams as Stream
 import Test.Tasty
 import Test.Tasty.HUnit
 
-tests :: TestTree
-tests = testCaseSteps "roundtrip MySQLBit" $ \step -> do
+tests :: QueryApi -> TestTree
+tests api = testCaseSteps "roundtrip MySQLBit" $ \step -> do
     (_, c) <- connectDetail defaultConnectInfo
         { ciUser = "testMySQLHaskell"
         , ciDatabase = "testMySQLHaskell"
@@ -22,7 +23,7 @@ tests = testCaseSteps "roundtrip MySQLBit" $ \step -> do
     let bitVal = 43744 -- 0b1010101011100000
     executeStmt c updStmt [MySQLBit bitVal]
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v] <- Stream.read is
     Stream.skipToEof is
     assertEqual "MySQLBit roundtrips through BIT(16)" (MySQLBit bitVal) v
@@ -30,7 +31,7 @@ tests = testCaseSteps "roundtrip MySQLBit" $ \step -> do
     step "roundtrip MySQLBit zero"
     executeStmt c updStmt [MySQLBit 0]
 
-    (_, is2) <- queryStmt c selStmt []
+    (_, is2) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v2] <- Stream.read is2
     Stream.skipToEof is2
     assertEqual "MySQLBit 0 roundtrips" (MySQLBit 0) v2
@@ -38,7 +39,7 @@ tests = testCaseSteps "roundtrip MySQLBit" $ \step -> do
     step "roundtrip MySQLBit max for BIT(16)"
     executeStmt c updStmt [MySQLBit 65535]
 
-    (_, is3) <- queryStmt c selStmt []
+    (_, is3) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v3] <- Stream.read is3
     Stream.skipToEof is3
     assertEqual "MySQLBit 65535 roundtrips" (MySQLBit 65535) v3

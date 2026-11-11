@@ -6,13 +6,18 @@ module TextRow where
 import           Data.Time.Calendar  (fromGregorian)
 import           Data.Time.LocalTime (LocalTime (..), TimeOfDay (..))
 import           Database.MySQL.Base
+import           QueryApi
 import qualified System.IO.Streams   as Stream
 import           Test.Tasty.HUnit
 import qualified Data.Vector as V
 
-tests :: MySQLConn -> Assertion
-tests c = do
-    (f, is1) <- query_ c "SELECT * FROM test"
+-- | The columns of the @test@ table.
+testColumns :: ColumnCount
+testColumns = ColumnCount 30
+
+tests :: QueryApi -> MySQLConn -> Assertion
+tests api c = do
+    (f, is1) <- apiQuery_ api testColumns c "SELECT * FROM test"
 
     assertEqual "decode Field types" (columnType <$> f)
         [ mySQLTypeLong
@@ -116,7 +121,7 @@ tests c = do
                 \__enum       = 'foo'                                  ,\
                 \__set        = 'foo,bar' WHERE __id=0"
 
-    (_, is2) <- query_ c "SELECT * FROM test"
+    (_, is2) <- apiQuery_ api testColumns c "SELECT * FROM test"
     Just v2 <- Stream.read is2
 
     assertEqual "decode text protocol" v2
@@ -154,7 +159,7 @@ tests c = do
 
     Stream.skipToEof is2
 
-    (_, is3) <- queryVector_ c "SELECT * FROM test"
+    (_, is3) <- apiQueryVector_ api testColumns c "SELECT * FROM test"
     Just v3 <- Stream.read is3
     Stream.skipToEof is3
 
@@ -221,7 +226,7 @@ tests c = do
                 , MySQLText "foo,bar"
                 ]
 
-    (_, is4) <- query_ c "SELECT * FROM test"
+    (_, is4) <- apiQuery_ api testColumns c "SELECT * FROM test"
     Just v4 <- Stream.read is4
 
     assertEqual "roundtrip text protocol" v4
@@ -265,7 +270,7 @@ tests c = do
         \__double     = null         ,\
         \__text = null WHERE __id=0"
 
-    (_, is5) <- query_ c "SELECT * FROM test"
+    (_, is5) <- apiQuery_ api testColumns c "SELECT * FROM test"
     Just v5 <- Stream.read is5
 
     assertEqual "decode text protocol with null" v5
@@ -309,7 +314,7 @@ tests c = do
         \__timestamp = ? WHERE __id=0"
         [MySQLNull, MySQLNull, MySQLNull]
 
-    (_, is6) <- query_ c "SELECT * FROM test"
+    (_, is6) <- apiQuery_ api testColumns c "SELECT * FROM test"
     Just v6 <- Stream.read is6
 
     assertEqual "roundtrip text protocol with null" v6
@@ -351,7 +356,7 @@ tests c = do
         \__time       = '199:59:59'     ,\
         \__year       = 0  WHERE __id=0"
 
-    (_, is7) <- query_ c "SELECT __time, __year FROM test"
+    (_, is7) <- apiQuery_ api (ColumnCount 2) c "SELECT __time, __year FROM test"
     Just v7 <- Stream.read is7
 
     assertEqual "decode text protocol 2" v7
@@ -365,7 +370,7 @@ tests c = do
         \__text       = ''     ,\
         \__blob       = ''  WHERE __id=0"
 
-    (_, is8) <- query_ c "SELECT __text, __blob FROM test"
+    (_, is8) <- apiQuery_ api (ColumnCount 2) c "SELECT __text, __blob FROM test"
     Just v8 <- Stream.read is8
 
     assertEqual "decode text protocol 3" v8
@@ -380,7 +385,7 @@ tests c = do
         \__year       = ?  WHERE __id=0"
         [ MySQLTime 0 (TimeOfDay 199 59 59), MySQLYear 0]
 
-    (_, is9) <- query_ c "SELECT __time, __year FROM test"
+    (_, is9) <- apiQuery_ api (ColumnCount 2) c "SELECT __time, __year FROM test"
     Just v9 <- Stream.read is9
 
     assertEqual "roundtrip text protocol 2" v9

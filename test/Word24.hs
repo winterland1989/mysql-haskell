@@ -33,12 +33,12 @@ prop_enum2 :: Word24 -> Property
 prop_enum4 :: Word24 -> Property
 prop_enum5 :: Word24 -> Word8 -> Bool
 prop_enum6 :: Word24 -> Word24 -> Bool
-prop_quot :: Word24 -> Word24 -> Bool
-prop_rem :: Word24 -> Word24 -> Bool
-prop_div :: Word24 -> Word24 -> Bool
-prop_mod :: Word24 -> Word24 -> Bool
-prop_quotrem :: Word24 -> Word24 -> Bool
-prop_divmod :: Word24 -> Word24 -> Bool
+prop_quot :: Word24 -> Word24 -> Property
+prop_rem :: Word24 -> Word24 -> Property
+prop_div :: Word24 -> Word24 -> Property
+prop_mod :: Word24 -> Word24 -> Property
+prop_quotrem :: Word24 -> Word24 -> Property
+prop_divmod :: Word24 -> Word24 -> Property
 prop_and :: Word16 -> Word16 -> Bool
 prop_or :: Word16 -> Word16 -> Bool
 prop_xor :: Word16 -> Word16 -> Bool
@@ -71,10 +71,15 @@ prop_enum3I :: Int -> Bool
 prop_enum4I :: Int24 -> Property
 prop_enum5I :: Int24 -> Word8 -> Bool
 prop_enum6I :: Int24 -> Int24 -> Bool
-prop_quotI :: Int24 -> Int24 -> Bool
-prop_remI :: Int24 -> Int24 -> Bool
-prop_divI :: Int24 -> Int24 -> Bool
-prop_modI :: Int24 -> Int24 -> Bool
+-- | Int24 division throws for a zero divisor and, like 'Int' quot, for
+-- minBound divided by -1 (Data.Int.Int24 raises overflowError there).
+int24DivisionDefined :: Int24 -> Int24 -> Bool
+int24DivisionDefined a b = b /= 0 && not (a == minBound && b == (-1))
+
+prop_quotI :: Int24 -> Int24 -> Property
+prop_remI :: Int24 -> Int24 -> Property
+prop_divI :: Int24 -> Int24 -> Property
+prop_modI :: Int24 -> Int24 -> Property
 
 -- ----------------------------------------
 -- Word24 Properties
@@ -124,22 +129,22 @@ prop_enum5 a b = let b' = fromIntegral b in
 prop_enum6 a b = take 2 (enumFromThen a b) == [a,b]
 
 -- Word24 Integral properties
-prop_quot a b =
+prop_quot a b = b /= 0 ==>
   quot a b == fromIntegral (quot (fromIntegral a :: Word32) (fromIntegral b :: Word32))
 
-prop_rem a b =
+prop_rem a b = b /= 0 ==>
   rem a b == fromIntegral (rem (fromIntegral a :: Word32) (fromIntegral b :: Word32))
 
-prop_div a b =
+prop_div a b = b /= 0 ==>
   div a b == fromIntegral (div (fromIntegral a :: Word32) (fromIntegral b :: Word32))
 
-prop_mod a b =
+prop_mod a b = b /= 0 ==>
   mod a b == fromIntegral (mod (fromIntegral a :: Word32) (fromIntegral b :: Word32))
 
-prop_quotrem a b = let (j, k) = quotRem a b in
+prop_quotrem a b = b /= 0 ==> let (j, k) = quotRem a b in
   a == (b * j) + k
 
-prop_divmod a b =
+prop_divmod a b = b /= 0 ==>
   divMod a b == (div a b, mod a b)
 
 -- binary Word properties
@@ -246,24 +251,24 @@ prop_enum5I a b = let b' = fromIntegral b in
 prop_enum6I a b = take 2 (enumFromThen a b) == [a,b]
 
 -- Int24 Integral properties
-prop_quotI a b =
+prop_quotI a b = int24DivisionDefined a b ==>
   quot a b == fromIntegral (quot (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_remI a b =
+prop_remI a b = int24DivisionDefined a b ==>
   rem a b == fromIntegral (rem (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_divI a b =
+prop_divI a b = int24DivisionDefined a b ==>
   div a b == fromIntegral (div (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_modI a b =
+prop_modI a b = int24DivisionDefined a b ==>
   mod a b == fromIntegral (mod (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_quotremI :: Int24 -> Int24 -> Bool
-prop_quotremI a b = let (j, k) = quotRem a b in
+prop_quotremI :: Int24 -> Int24 -> Property
+prop_quotremI a b = int24DivisionDefined a b ==> let (j, k) = quotRem a b in
   a == (b * j) + k
 
-prop_divmodI :: Int24 -> Int24 -> Bool
-prop_divmodI a b =
+prop_divmodI :: Int24 -> Int24 -> Property
+prop_divmodI a b = int24DivisionDefined a b ==>
   divMod a b == (div a b, mod a b)
 
 

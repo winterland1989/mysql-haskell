@@ -79,6 +79,20 @@ It's recommanded to use prepared statement to improve query speed:
 
 If you want to do batch inserting/deleting/updating, you can use `executeMany` to save considerable time.
 
+To decode rows straight into your own types, skipping `MySQLValue`, give `queryRows_`, `queryRows` or `queryStmtRows` a decoder from `Database.MySQL.Decoder`. Each column is checked against its decoder once, before the first row:
+
+```haskell
+import qualified Database.MySQL.Decoder as Decode
+
+data Person = Person { name :: Text, age :: Word32 }
+
+person :: Decode.RowDecoder Person
+person = Person <$> Decode.field Decode.text <*> Decode.field Decode.word32
+
+    ...
+    (defs, people) <- queryRows_ person conn "SELECT name, person_age FROM some_table"
+```
+
 The `Database.MySQL.BinLog` module provides binlog listenning functions and row-based event decoder, following program will automatically get last binlog position, and print every row event it receives:
 
 ```haskell

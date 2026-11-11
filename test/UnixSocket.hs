@@ -4,6 +4,7 @@ module UnixSocket (tests, findSocketPath) where
 
 import qualified Data.ByteString       as B
 import           Database.MySQL.Base
+import           QueryApi
 import qualified System.IO.Streams     as Stream
 import           System.Directory      (doesFileExist)
 import           System.Environment    (lookupEnv)
@@ -36,8 +37,8 @@ findSocketPath = do
         exists <- doesFileExist p
         if exists then return (Just p) else firstExisting ps
 
-tests :: FilePath -> TestTree
-tests socketPath = testGroup "unix-socket"
+tests :: QueryApi -> FilePath -> TestTree
+tests api socketPath = testGroup "unix-socket"
     [ testCaseSteps "connectUnixSocket: SELECT 1" $ \step -> do
         step "connecting via unix socket..."
         c <- connectUnixSocket socketPath defaultConnectInfo
@@ -46,7 +47,7 @@ tests socketPath = testGroup "unix-socket"
             }
 
         step "executing SELECT 1..."
-        (_, is) <- query_ c "SELECT 1"
+        (_, is) <- apiQuery_ api (ColumnCount 1) c "SELECT 1"
         Just row <- Stream.read is
         assertBool "SELECT 1 returns 1"
             (row == [MySQLInt32 1] || row == [MySQLInt64 1])
@@ -66,7 +67,7 @@ tests socketPath = testGroup "unix-socket"
         assertBool "greeting version is not empty" (not $ B.null ver)
 
         step "executing query to verify connection..."
-        (_, is) <- query_ c "SELECT 1 + 1"
+        (_, is) <- apiQuery_ api (ColumnCount 1) c "SELECT 1 + 1"
         Just row <- Stream.read is
         assertBool "SELECT 1+1 returns 2"
             (row == [MySQLInt32 2] || row == [MySQLInt64 2])
@@ -83,7 +84,7 @@ tests socketPath = testGroup "unix-socket"
 
         step "executing prepared statement..."
         stmt <- prepareStmt c "SELECT ? + 1"
-        (_, is) <- queryStmt c stmt [MySQLInt32 41]
+        (_, is) <- apiQueryStmt api (ColumnCount 1) c stmt [MySQLInt32 41]
         Just row <- Stream.read is
         assertBool "41 + 1 = 42"
             (row == [MySQLInt32 42] || row == [MySQLInt64 42])

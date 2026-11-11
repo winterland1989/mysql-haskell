@@ -1,12 +1,13 @@
 module RoundtripYear (tests) where
 
 import Database.MySQL.Base
+import QueryApi
 import qualified System.IO.Streams as Stream
 import Test.Tasty
 import Test.Tasty.HUnit
 
-tests :: TestTree
-tests = testCaseSteps "roundtrip MySQLYear" $ \step -> do
+tests :: QueryApi -> TestTree
+tests api = testCaseSteps "roundtrip MySQLYear" $ \step -> do
     (_, c) <- connectDetail defaultConnectInfo
         { ciUser = "testMySQLHaskell"
         , ciDatabase = "testMySQLHaskell"
@@ -21,7 +22,7 @@ tests = testCaseSteps "roundtrip MySQLYear" $ \step -> do
 
     executeStmt c updStmt [MySQLYear 1999]
 
-    (_, is) <- queryStmt c selStmt []
+    (_, is) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v] <- Stream.read is
     Stream.skipToEof is
     assertEqual "MySQLYear 1999 roundtrips" (MySQLYear 1999) v
@@ -29,7 +30,7 @@ tests = testCaseSteps "roundtrip MySQLYear" $ \step -> do
     step "roundtrip MySQLYear min (1901)"
     executeStmt c updStmt [MySQLYear 1901]
 
-    (_, is2) <- queryStmt c selStmt []
+    (_, is2) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v2] <- Stream.read is2
     Stream.skipToEof is2
     assertEqual "MySQLYear 1901 roundtrips" (MySQLYear 1901) v2
@@ -37,7 +38,7 @@ tests = testCaseSteps "roundtrip MySQLYear" $ \step -> do
     step "roundtrip MySQLYear max (2155)"
     executeStmt c updStmt [MySQLYear 2155]
 
-    (_, is3) <- queryStmt c selStmt []
+    (_, is3) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v3] <- Stream.read is3
     Stream.skipToEof is3
     assertEqual "MySQLYear 2155 roundtrips" (MySQLYear 2155) v3
@@ -45,7 +46,7 @@ tests = testCaseSteps "roundtrip MySQLYear" $ \step -> do
     step "roundtrip MySQLYear zero"
     executeStmt c updStmt [MySQLYear 0]
 
-    (_, is4) <- queryStmt c selStmt []
+    (_, is4) <- apiQueryStmt api (ColumnCount 1) c selStmt []
     Just [v4] <- Stream.read is4
     Stream.skipToEof is4
     assertEqual "MySQLYear 0 roundtrips" (MySQLYear 0) v4

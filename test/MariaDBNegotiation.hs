@@ -53,9 +53,11 @@ mariadbTests =
 mysqlTests :: [TestTree]
 mysqlTests =
     [ testCase "connectMariaDB refuses a MySQL server and closes the connection" $ do
-        observer <- connect testConnectInfo
-        before <- threadsConnected observer
-        result <- try (connectMariaDB [MariaDBExtendedMetadata] testConnectInfo)
+        admin <- connect testConnectInfo
+        _ <- execute_ admin "CREATE USER IF NOT EXISTS 'mariadbRefusal'@'localhost' IDENTIFIED WITH mysql_native_password BY 'refusal'"
+        observer <- connect refusalConnectInfo
+        before <- refusalConnections observer
+        result <- try (connectMariaDB [MariaDBExtendedMetadata] refusalConnectInfo)
         case result of
             Left (NotMariaDB version) ->
                 assertBool ("refused with the server's version, got " ++ show version)
@@ -63,22 +65,30 @@ mysqlTests =
             Right conn -> do
                 close (mysqlConnection conn)
                 assertFailure "connected to a MySQL server"
-        after <- settledThreadsConnected observer before (20 :: Int)
+        after <- settledRefusalConnections observer before (20 :: Int)
         after @?= before
         close observer
+        _ <- execute_ admin "DROP USER 'mariadbRefusal'@'localhost'"
+        close admin
     ]
 
--- | The server's count of open client connections, this one included.
-threadsConnected :: MySQLConn -> IO [[MySQLValue]]
-threadsConnected conn = do
-    (_, rows) <- query_ conn "SHOW GLOBAL STATUS LIKE 'Threads_connected'"
+-- | A user only this test connects as, so concurrent tests' connections do
+-- not show up in its count.
+refusalConnectInfo :: ConnectInfo
+refusalConnectInfo = defaultConnectInfo {ciUser = "mariadbRefusal", ciPassword = "refusal", ciDatabase = ""}
+
+-- | How many connections the server has open for 'refusalConnectInfo''s user.
+-- A user sees its own threads in PROCESSLIST without the PROCESS privilege.
+refusalConnections :: MySQLConn -> IO [[MySQLValue]]
+refusalConnections conn = do
+    (_, rows) <- query_ conn "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE USER = 'mariadbRefusal'"
     Stream.toList rows
 
 -- | The server ends a connection's thread shortly after COM_QUIT, so the count
 -- may take a moment to drop back; poll for up to a second.
-settledThreadsConnected :: MySQLConn -> [[MySQLValue]] -> Int -> IO [[MySQLValue]]
-settledThreadsConnected conn expected attempts = do
-    current <- threadsConnected conn
+settledRefusalConnections :: MySQLConn -> [[MySQLValue]] -> Int -> IO [[MySQLValue]]
+settledRefusalConnections conn expected attempts = do
+    current <- refusalConnections conn
     if current == expected || attempts <= 0
         then pure current
-        else threadDelay 50000 >> settledThreadsConnected conn expected (attempts - 1)
+        else threadDelay 50000 >> settledRefusalConnections conn expected (attempts - 1)
