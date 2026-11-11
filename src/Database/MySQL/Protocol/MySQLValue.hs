@@ -302,39 +302,41 @@ stringColumnValue column bytes = case resultCharset (columnCharSet column) of
 
 -- | MySQL's latin1, which is Windows-1252 with its five unassigned bytes
 -- (0x81, 0x8D, 0x8F, 0x90, 0x9D) mapped to the C1 controls of the same number.
+-- 'T.decodeLatin1' alone is ISO-8859-1, which reads all of 0x80 to 0x9F as
+-- C1 controls, so the 27 bytes Windows-1252 assigns are remapped after it.
 decodeMySQLLatin1 :: ByteString -> Text
-decodeMySQLLatin1 = T.pack . map latin1Char . B.unpack
+decodeMySQLLatin1 = T.map windows1252Char . T.decodeLatin1
 
-latin1Char :: Word8 -> Char
-latin1Char byte = case byte of
-    0x80 -> '\x20AC'
-    0x82 -> '\x201A'
-    0x83 -> '\x0192'
-    0x84 -> '\x201E'
-    0x85 -> '\x2026'
-    0x86 -> '\x2020'
-    0x87 -> '\x2021'
-    0x88 -> '\x02C6'
-    0x89 -> '\x2030'
-    0x8A -> '\x0160'
-    0x8B -> '\x2039'
-    0x8C -> '\x0152'
-    0x8E -> '\x017D'
-    0x91 -> '\x2018'
-    0x92 -> '\x2019'
-    0x93 -> '\x201C'
-    0x94 -> '\x201D'
-    0x95 -> '\x2022'
-    0x96 -> '\x2013'
-    0x97 -> '\x2014'
-    0x98 -> '\x02DC'
-    0x99 -> '\x2122'
-    0x9A -> '\x0161'
-    0x9B -> '\x203A'
-    0x9C -> '\x0153'
-    0x9E -> '\x017E'
-    0x9F -> '\x0178'
-    sameCodePoint -> toEnum (Word8.toInt sameCodePoint)
+windows1252Char :: Char -> Char
+windows1252Char char = case char of
+    '\x80' -> '\x20AC'
+    '\x82' -> '\x201A'
+    '\x83' -> '\x0192'
+    '\x84' -> '\x201E'
+    '\x85' -> '\x2026'
+    '\x86' -> '\x2020'
+    '\x87' -> '\x2021'
+    '\x88' -> '\x02C6'
+    '\x89' -> '\x2030'
+    '\x8A' -> '\x0160'
+    '\x8B' -> '\x2039'
+    '\x8C' -> '\x0152'
+    '\x8E' -> '\x017D'
+    '\x91' -> '\x2018'
+    '\x92' -> '\x2019'
+    '\x93' -> '\x201C'
+    '\x94' -> '\x201D'
+    '\x95' -> '\x2022'
+    '\x96' -> '\x2013'
+    '\x97' -> '\x2014'
+    '\x98' -> '\x02DC'
+    '\x99' -> '\x2122'
+    '\x9A' -> '\x0161'
+    '\x9B' -> '\x203A'
+    '\x9C' -> '\x0153'
+    '\x9E' -> '\x017E'
+    '\x9F' -> '\x0178'
+    sameCodePoint -> sameCodePoint
 
 feedLenEncBytes :: FieldType -> (t -> b) -> (ByteString -> Maybe t) -> Get b
 feedLenEncBytes typ con parser = do
