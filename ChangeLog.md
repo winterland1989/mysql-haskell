@@ -8,7 +8,7 @@ is `CRC32`, the default, and raises `BinLogChecksumMismatch` on a corrupted
 event, which it used to decode as if it were intact.
 
 * Binlog event checksums checked instead of skipped
-  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+  [#112](https://github.com/winterland1989/mysql-haskell/pull/112)
 
 ## 1.4.1 -- 2026.11.11
 
