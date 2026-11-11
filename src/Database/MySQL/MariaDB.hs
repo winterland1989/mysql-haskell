@@ -37,17 +37,27 @@ module Database.MySQL.MariaDB
     , ExtendedMetadata(..)
     , prepareStmtMetadata
     , getColumnMetadata
+      -- * Bulk execution
+    , BulkParam(..)
+    , executeBulk
+    , BulkExecuteError(..)
       -- * Exceptions
     , CapabilityNotNegotiated(..)
     ) where
 
 import           Control.Exception              (Exception (displayException), throwIO)
-import           Control.Monad                  (replicateM, unless, void)
+import           Control.Monad                  (forM_, replicateM, unless, void)
 import           Data.Binary.Get                (Get, getWord8, isEmpty)
+import           Data.Binary.Put                (Put, putLazyByteString, putWord16le, putWord32le,
+                                                 putWord8, runPut)
 import           Data.Binary.Parser             (parseOnly)
 import           Data.Bits                      ((.&.), (.|.))
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
+import qualified Data.ByteString.Lazy           as L
+import           Data.List                      (nub, transpose)
+import           Data.List.NonEmpty             (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty             as NonEmpty
 import           Data.Word                      (Word32, Word8)
 import           Database.MySQL.Base
 import qualified Database.MySQL.Connection      as Connection
@@ -61,12 +71,15 @@ data MariaDBCapability
     = MariaDBExtendedMetadata
       -- ^ MARIADB_CLIENT_EXTENDED_METADATA: column definitions name types
       -- such as JSON or UUID, see 'prepareStmtMetadata'.
+    | MariaDBBulkOperations
+      -- ^ MARIADB_CLIENT_STMT_BULK_OPERATIONS: 'executeBulk'.
     deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Bits 32 to 63 of the capability flags, see
 -- Note [MariaDB extended capabilities] in "Database.MySQL.Protocol.Auth".
 capabilityBit :: MariaDBCapability -> Word32
 capabilityBit MariaDBExtendedMetadata = 0x08  -- 1 << (35 - 32)
+capabilityBit MariaDBBulkOperations   = 0x04  -- 1 << (34 - 32)
 
 capabilityBits :: [MariaDBCapability] -> ExtendedCapabilities
 capabilityBits = ExtendedCapabilities . foldr ((.|.) . capabilityBit) 0
@@ -185,6 +198,117 @@ prepareStmtMetadata conn (Query stmt) = do
         columns <- replicateM columnCount (Connection.readPacket is >>= getFromPacket getColumnMetadata)
         unless (columnCount == 0) (void (Connection.readPacket is))  -- EOF
         pure (prepared, params, columns)
+
+-- | One parameter of one row given to 'executeBulk'.
+data BulkParam
+    = BulkValue !MySQLValue
+      -- ^ 'MySQLNull' sends SQL NULL.
+    | BulkDefault
+      -- ^ The column's default, for INSERT and UPDATE.
+    | BulkIgnore
+      -- ^ The column's default for INSERT; UPDATE leaves the column as it is.
+    deriving (Show, Eq)
+
+-- | Rows 'executeBulk' refuses before sending anything, so the connection
+-- stays usable.
+data BulkExecuteError
+    = BulkNoParameters
+      -- ^ The rows have no parameters; a bulk command sends parameter rows.
+    | BulkRowWidth !Int !Int !Int
+      -- ^ Row number (counting from 0), the first row's width, this row's width.
+    | BulkMixedTypes !Int ![MySQLValue]
+      -- ^ Parameter number (counting from 0) and one value of each type found
+      -- there. The command declares one type per parameter for every row.
+    deriving (Show, Eq)
+
+instance Exception BulkExecuteError where
+    displayException err = "mysql-haskell: executeBulk: " ++ case err of
+        BulkNoParameters -> "the rows have no parameters"
+        BulkRowWidth row expected found ->
+            "row " ++ show row ++ " has " ++ show found ++ " parameters, the first row has " ++ show expected
+        BulkMixedTypes param examples ->
+            "parameter " ++ show param ++ " mixes value types " ++ show examples
+            ++ "; give every row the same MySQLValue constructor there"
+
+-- | Execute a prepared statement once per row in a single round trip
+-- (COM_STMT_BULK_EXECUTE). The 'OK' sums the affected rows of every
+-- execution. A statement that returns rows is refused by the server with an
+-- 'ERRException'.
+--
+-- Every row must have the same number of parameters, and each parameter the
+-- same 'MySQLValue' constructor in every row where it is a 'BulkValue' other
+-- than 'MySQLNull', or 'BulkExecuteError' is raised. Raises
+-- 'CapabilityNotNegotiated' without 'MariaDBBulkOperations'; MySQL has no
+-- bulk command.
+--
+-- The rows travel in one command, which the server's @max_allowed_packet@
+-- limits; split larger inputs over several calls.
+executeBulk :: MariaDBConn -> StmtID -> NonEmpty [BulkParam] -> IO OK
+executeBulk conn stid rows = do
+    requireCapability MariaDBBulkOperations conn
+    types <- either throwIO pure (bulkParamTypes rows)
+    let mysqlConn = mariadbConnection conn
+        is = Connection.mysqlRead mysqlConn
+    Connection.guardUnconsumed mysqlConn
+    Connection.writePayload (runPut (putBulkExecute stid types rows)) (Connection.mysqlWrite mysqlConn)
+    p <- Connection.readPacket is
+    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
+        | isOK  p -> decodeFromPacket p
+        | otherwise -> throwIO (UnexpectedPacket p)
+
+-- | The type each parameter is declared with: that of its values, or NULL's
+-- when every row sends NULL, DEFAULT or IGNORE there.
+bulkParamTypes :: NonEmpty [BulkParam] -> Either BulkExecuteError [L.ByteString]
+bulkParamTypes rows@(firstRow :| _) =
+    if null firstRow
+    then Left BulkNoParameters
+    else do
+        mapM_ (checkRowWidth (length firstRow)) (zip [0 ..] (NonEmpty.toList rows))
+        mapM paramType (zip [0 ..] (transpose (NonEmpty.toList rows)))
+
+checkRowWidth :: Int -> (Int, [BulkParam]) -> Either BulkExecuteError ()
+checkRowWidth expected (row, params) =
+    if length params == expected then Right () else Left (BulkRowWidth row expected (length params))
+
+paramType :: (Int, [BulkParam]) -> Either BulkExecuteError L.ByteString
+paramType (param, column) =
+    let values = concatMap typedValue column
+        typed = nubOn (runPut . putParamMySQLType) values
+    in case typed of
+        []      -> Right (runPut (putParamMySQLType MySQLNull))
+        [value] -> Right (runPut (putParamMySQLType value))
+        (_ : _ : _) -> Left (BulkMixedTypes param typed)
+
+typedValue :: BulkParam -> [MySQLValue]
+typedValue (BulkValue MySQLNull) = []
+typedValue (BulkValue value)     = [value]
+typedValue BulkDefault           = []
+typedValue BulkIgnore            = []
+
+-- | One value per distinct key, in order of first appearance.
+nubOn :: Eq key => (value -> key) -> [value] -> [value]
+nubOn key values =
+    let keys = nub (map key values)
+    in concatMap (\k -> take 1 (filter ((== k) . key) values)) keys
+
+-- Decision: always send the parameter types (SEND_TYPES_TO_SERVER, 128), as
+-- mariadb-connector-c does. The server keeps no types from an earlier
+-- COM_STMT_EXECUTE that a bulk command could rely on. Per-row results
+-- (SEND_UNIT_RESULTS) need MARIADB_CLIENT_BULK_UNIT_RESULTS, which MariaDB
+-- 11.4, the version CI runs, does not offer.
+putBulkExecute :: StmtID -> [L.ByteString] -> NonEmpty [BulkParam] -> Put
+putBulkExecute stid types rows = do
+    putWord8 0xfa
+    putWord32le stid
+    putWord16le 128
+    mapM_ putLazyByteString types
+    forM_ rows (mapM_ putBulkParam)
+
+putBulkParam :: BulkParam -> Put
+putBulkParam (BulkValue MySQLNull) = putWord8 1
+putBulkParam (BulkValue value)     = putWord8 0 >> putBinaryField value
+putBulkParam BulkDefault           = putWord8 2
+putBulkParam BulkIgnore            = putWord8 3
 
 requireCapability :: MariaDBCapability -> MariaDBConn -> IO ()
 requireCapability capability conn =

@@ -41,6 +41,7 @@ import           Data.IORef                      (IORef, newIORef, readIORef,
                                                   writeIORef)
 import qualified Data.PEM                        as PEM
 import           Data.Typeable
+import           Data.Int                        (Int64)
 import           Data.Word
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Command
@@ -464,20 +465,25 @@ readPacket is = Stream.read is >>= maybe
 {-# INLINE readPacket #-}
 
 writeCommand :: Command -> (Packet -> IO ()) -> IO ()
-writeCommand a writePacket = let bs = Binary.runPut (putCommand a) in
-    go (L.length bs) 0 bs writePacket
-  where
-    go len seqN bs writePacket' = do
-        if len < 16777215
-        then writePacket (Packet len seqN bs)
-        else do
-            let (bs', rest) = L.splitAt 16777215 bs
-                seqN' = seqN + 1
-                len'  = len - 16777215
-
-            writePacket (Packet 16777215 seqN bs')
-            seqN' `seq` len' `seq` go len' seqN' rest writePacket'
+writeCommand a = writePayload (Binary.runPut (putCommand a))
 {-# INLINE writeCommand #-}
+
+-- | Send one command's payload, split into packets as the protocol requires
+-- for payloads of 16 MiB and more.
+--
+-- @since 1.4.1
+writePayload :: L.ByteString -> (Packet -> IO ()) -> IO ()
+writePayload bs = writePayloadFrom 0 (L.length bs) bs
+{-# INLINE writePayload #-}
+
+writePayloadFrom :: Word8 -> Int64 -> L.ByteString -> (Packet -> IO ()) -> IO ()
+writePayloadFrom seqN len bs writePacket =
+    if len < 16777215
+    then writePacket (Packet len seqN bs)
+    else do
+        let (bs', rest) = L.splitAt 16777215 bs
+        writePacket (Packet 16777215 seqN bs')
+        writePayloadFrom (seqN + 1) (len - 16777215) rest writePacket
 
 guardUnconsumed :: MySQLConn -> IO ()
 guardUnconsumed (MySQLConn _ _ _ consumed) = do
