@@ -17,6 +17,14 @@ A quote is doubled and a backslash escaped with a backslash; every other
 character is kept as it is. Under @NO_BACKSLASH_ESCAPES@ the literal reads the
 same, except that each backslash is stored twice.
 
+Not safe on a connection whose character set lets a multibyte character end
+in the backslash byte, 0x5C: gbk, big5, sjis, cp932 and gb18030. There the
+escaping backslash can become the second byte of a character, and the
+backslash in the data then escapes a quote, so a parameter can end its
+literal, with @SET NAMES gbk@ on MySQL 8.0.45 and MariaDB 11.4.9 alike. UTF-8,
+the default, and latin1 never put 0x5C inside a character. On those other
+character sets, use prepared statements, which send parameters separately.
+
 reference: <https://dev.mysql.com/doc/refman/8.0/en/string-literals.html>
 
 -}

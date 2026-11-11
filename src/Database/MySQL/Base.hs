@@ -126,8 +126,10 @@ import qualified Unwitch.Convert.Int                as Int
 --
 -- The query may contain placeholders @?@, for filling up parameters, the parameters
 -- will be escaped before get filled into the query. Under @NO_BACKSLASH_ESCAPES@
--- a backslash in a parameter is stored twice, see "Database.MySQL.Protocol.Escape".
--- You should consider using prepared statement if this's not an one shot query.
+-- a backslash in a parameter is stored twice, and on a gbk, big5, sjis, cp932 or
+-- gb18030 connection the escaping is not safe at all, see
+-- "Database.MySQL.Protocol.Escape". You should consider using prepared statement
+-- if this's not an one shot query, and must on those character sets.
 --
 execute :: QueryParam p => MySQLConn -> Query -> [p] -> IO OK
 execute conn qry params = execute_ conn (renderParams qry params)
