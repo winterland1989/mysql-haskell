@@ -1,6 +1,6 @@
 # Revision history for mysql-haskell
 
-## 1.5.0 -- unreleased
+## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours
 change, described below; no existing export changes its type. A
