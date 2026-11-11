@@ -5,6 +5,7 @@ module Main (main) where
 
 import           System.Environment (lookupEnv)
 import           Test.Tasty (defaultMain, testGroup)
+import qualified MariaDBBulk
 import qualified MariaDBExtendedMetadata
 import qualified UnixSocket
 
@@ -14,4 +15,5 @@ main = do
     caPath <- lookupEnv "MYSQL_TLS_CA_PATH"
     defaultMain $ testGroup "mariadb-integration"
         [ MariaDBExtendedMetadata.tests socketPath caPath
+        , MariaDBBulk.tests
         ]
