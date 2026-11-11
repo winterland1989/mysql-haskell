@@ -13,7 +13,7 @@ Versions compared:
 | mysql-haskell | `92a9401` (1.3.3 plus #96) | master on 11 Nov 2026 |
 | mariadb-haskell | `9f2a1ca` (0.1.0.0) | forked from `92a9401`, 35 commits from 6 to 9 Nov 2026 |
 
-The fork changes about 6,300 lines and removes about 1,500 under `src/`
+The fork adds about 6,000 lines and removes about 1,500 under `src/`
 and `cbits/`. The remaining 2.5 million added lines are validation
 results. Every module keeps its `Database.MySQL.*` name and no export of
 `Database.MySQL.Base` was removed. The package supports MariaDB only.
@@ -63,10 +63,15 @@ connection; messages are capped at 64 MiB and metadata at 16 MiB; and
 
 * Linux builds need MIT Kerberos (`extra-libraries: gssapi_krb5` with no
   flag), so the driver is no longer pure Haskell.
-* GHC 9.4 or newer, MariaDB only, no Windows.
+* GHC 9.4 or newer and MariaDB only. Windows still builds (GSSAPI is
+  stubbed out there) but is not a verified platform and left the fork's CI.
 * The fork's own report (`validation/RESULTS.md`) measures ordinary
   workloads slower than 1.3.3: `latency.prepared` 23.3%,
-  `read.text.narrow` 14.5% and `read.prepared.narrow` 11.7%.
+  `read.text.narrow` 14.5% and `read.prepared.narrow` 11.7%. Between the
+  same two runs its unchanged MariaDB Connector/C control also slowed, by
+  5.6% to 12.4% (`read.text.narrow` 8.0%), and the announcement says the
+  host had background activity. Only `latency.prepared` is flagged there
+  for a recheck on an idle machine.
 * The speed-ups in the announcement compare new APIs against other APIs of
   the same build, for example bulk execution against one prepared insert
   per row. None of them compares against mysql-haskell.
@@ -81,7 +86,7 @@ unsupported and 2 lack an environment. The 56 failures are not 56 bugs.
 |---|---|
 | 12 × `cdc.native-event-160` to `171` | one defect, the `toEnum` crash below |
 | 6 × `auth.ed25519.*`, `auth.parsec.*` | plugins mysql-haskell never supported |
-| `reliability.timeout-before-metadata` | wrong test; the fork corrected it on 9 Nov (`docs/ROADMAP.md`) |
+| `reliability.timeout-before-metadata` | defect: the next query reads the interrupted query's reply (below). The fork changed the expected outcome on 9 Nov from reuse to retirement (`docs/ROADMAP.md`); 1.3.3 fails both |
 | `connection.default-full-unicode` | documented default; `defaultConnectInfoMB4` gives utf8mb4 |
 | `transaction.nested-preserves-outer` | `withTransaction` never promised nesting |
 | `auth.sha2.tcp`, `auth.mutual-tls-helper-client`, `connection.localhost-address-fallback` | not investigated |
@@ -89,17 +94,19 @@ unsupported and 2 lack an environment. The 56 failures are not 56 bugs.
 
 ## Defects confirmed in mysql-haskell
 
-Each of these is read from the source at `92a9401`. They affect MySQL users
-as much as MariaDB users.
+Each of these was checked at `92a9401`, from the source and, for the
+interrupted query, by running it against MariaDB 11.4.9 and MySQL 8.0.45.
+They affect MySQL users as much as MariaDB users.
 
 | Defect | Location |
 |---|---|
 | `isEOF` only checks for a leading `0xFE`. A row whose first column is 16 MiB or longer starts with the same byte and is read as the end of the result; the packet length must be checked as well. An empty packet makes `L.index` crash | `Protocol/Packet.hs:71` |
 | `okLastInsertID :: Int`. An unsigned 64-bit ID above `maxBound :: Int` comes back negative | `Protocol/Packet.hs:133` |
 | `renderParams` splits on every `?`, including those inside string literals and comments, so `SELECT '?'` raises `WrongParamsCount` | `Query.hs:72` |
-| `fromGregorian 0 0 0` clamps, so `0000-00-00` comes back as `0000-01-01` | `Protocol/MySQLValue.hs:311,328` |
+| `fromGregorian` clamps, so `0000-00-00` comes back as `0000-01-01`, in the text protocol (`dateParser`, used for DATE, DATETIME and TIMESTAMP) and in the binary protocol | `Protocol/MySQLValue.hs:206` (text), `311,328,346` (binary) |
 | `T.decodeUtf8` on text columns throws when the connection delivers latin1 bytes | `Protocol/MySQLValue.hs:189,377` |
 | `toEnum` on the binlog event type calls `error` for any type it does not know, such as MariaDB's 160 to 171 or MySQL 8.0's 36 to 41 (`TRANSACTION_PAYLOAD_EVENT` is 40) | `BinLogProtocol/BinLogEvent.hs:99` |
+| A query interrupted by an asynchronous exception, such as `timeout` while it waits for the reply, leaves that reply on the connection. The next query on the connection returns it: after `timeout 20000 (query_ c "SELECT SLEEP(0.2)")`, `SELECT 937` returns 0. Issue #10 ("Handling timeout") has been open since 2016 | `Connection.hs`, command and reply handling |
 | `mozillaCAStore.pem` is listed in `extra-source-files` but read through `getDataFileName`, so `MozillaCAStore` fails in an installed library | `mysql-haskell.cabal:14`, `Data/TLSSetting.hs:46` |
 
 The fork reports these as well; they are not yet checked:
