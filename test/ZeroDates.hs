@@ -6,7 +6,8 @@ import           Data.Binary.Parser             (parseOnly)
 import           Data.Binary.Put                (runPut)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
-import           Data.Time.Calendar             (Day)
+import           Data.Time.Calendar             (Day, fromGregorianValid)
+import           Data.Word                      (Word16, Word8)
 import           Data.Time.LocalTime            (TimeOfDay (..))
 import           Database.MySQL.Field
 import           Database.MySQL.Protocol.ColumnDef
@@ -38,7 +39,24 @@ tests = testGroup "zero dates"
         assertEqual "decoded"
             (Left (DecodeUnrepresentableDate (ExpectedTypeName "Day") (MySQLDateRaw (RawDate 0 0 0))))
             (fromField (MySQLDateRaw (RawDate 0 0 0)) :: Either DecodeError Day)
+    , testCase "calendarDate agrees with fromGregorianValid on every month and day" $
+        take 5 (filter disagrees calendarSample) @?= []
     ]
+
+-- | Two full 400-year Gregorian cycles from year 0, the turns of centuries
+-- around them, and the ends of 'Word16', each with every month 0 to 13 and
+-- day 0 to 32, so that the fast path and its fallback both run.
+calendarSample :: [RawDate]
+calendarSample = do
+    year <- [0 .. 800] ++ [1582, 1858, 1900, 1970, 2000, 2024, 2100, 9999, 65534, 65535 :: Word16]
+    month <- [0 .. 13 :: Word8]
+    day <- [0 .. 32 :: Word8]
+    pure (RawDate year month day)
+
+disagrees :: RawDate -> Bool
+disagrees raw@(RawDate year month day) =
+    calendarDate raw
+        /= maybe (Left raw) Right (fromGregorianValid (toInteger year) (fromEnum month) (fromEnum day))
 
 column :: FieldType -> ColumnDef
 column fieldType = ColumnDef "" "" "" "" "" 63 0 fieldType 0 0

@@ -133,6 +133,10 @@ tests = testGroup "direct decoding"
         decodeTextWith (Decode.field Decode.text) [columnOf mySQLTypeVarString 0 utf8]
             (encodeRow [Just (B.pack [0xff])])
             @?= FieldFailed (Decode.FieldError (ColumnNumber 0) (Decode.FieldInvalidUtf8 (B.pack [0xff])))
+    , testCase "mysqlValue checks UTF-8 while it reads the row, unlike query_" $
+        decodeTextWith (Decode.field Decode.mysqlValue) [columnOf mySQLTypeVarString 0 utf8]
+            (encodeRow [Just (B.pack [0xff])])
+            @?= FieldFailed (Decode.FieldError (ColumnNumber 0) (Decode.FieldInvalidUtf8 (B.pack [0xff])))
     , testCase "the binary protocol's signed integers are two's complement" $
         decodeBinaryWith (Decode.field Decode.int32) [columnOf mySQLTypeLong 0 binary]
             (encodeBinaryRow [Just (B.pack [0xfe, 0xff, 0xff, 0xff])])
@@ -292,7 +296,8 @@ genBinaryValue kind = case kind of
     KindDate        -> lengthEncoded <$> (elements [0, 4, 3] >>= genBytes)
     KindTime        -> lengthEncoded <$> (elements [0, 8, 12, 9] >>= genBytes)
     KindGeometry    -> lengthEncoded <$> arbitrary
-    KindText _      -> lengthEncoded <$> frequency [(9, T.encodeUtf8 <$> arbitrary), (1, arbitrary)]
+    -- Valid UTF-8 only, as in TextRowDecoding's genField.
+    KindText _      -> lengthEncoded . T.encodeUtf8 <$> arbitrary
     KindLatin1Text  -> lengthEncoded <$> arbitrary
     KindBytes       -> lengthEncoded <$> arbitrary
     KindBit         -> lengthEncoded <$> (choose (1, 10) >>= genBytes)

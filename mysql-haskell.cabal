@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               mysql-haskell
-version:            1.4.0
+version:            1.4.1
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -217,6 +217,7 @@ test-suite integration
     MariaDBNegotiation
     MultipleResults
     MysqlTests
+    NonUtf8Results
     PlaceholderLiterals
     QueryApi
     QueryWithoutResultSet

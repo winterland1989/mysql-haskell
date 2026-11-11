@@ -12,6 +12,7 @@ import qualified FloatingPoint
 import qualified MariaDBNegotiation
 import qualified LargeRows
 import qualified Latin1Results
+import qualified NonUtf8Results
 import qualified PlaceholderLiterals
 import qualified UnsignedInsertId
 import qualified ZeroDateRoundtrip
@@ -46,6 +47,7 @@ main = do
         , MultipleResults.tests
         , RowDecoderQueries.tests
         , MariaDBNegotiation.tests greet
+        , NonUtf8Results.tests
         , UnsignedInsertId.tests
         , BinLogRowEvents.tests
         , CABundle.tests
