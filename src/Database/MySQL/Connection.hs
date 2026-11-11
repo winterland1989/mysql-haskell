@@ -119,32 +119,19 @@ connect = fmap snd . connectDetail
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail (ConnectInfo host port db user pass charset)
-    = bracketOnError open TCP.close go
-  where
-    open  = connectWithBufferSize host port bUFSIZE
-    go c  = do
-        let is = TCP.source c
-        is' <- decodeInputStream is
-        p <- readPacket is'
-        greet <- decodeFromPacket p
-        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
-            auth = mkAuth db user pass charset greet
-        write c $ encodeToPacket 1 auth
-        q <- readPacket is'
-        completeAuth is' (write c) pass q (plainFullAuth salt)
-        consumed <- newIORef True
-        let waitNotMandatoryOK = catch
-                (void (waitCommandReply is'))           -- server will either reply an OK packet
-                ((\ _ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
-            conn = MySQLConn is'
-                (write c)
-                (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
-                consumed
-        return (greet, conn)
+connectDetail = fmap withoutNegotiated . connectDetailExtended noExtendedCapabilities
 
-    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
-    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
+-- | 'connectDetail' asking a MariaDB server for extended capabilities, also
+-- returning those the server agreed to. Asking for none gives exactly
+-- 'connectDetail'. See Note [MariaDB extended capabilities].
+--
+-- @since 1.4.1
+connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+connectDetailExtended requested ci =
+    bracketOnError
+        (TCP.connectSocket (ciHost ci) (ciPort ci) >>= TCP.socketToConnection bUFSIZE)
+        TCP.close
+        (handshakePlain requested ci)
 
 -- | Connect to MySQL via a Unix domain socket.
 --
@@ -155,44 +142,97 @@ connectUnixSocket socketPath ci = fmap snd (connectUnixSocketDetail socketPath c
 -- so you can find server's version .etc.
 --
 connectUnixSocketDetail :: FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
-connectUnixSocketDetail socketPath (ConnectInfo _host _port db user pass charset)
-    = bracketOnError open TCP.close go
-  where
-    open  = bracketOnError
-                (N.socket N.AF_UNIX N.Stream 0)
-                N.close
-                (\sock -> do
-                    N.connect sock (N.SockAddrUnix socketPath)
-                    TCP.socketToConnection bUFSIZE (sock, N.SockAddrUnix socketPath)
-                )
-    go c  = do
-        let is = TCP.source c
-        is' <- decodeInputStream is
-        p <- readPacket is'
-        greet <- decodeFromPacket p
-        let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
-            auth = mkAuth db user pass charset greet
-        write c $ encodeToPacket 1 auth
-        q <- readPacket is'
-        completeAuth is' (write c) pass q (plainFullAuth salt)
-        consumed <- newIORef True
-        let waitNotMandatoryOK = catch
-                (void (waitCommandReply is'))           -- server will either reply an OK packet
-                ((\_ -> return ()) :: SomeException -> IO ())   -- or directy close the connection
-            conn = MySQLConn is'
-                (write c)
-                (writeCommand COM_QUIT (write c) >> waitNotMandatoryOK >> TCP.close c)
-                consumed
-        return (greet, conn)
+connectUnixSocketDetail socketPath =
+    fmap withoutNegotiated . connectUnixSocketDetailExtended noExtendedCapabilities socketPath
 
-    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
+-- | 'connectUnixSocketDetail' asking for extended capabilities, as
+-- 'connectDetailExtended' does.
+--
+-- @since 1.4.1
+connectUnixSocketDetailExtended :: ExtendedCapabilities -> FilePath -> ConnectInfo
+                                -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+connectUnixSocketDetailExtended requested socketPath ci =
+    bracketOnError (openUnixSocket socketPath) TCP.close (handshakePlain requested ci)
+
+openUnixSocket :: FilePath -> IO TCP.TCPConnection
+openUnixSocket socketPath = bracketOnError
+    (N.socket N.AF_UNIX N.Stream 0)
+    N.close
+    (\sock -> do
+        N.connect sock (N.SockAddrUnix socketPath)
+        TCP.socketToConnection bUFSIZE (sock, N.SockAddrUnix socketPath)
+    )
+
+withoutNegotiated :: (Greeting, ExtendedCapabilities, MySQLConn) -> (Greeting, MySQLConn)
+withoutNegotiated (greet, _, conn) = (greet, conn)
+
+-- | Authenticate over a connection without TLS, TCP or Unix socket alike.
+handshakePlain :: ExtendedCapabilities -> ConnectInfo -> TCP.TCPConnection
+               -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+handshakePlain requested (ConnectInfo _host _port db user pass charset) c = do
+    is' <- decodeInputStream (TCP.source c)
+    p <- readPacket is'
+    (greet, offered) <- getFromPacket getGreetingExtended p
+    let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
+        negotiated = negotiateExtended requested greet offered
+    sendPacket c (handshakeResponsePacket 1 negotiated db user pass charset greet)
+    q <- readPacket is'
+    completeAuth is' (sendPacket c) pass q (plainFullAuth salt)
+    conn <- authenticatedConnection is' c
+    return (greet, negotiated, conn)
+
+-- | The 'MySQLConn' over a connection whose handshake completed.
+--
+-- @since 1.4.1
+authenticatedConnection :: InputStream Packet -> TCP.Connection a -> IO MySQLConn
+authenticatedConnection is' c = do
+    consumed <- newIORef True
+    return $ MySQLConn is'
+        (sendPacket c)
+        (writeCommand COM_QUIT (sendPacket c) >> quitReply is' >> TCP.close c)
+        consumed
+
+-- | After COM_QUIT the server either replies an OK packet or closes the
+-- connection, so a failed read is not an error here.
+quitReply :: InputStream Packet -> IO ()
+quitReply is' = catch
+    (void (waitCommandReply is'))
+    ((\_ -> return ()) :: SomeException -> IO ())
+
+sendPacket :: TCP.Connection a -> Packet -> IO ()
+sendPacket c = TCP.send c . Binary.runPut . Binary.put
+
+-- | The handshake response for a connection using the negotiated extended
+-- capabilities, numbered @seqN@ (1 after a plain greeting, 2 after an SSL
+-- request). With 'noExtendedCapabilities' it is the packet mysql-haskell sent
+-- before extended capabilities existed.
+--
+-- @since 1.4.1
+handshakeResponsePacket :: Word8 -> ExtendedCapabilities -> ByteString -> ByteString -> ByteString
+                        -> Word8 -> Greeting -> Packet
+handshakeResponsePacket seqN negotiated db user pass charset greet =
+    putToPacket seqN (putAuthExtended negotiated (mkAuthFor negotiated db user pass charset greet))
+
+-- | The SSL request for a connection using the negotiated extended
+-- capabilities, as 'handshakeResponsePacket'.
+--
+-- @since 1.4.1
+sslRequestPacket :: ExtendedCapabilities -> Word8 -> Packet
+sslRequestPacket negotiated charset =
+    putToPacket 1 (putSSLRequestExtended negotiated (sslRequestFor negotiated charset))
 
 mkAuth :: ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
-mkAuth db user pass charset greet =
+mkAuth = mkAuthFor noExtendedCapabilities
+
+-- | 'mkAuth' for a connection using these extended capabilities.
+--
+-- @since 1.4.1
+mkAuthFor :: ExtendedCapabilities -> ByteString -> ByteString -> ByteString -> Word8 -> Greeting -> Auth
+mkAuthFor negotiated db user pass charset greet =
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
         plugin = greetingAuthPlugin greet
         scambleBuf = scrambleForPlugin plugin salt pass
-    in Auth clientCap clientMaxPacketSize charset user scambleBuf db plugin
+    in Auth (clientCapFor negotiated) clientMaxPacketSize charset user scambleBuf db plugin
 
 -- | Dispatch scramble based on the authentication plugin name.
 scrambleForPlugin :: ByteString -> ByteString -> ByteString -> ByteString

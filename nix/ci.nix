@@ -19,6 +19,9 @@ in
       server.succeed("mysql -u root -e \"GRANT BINLOG MONITOR, REPLICATION SLAVE, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"SHOW VARIABLES LIKE 'have_ssl'\" | grep YES")
       print(server.succeed("MYSQL_TLS_CA_PATH=${package}/test/cert/ca.pem ${package}/bin/integration/integration"))
+      # Decision: MariaDB-only tests are a separate suite run in this VM alone,
+      # rather than skipped by version checks inside the shared suite.
+      print(server.succeed("MYSQL_TLS_CA_PATH=${package}/test/cert/ca.pem ${package}/bin/integration/integration-mariadb"))
     '';
     nodes.server = {
       virtualisation.memorySize = 2048;

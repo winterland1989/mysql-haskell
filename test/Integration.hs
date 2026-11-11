@@ -5,6 +5,8 @@ import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
 import           Test.Tasty (defaultMain, testGroup)
 import qualified CachingSha2
+import qualified MariaDBNegotiation
+import           Database.MySQL.MariaDB (serverFlavour)
 import qualified MultipleResults
 import qualified MysqlTests
 import qualified QueryWithoutResultSet
@@ -36,6 +38,7 @@ main = do
         , MysqlTests.tests
         , QueryWithoutResultSet.tests
         , MultipleResults.tests
+        , MariaDBNegotiation.tests (serverFlavour greet)
         ]
         -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
         -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.
