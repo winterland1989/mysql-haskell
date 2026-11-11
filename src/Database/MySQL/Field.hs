@@ -98,6 +98,10 @@ data DecodeError
     | DecodeUnexpectedNull !ExpectedTypeName
       -- ^ The value was @MySQLNull@ but the requested type is not
       -- 'Maybe'; wrap the type in 'Maybe' for nullable columns.
+    | DecodeUnrepresentableDate !ExpectedTypeName !MySQLValue
+      -- ^ A @DATE@, @DATETIME@ or @TIMESTAMP@ whose date the requested type
+      -- cannot hold, such as the zero date @0000-00-00@; see
+      -- 'Database.MySQL.Protocol.MySQLValue.RawDate'.
     deriving (Show, Eq)
 
 instance Exception DecodeError
@@ -335,8 +339,9 @@ encodeDay :: Day -> MySQLValue
 encodeDay = MySQLDate
 
 decodeDay :: MySQLValue -> Either DecodeError Day
-decodeDay (MySQLDate d) = Right d
-decodeDay value         = decodeFailure (ExpectedTypeName "Day") value
+decodeDay (MySQLDate d)          = Right d
+decodeDay value@(MySQLDateRaw _) = Left (DecodeUnrepresentableDate (ExpectedTypeName "Day") value)
+decodeDay value                  = decodeFailure (ExpectedTypeName "Day") value
 
 instance Field Day where
     toField = encodeDay
@@ -352,6 +357,10 @@ encodeLocalTime = MySQLDateTime
 decodeLocalTime :: MySQLValue -> Either DecodeError LocalTime
 decodeLocalTime (MySQLDateTime t)  = Right t
 decodeLocalTime (MySQLTimeStamp t) = Right t
+decodeLocalTime value@(MySQLDateTimeRaw _ _) =
+    Left (DecodeUnrepresentableDate (ExpectedTypeName "LocalTime") value)
+decodeLocalTime value@(MySQLTimeStampRaw _ _) =
+    Left (DecodeUnrepresentableDate (ExpectedTypeName "LocalTime") value)
 decodeLocalTime value              = decodeFailure (ExpectedTypeName "LocalTime") value
 
 instance Field LocalTime where

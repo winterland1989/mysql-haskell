@@ -47,6 +47,12 @@ pkgs.haskellPackages.override {
       # Hackage revision 2 widens crypton to < 2.2; the tarball says < 1.2.
       rev = { revision = "2"; sha256 = "1i2ccxl9b861yg61vvmzikps1aqs6hrzkycngmr1332xnacqlf5d"; };
     };
+    # Decision: unwitch is not in the pinned nixpkgs, so it comes from Hackage.
+    unwitch = fromHackage hnew {
+      pkg = "unwitch";
+      ver = "3.1.0";
+      sha256 = "sha256-vE8uezsm3eAHdos/HQnMXSO3pkcZ2dTuUwobeTbYlf0=";
+    };
     crypton-x509-system = fromHackage hnew {
       pkg = "crypton-x509-system";
       ver = "1.9.0";
