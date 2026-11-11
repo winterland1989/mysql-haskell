@@ -11,7 +11,7 @@ and the double quote as they are, so their result is only safe between single
 quotes.
 
 * Parameters escaped safely under `NO_BACKSLASH_ESCAPES`
-  [#PR](https://github.com/winterland1989/mysql-haskell/pulls)
+  [#110](https://github.com/winterland1989/mysql-haskell/pull/110)
 
 ## 1.4.1 -- 2026.11.11
 
