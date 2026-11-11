@@ -38,6 +38,8 @@ used to crash or skip it.
   [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
 * MariaDB bulk execution with NULL, DEFAULT and IGNORE parameters
   [#101](https://github.com/winterland1989/mysql-haskell/pull/101)
+* `Database.MariaDB` for MariaDB servers only, with `mysqlConnection` for the
+  MySQL functions [#104](https://github.com/winterland1989/mysql-haskell/pull/104)
 
 ## 1.3.3 -- 2026.10.07
 
