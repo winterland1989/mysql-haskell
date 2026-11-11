@@ -51,6 +51,8 @@ in
       server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskell'@'localhost' IDENTIFIED WITH mysql_native_password;\"")
       server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"GRANT REPLICATION SLAVE, REPLICATION CLIENT, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
+      # binlog_transaction_compression is a restricted session variable.
+      server.succeed("mysql -u root -e \"GRANT SESSION_VARIABLES_ADMIN ON *.* TO 'testMySQLHaskell'@'localhost';\"")
 
       # User with caching_sha2_password (MySQL 8.0 default) for SHA256 fast auth test
       server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskellSha2'@'localhost' IDENTIFIED BY 'testPassword123';\"")

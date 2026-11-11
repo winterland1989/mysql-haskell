@@ -1,5 +1,31 @@
 # Revision history for mysql-haskell
 
+## 1.4.0 -- 2026.11.11
+
+Fixes for MySQL and MariaDB alike, found comparing mysql-haskell with the
+mariadb-haskell fork. A text query no longer loses a row whose first value is
+16 MiB or longer; insert IDs above 2^63 come back intact; a `?` inside a quoted
+string or a comment is no longer taken for a placeholder; dates such as
+`0000-00-00` round-trip instead of turning into `0000-01-01`; latin1 results
+decode; the binlog row decoder no longer drops a statement's rows events after
+its first; and the Mozilla CA bundle is installed with the library.
+
+Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
+`MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
+cannot hold, `DecodeError` gains `DecodeUnrepresentableDate`, and
+`BinLogEventType` gains `BINLOG_UNRECOGNIZED_EVENT` and loses its `Enum`
+instance (use `binLogEventTypeCode`). A connection whose reply was interrupted,
+for example by a timeout, now refuses further commands with `AbandonedReply`
+instead of handing the rest of that reply to the next query (#10); discard it
+and reconnect. `resetStmt` with rows still unread raises `UnconsumedResultSet`,
+`withTransaction` rethrows the procedure's own exception, and
+`decodeRowBinLogEvent` raises `RowEventDecodeException` on an event that may
+hold rows it cannot decode, such as MySQL's compressed transactions, where it
+used to crash or skip it.
+
+* Fix eight defects for MySQL and MariaDB, each with a reproducer
+  [#PRNUMBER](https://github.com/winterland1989/mysql-haskell/pull/PRNUMBER)
+
 ## 1.3.3 -- 2026.10.07
 
 New functions, and fixes to `executeMany` and `executeMany_` for inputs that

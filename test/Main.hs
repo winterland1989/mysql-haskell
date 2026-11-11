@@ -10,6 +10,11 @@ import qualified Word24
 import qualified TCPStreams
 import qualified BoundsCheck
 import qualified FieldRoundtrip
+import qualified BinLogEventCodes
+import qualified PacketClassification
+import qualified Placeholders
+import qualified ResultCharsets
+import qualified ZeroDates
 
 main :: IO ()
 main = do
@@ -30,4 +35,9 @@ main = do
       , Sha256Scramble.tests
       , BoundsCheck.tests
       , FieldRoundtrip.tests
+      , PacketClassification.tests
+      , Placeholders.tests
+      , ZeroDates.tests
+      , ResultCharsets.tests
+      , BinLogEventCodes.tests
       ]
