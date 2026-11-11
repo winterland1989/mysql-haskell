@@ -15,6 +15,7 @@ import qualified DirectDecoding
 import qualified DecoderRoundtrip
 import qualified FloatingPointText
 import qualified HandshakeGolden
+import qualified BinLogChecksum
 import qualified BinLogEventCodes
 import qualified PacketClassification
 import qualified Placeholders
@@ -50,4 +51,5 @@ main = do
       , ZeroDates.tests
       , ResultCharsets.tests
       , BinLogEventCodes.tests
+      , BinLogChecksum.tests
       ]

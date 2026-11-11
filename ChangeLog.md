@@ -1,5 +1,15 @@
 # Revision history for mysql-haskell
 
+## 1.4.2 -- unreleased
+
+No API change beyond new functions and one new exception. The binlog dump
+checks the CRC32 checksum of every event when the server's `binlog_checksum`
+is `CRC32`, the default, and raises `BinLogChecksumMismatch` on a corrupted
+event, which it used to decode as if it were intact.
+
+* Binlog event checksums checked instead of skipped
+  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+
 ## 1.4.1 -- 2026.11.11
 
 Faster decoding. No type changes beyond one new exception, but one change of

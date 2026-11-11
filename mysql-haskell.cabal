@@ -72,6 +72,7 @@ library
     Database.MySQL.BinLogProtocol.BinLogEvent
     Database.MySQL.BinLogProtocol.BinLogMeta
     Database.MySQL.BinLogProtocol.BinLogValue
+    Database.MySQL.BinLogProtocol.CRC32
     Database.MySQL.Connection
     Database.MySQL.Decoder
     Database.MySQL.Field
@@ -92,6 +93,8 @@ library
   hs-source-dirs:     src
   other-modules:      Database.MySQL.Query
   build-depends:
+    -- The CRC32 table of binlog event checksums.
+    array >=0.5 && <0.6,
     asn1-encoding >=0.9 && <0.10,
     asn1-types >=0.3 && <0.4,
     binary >=0.8.3 && <0.9,
@@ -145,6 +148,7 @@ test-suite test
   other-modules:
     Aeson
     AesonBP
+    BinLogChecksum
     BinLogEventCodes
     BoundsCheck
     DecoderRoundtrip

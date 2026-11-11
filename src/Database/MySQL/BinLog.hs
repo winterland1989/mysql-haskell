@@ -19,6 +19,9 @@ module Database.MySQL.BinLog
     , RowBinLogEvent(..)
     , decodeRowBinLogEvent
     , RowEventDecodeException(..)
+    , decodeBinLogPacket
+    , BinLogChecksumMismatch(..)
+    , BinLogChecksum(..)
     -- * helpers
     , getLastBinLogTracker
     , isCheckSumEnabled
@@ -34,20 +37,25 @@ import           Control.Exception                         (Exception (..),
 import           Control.Monad
 import           Data.Binary.Put
 import           Data.ByteString                           (ByteString)
+import qualified Data.ByteString.Char8                     as B8
+import qualified Data.ByteString.Lazy                      as L
 import           Data.IORef                                (IORef, newIORef,
                                                             readIORef,
                                                             writeIORef)
-import           Data.Bits                                 ((.&.))
+import           Data.Bits                                 (shiftL, (.&.), (.|.))
 import           Data.Text.Encoding                        (encodeUtf8)
 import           Data.Word
 import           Database.MySQL.Base
 import           Database.MySQL.BinLogProtocol.BinLogEvent
 import           Database.MySQL.BinLogProtocol.BinLogMeta
 import           Database.MySQL.BinLogProtocol.BinLogValue
+import           Database.MySQL.BinLogProtocol.CRC32       (crc32)
 import           Database.MySQL.Connection
 import           GHC.Generics                              (Generic)
+import           Numeric                                   (showHex)
 import           System.IO.Streams                         (InputStream)
 import qualified System.IO.Streams                         as Stream
+import qualified Unwitch.Convert.Word8                     as Word8
 
 type SlaveID = Word32
 
@@ -84,16 +92,17 @@ dumpBinLog conn@(MySQLConn is wp _ state) sid (BinLogTracker initfn initpos) wan
     writeCommand (COM_BINLOG_DUMP initpos 0x00 sid initfn) wp
     writeIORef state RowsUnread
 
-    rp <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_ROTATE_EVENT
+    fref <- newIORef initfn
+    rp <- skipToPacketT (readBinLogPacket checksum needAck fref is) BINLOG_ROTATE_EVENT
     re <- getFromBinLogPacket getRotateEvent rp
-    fref <- newIORef (rFileName re)
+    writeIORef fref (rFileName re)
 
-    p <- skipToPacketT (readBinLogPacket checksum needAck is) BINLOG_FORMAT_DESCRIPTION_EVENT
+    p <- skipToPacketT (readBinLogPacket checksum needAck fref is) BINLOG_FORMAT_DESCRIPTION_EVENT
     replyAck needAck p fref wp
     fmt <- getFromBinLogPacket getFormatDescription p
 
     es <- Stream.makeInputStream $ do
-        q <- readBinLogPacket checksum needAck is
+        q <- readBinLogPacket checksum needAck fref is
         case q of
             Nothing   -> writeIORef state RepliesRead >> return Nothing
             Just q' -> do when (blEventType q' == BINLOG_ROTATE_EVENT) $ do
@@ -119,12 +128,140 @@ dumpBinLog conn@(MySQLConn is wp _ state) sid (BinLogTracker initfn initpos) wan
         putWord64le pos
         putByteString fn
 
-    readBinLogPacket checksum needAck is' = do
+    readBinLogPacket checksum needAck fref' is' = do
         p <- readPacket is'
-        if  | isOK p -> Just <$> getFromPacket (getBinLogPacket checksum needAck) p
+        if  | isOK p -> do
+                fileName <- readIORef fref'
+                Just <$> decodeBinLogPacket checksum needAck fileName p
             | isEOF p -> return Nothing
             | isERR p -> decodeFromPacket p >>= throwIO . ERRException
             | otherwise -> error ("unkown package" <> show p)
+
+-- | Decode a packet of a binlog dump as 'getBinLogPacket' does with the same
+-- two flags, and check the CRC32 checksum of the event in it when the event
+-- carries one. 'dumpBinLog' reads every packet this way.
+--
+-- Throws 'BinLogChecksumMismatch' when the checksum does not match the
+-- event's bytes, rather than decode a corrupted event, and
+-- 'DecodePacketException' when the packet holds no binlog event. See
+-- Note [Binlog event checksums] for which events carry a checksum.
+--
+-- @since 1.4.2
+decodeBinLogPacket :: Bool        -- ^ whether the dump's events carry checksums, as 'isCheckSumEnabled' says
+                   -> Bool        -- ^ whether the packet has a semi-sync header
+                   -> ByteString  -- ^ the binlog file the dump is reading, for the exception
+                   -> Packet
+                   -> IO BinLogPacket
+decodeBinLogPacket checksum semiAck fileName packet = do
+    event <- getFromPacket (getBinLogPacket checksum semiAck) packet
+    let eventType = blEventType event
+        eventBytes = L.drop (if semiAck then 3 else 1) (pBody packet)
+        expected = carriedChecksum eventBytes
+        actual = computedChecksum eventType eventBytes
+    when (carriesChecksum checksum eventType eventBytes && expected /= actual) $
+        throwIO (BinLogChecksumMismatch eventType fileName (blLogPos event) expected actual)
+    pure event
+
+-- Decision: an event other than a format description event carries a checksum
+-- when the dump's setting says so, the setting 'getBinLogPacket' strips four
+-- bytes by. A replica follows the algorithm the last format description event
+-- names instead, which differs for a binlog file written while binlog_checksum
+-- was NONE; such a file now fails its checks, where it used to lose the last
+-- four bytes of each event without a word.
+
+-- | See Note [Binlog event checksums].
+carriesChecksum :: Bool -> BinLogEventType -> L.ByteString -> Bool
+carriesChecksum checksum eventType eventBytes =
+    if eventType == BINLOG_FORMAT_DESCRIPTION_EVENT
+        then L.indexMaybe eventBytes (L.length eventBytes - 5) == Just checksumAlgorithmCRC32
+        else checksum
+
+-- | @BINLOG_CHECKSUM_ALG_CRC32@, as a format description event names it.
+checksumAlgorithmCRC32 :: Word8
+checksumAlgorithmCRC32 = 1
+
+-- | The checksum in an event's last four bytes.
+carriedChecksum :: L.ByteString -> BinLogChecksum
+carriedChecksum eventBytes =
+    BinLogChecksum (L.foldr prependByte 0 (L.drop (L.length eventBytes - 4) eventBytes))
+
+prependByte :: Word8 -> Word32 -> Word32
+prependByte byte rest = Word8.toWord32 byte .|. (rest `shiftL` 8)
+
+-- | The CRC32 of an event's bytes before its checksum. See
+-- Note [Binlog event checksums].
+computedChecksum :: BinLogEventType -> L.ByteString -> BinLogChecksum
+computedChecksum eventType eventBytes =
+    let checked = L.take (L.length eventBytes - 4) eventBytes
+    in BinLogChecksum
+        (crc32 (if eventType == BINLOG_FORMAT_DESCRIPTION_EVENT then clearInUseFlag checked else checked))
+
+-- | Clear @LOG_EVENT_BINLOG_IN_USE_F@ (0x01) in the low byte of an event's
+-- flags, which is its 18th byte.
+clearInUseFlag :: L.ByteString -> L.ByteString
+clearInUseFlag bytes =
+    L.take 17 bytes <> L.map (.&. 0xFE) (L.take 1 (L.drop 17 bytes)) <> L.drop 18 bytes
+
+-- | A binlog event whose CRC32 checksum does not match its bytes, as when it
+-- was corrupted between the server's binlog and this client.
+--
+-- @since 1.4.2
+data BinLogChecksumMismatch = BinLogChecksumMismatch
+    { mismatchEventType :: !BinLogEventType
+    , mismatchFileName  :: !ByteString
+      -- ^ The binlog file the dump was reading when the event arrived.
+    , mismatchLogPos    :: !Word64
+      -- ^ The position after the event that its header gives, as 'blLogPos';
+      -- 0 for an event the server makes up for the dump, such as its first
+      -- rotate event.
+    , mismatchExpected  :: !BinLogChecksum
+      -- ^ The checksum the event carries.
+    , mismatchActual    :: !BinLogChecksum
+      -- ^ The CRC32 of the event's bytes.
+    } deriving (Show, Eq)
+
+-- | The CRC32 checksum of a binlog event.
+--
+-- @since 1.4.2
+newtype BinLogChecksum = BinLogChecksum Word32
+    deriving (Show, Eq)
+
+instance Exception BinLogChecksumMismatch where
+    displayException mismatch =
+        "mysql-haskell: the binlog event of type "
+        ++ show (binLogEventTypeCode (mismatchEventType mismatch))
+        ++ " (" ++ show (mismatchEventType mismatch) ++ ") ending at position "
+        ++ show (mismatchLogPos mismatch) ++ " of " ++ B8.unpack (mismatchFileName mismatch)
+        ++ " fails its CRC32 checksum: it carries " ++ showChecksum (mismatchExpected mismatch)
+        ++ ", its bytes give " ++ showChecksum (mismatchActual mismatch)
+        ++ ". The event was corrupted on its way from the server's binlog, so it is not"
+        ++ " decoded. If the binlog file was written while binlog_checksum was NONE, its"
+        ++ " events have no checksum, and a dump from a server whose binlog_checksum is"
+        ++ " now CRC32 cannot read that file."
+
+showChecksum :: BinLogChecksum -> String
+showChecksum (BinLogChecksum checksum) =
+    let digits = showHex checksum ""
+    in "0x" ++ replicate (8 - length digits) '0' ++ digits
+
+{- Note [Binlog event checksums]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+With binlog_checksum = CRC32, MySQL (5.6.1 and up) and MariaDB end each event
+with the CRC32 of the event's bytes before it, header and body alike. A
+replica checks it over the event as the packet delivers it, not over the
+length the event's header gives (MySQL's Log_event_footer::event_checksum_test
+on read_event's packet length, MariaDB's event_checksum_test in
+sql/rpl_utility.cc), and so does 'decodeBinLogPacket'.
+
+The format description event differs twice. Its checksum is computed with
+LOG_EVENT_BINLOG_IN_USE_F cleared, since the server clears that flag in place
+when it closes the binlog file, so a check clears it as well. And the byte
+before its checksum names the algorithm of the events after it, yet the event
+always ends in four checksum bytes; when that byte says off (0), the server
+does not recompute them after rewriting the event's position for a dump. A
+replica therefore checks a format description event only when its own byte
+says CRC32 (1), whatever the dump's setting.
+-}
 
 -- | Row based binlog event type.
 --
