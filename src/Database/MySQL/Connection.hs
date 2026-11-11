@@ -13,7 +13,58 @@ This is an internal module, the 'MySQLConn' type should not directly acessed to 
 -}
 
 module Database.MySQL.Connection
-    ( module Database.MySQL.Connection
+    ( -- * Connections
+      MySQLConn (..)
+    , ReplyState (..)
+    , ConnectInfo (..)
+    , defaultConnectInfo
+    , defaultConnectInfoMB4
+    , utf8_general_ci
+    , utf8mb4_unicode_ci
+    , bUFSIZE
+    , connect
+    , connectDetail
+    , connectUnixSocket
+    , connectUnixSocketDetail
+    , connectDetailExtended
+    , connectUnixSocketDetailExtended
+    , withoutNegotiated
+    , authenticatedConnection
+      -- * Authentication
+    , mkAuth
+    , handshakeResponsePacket
+    , sslRequestPacket
+    , scrambleForPlugin
+    , scrambleSHA1
+    , scrambleSHA256
+    , completeAuth
+    , plainFullAuth
+    , parseRSAPublicKey
+    , xorPasswordNonce
+    , doRSAAuth
+    , AuthException (..)
+      -- * Commands and replies
+    , decodeInputStream
+    , close
+    , ping
+    , command
+    , waitCommandReply
+    , waitCommandReplys
+    , readPacket
+    , writeCommand
+    , sendPacket
+    , guardUnconsumed
+    , runCommand
+    , settleFailedExchange
+    , endsReply
+    , writeIORef'
+      -- * Exceptions
+    , NetworkException (..)
+    , UnconsumedResultSet (..)
+    , AbandonedReply (..)
+    , ERRException (..)
+    , UnexpectedPacket (..)
+    , ExtraResultSets (..)
     ) where
 
 import           Control.Exception               (Exception (displayException),
