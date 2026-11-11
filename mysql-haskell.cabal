@@ -66,6 +66,7 @@ library
     Data.Int.Int24
     Data.TLSSetting
     Data.Word.Word24
+    Database.MariaDB
     Database.MySQL.Base
     Database.MySQL.BinLog
     Database.MySQL.BinLogProtocol.BinLogEvent
@@ -74,7 +75,6 @@ library
     Database.MySQL.Connection
     Database.MySQL.Decoder
     Database.MySQL.Field
-    Database.MySQL.MariaDB
     Database.MySQL.Protocol.Auth
     Database.MySQL.Protocol.ColumnDef
     Database.MySQL.Protocol.Command

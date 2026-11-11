@@ -96,9 +96,17 @@ negotiateExtended :: ExtendedCapabilities  -- ^ requested by the client
                   -> ExtendedCapabilities  -- ^ offered in that greeting
                   -> ExtendedCapabilities
 negotiateExtended (ExtendedCapabilities requested) greeting (ExtendedCapabilities offered) =
-    if greetingCaps greeting .&. CLIENT_MYSQL == 0
+    if offersExtendedCapabilities greeting
     then ExtendedCapabilities (requested .&. offered)
     else noExtendedCapabilities
+
+-- | Whether the greeting comes from a server speaking MariaDB's protocol
+-- extensions: MariaDB 10.2 and later leave CLIENT_MYSQL out of it, MySQL and
+-- older MariaDB set it. See Note [MariaDB extended capabilities].
+--
+-- @since 1.4.0
+offersExtendedCapabilities :: Greeting -> Bool
+offersExtendedCapabilities greeting = greetingCaps greeting .&. CLIENT_MYSQL == 0
 
 data Greeting = Greeting
     { greetingProtocol :: !Word8

@@ -2,7 +2,7 @@ module MariaDBExtendedMetadata (tests) where
 
 import qualified Data.ByteString        as B
 import           Database.MySQL.Base
-import           Database.MySQL.MariaDB
+import           Database.MariaDB
 import qualified Database.MySQL.TLS     as TLS
 import qualified System.IO.Streams      as Stream
 import           Test.Tasty
@@ -35,7 +35,7 @@ tests :: Maybe FilePath -> Maybe FilePath -> TestTree
 tests socketPath caPath = testGroup "MariaDB extended column metadata" $
     [ testCase "prepared statement columns name their SQL types" $ do
         conn <- connectMariaDB [MariaDBExtendedMetadata] testConnectInfo
-        createTable (mariadbConnection conn)
+        createTable (mysqlConnection conn)
         (_, params, columns) <- prepareStmtMetadata conn "SELECT n, j, u, a, p, s FROM mariadb_extended WHERE n = ?"
         length params @?= 1
         map (columnName . columnDefinition) columns @?= ["n", "j", "u", "a", "p", "s"]
@@ -51,10 +51,10 @@ tests socketPath caPath = testGroup "MariaDB extended column metadata" $
         columnExtended p @?= [ExtendedTypeName "point"]
         s <- columnNamed "s" columns
         columnExtended s @?= []
-        close (mariadbConnection conn)
+        close (mysqlConnection conn)
     , testCase "text and binary queries read rows despite the metadata" $ do
         conn <- connectMariaDB [MariaDBExtendedMetadata] testConnectInfo
-        let mysqlConn = mariadbConnection conn
+        let mysqlConn = mysqlConnection conn
         createTable mysqlConn
         (textColumns, textRows) <- query mysqlConn selectAll [MySQLInt32 1]
         map columnName textColumns @?= ["n", "j", "u", "a", "s"]
@@ -73,7 +73,7 @@ tests socketPath caPath = testGroup "MariaDB extended column metadata" $
 -- | A temporary table keeps tests on separate connections apart.
 jsonColumnMetadata :: MariaDBConn -> Assertion
 jsonColumnMetadata conn = do
-    _ <- execute_ (mariadbConnection conn) "CREATE TEMPORARY TABLE json_only (j JSON)"
+    _ <- execute_ (mysqlConnection conn) "CREATE TEMPORARY TABLE json_only (j JSON)"
     (_, _, columns) <- prepareStmtMetadata conn "SELECT j FROM json_only"
     map columnExtended columns @?= [[ExtendedFormat "json"]]
 
@@ -82,15 +82,15 @@ unixSocketTest path = testCase "negotiated over a Unix socket" $ do
     conn <- connectMariaDBUnixSocket [MariaDBExtendedMetadata] path testConnectInfo
     mariadbCapabilities conn @?= [MariaDBExtendedMetadata]
     jsonColumnMetadata conn
-    close (mariadbConnection conn)
+    close (mysqlConnection conn)
 
 tlsTest :: FilePath -> TestTree
 tlsTest caPath = testCase "negotiated over TLS, where the SSL request carries it" $ do
     cparams <- TLS.makeClientParams (TLS.CustomCAStore caPath)
     conn <- connectMariaDBTLS [MariaDBExtendedMetadata] testConnectInfo (cparams, "Winter")
     mariadbCapabilities conn @?= [MariaDBExtendedMetadata]
-    (_, cipher) <- query_ (mariadbConnection conn) "SHOW STATUS LIKE 'Ssl_cipher'"
+    (_, cipher) <- query_ (mysqlConnection conn) "SHOW STATUS LIKE 'Ssl_cipher'"
     cipherRows <- Stream.toList cipher
     assertBool "the connection is encrypted" (cipherRows /= [[MySQLText "Ssl_cipher", MySQLText ""]])
     jsonColumnMetadata conn
-    close (mariadbConnection conn)
+    close (mysqlConnection conn)

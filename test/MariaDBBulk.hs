@@ -5,7 +5,7 @@ import           Data.List.NonEmpty     (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty     as NonEmpty
 import qualified Data.Text              as T
 import           Database.MySQL.Base
-import           Database.MySQL.MariaDB
+import           Database.MariaDB
 import qualified System.IO.Streams      as Stream
 import           Test.Tasty
 import           Test.Tasty.HUnit
@@ -17,8 +17,8 @@ withBulkConnection :: (MariaDBConn -> MySQLConn -> IO a) -> IO a
 withBulkConnection action = do
     conn <- connectMariaDB [MariaDBBulkOperations] testConnectInfo
     mariadbCapabilities conn @?= [MariaDBBulkOperations]
-    result <- action conn (mariadbConnection conn)
-    close (mariadbConnection conn)
+    result <- action conn (mysqlConnection conn)
+    close (mysqlConnection conn)
     pure result
 
 selectRows :: MySQLConn -> Query -> IO [[MySQLValue]]
