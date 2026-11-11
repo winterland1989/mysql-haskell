@@ -45,8 +45,11 @@ for the binary protocol with `decodeBinaryValues`. Before, both went through
 binary's continuation-based `Get` over the lazy packet body, comparing the
 column type against two dozen constants for every field of every row.
 
-Values stay as lazy as before, so invalid UTF-8 still raises when a value is
-used, and a malformed row still raises `DecodePacketFailed`. The two paths
+Values stay as lazy as before, and a malformed row still raises
+`DecodePacketFailed`. Since the merge with 1.4.0's fixes a string's bytes are
+checked as UTF-8 while the row is read, so bytes that are not UTF-8 fail the
+row instead of raising when the value is used; see
+[After merging 1.4.0's fixes](#after-merging-140s-fixes). The two paths
 differ only on rows a server does not send: an 8-byte length above
 `maxBound :: Int` is rejected, and a zero-length BIT is 0 instead of the byte
 after it. `getTextField`, `getTextRow`, `getBinaryField` and `getBinaryRow`
@@ -214,8 +217,57 @@ does.
 
 The existing API keeps the lazy decoder: evaluating every value while
 decoding saved 3% of instructions when every value is used but took 2.75
-times the instructions when none is, and it would move invalid UTF-8 errors
-from use to read.
+times the instructions when none is. Invalid UTF-8 errors moved from use to
+read anyway in the merge with 1.4.0's fixes, through a check that leaves the
+value itself lazy.
+
+## After merging 1.4.0's fixes
+
+#102 fixed its defects in `getTextField` and `getBinaryField`, which `query_`
+and `queryStmt` no longer use here, so the merge carried them into this
+branch's paths: a string column's bytes are checked with `isValidUtf8` while
+the row is read, a latin1 column decodes as Windows-1252, a date goes through
+`calendarDate` (`fromGregorianValid`) so that one a `Day` cannot hold becomes
+a `MySQLDateRaw` instead of being clamped, and the row reads keep #102's
+`ReplyState` bookkeeping. Measured as above on MySQL 8.0.45, 1 thread, in
+instructions per row: master with #102's fixes but without this branch
+(`523dc96`), this branch before the merge (`87ce39f`), and the merge.
+
+| table | path | master | before the merge | merge | allocated/row, master | allocated/row, merge |
+|-------|------|--------|------------------|-------|-----------------------|----------------------|
+| employees | `query_`, values unused | 7,980 | 2,760 | 3,315 | 4,733 | 1,807 |
+| employees | `query_`, values used | 11,676 | 7,483 | 7,900 | 5,925 | 3,372 |
+| employees | `query_` + Field | 11,870 | 7,663 | 8,088 | 6,109 | 3,556 |
+| employees | `queryRows_` | | 8,079 | 8,116 | | 3,088 |
+| employees | `queryStmt` + Field | 11,603 | 7,187 | 8,224 | 5,622 | 3,355 |
+| employees | `queryStmtRows` | | 7,338 | 7,786 | | 2,705 |
+| mixed_types | `query_`, values unused | 17,366 | 13,920 | 15,225 | 8,114 | 5,572 |
+| mixed_types | `query_`, values used | 18,420 | 15,847 | 17,688 | 8,597 | 6,655 |
+| mixed_types | `query_` + Field | 18,625 | 16,079 | 17,939 | 8,845 | 6,901 |
+| mixed_types | `queryRows_` | | 16,242 | 17,012 | | 6,445 |
+| mixed_types | `queryStmt` + Field | 13,875 | 9,290 | 11,289 | 7,091 | 4,893 |
+| mixed_types | `queryStmtRows` | | 9,278 | 10,129 | | 4,319 |
+
+Master and the merge were measured in one run and the branch before the merge
+in another; the merge's figures in both agree within 0.3%. Master has no
+`queryRows_` or `queryStmtRows`.
+
+The fixes cost the merge 0.5 to 22% more instructions than the branch had
+without them, while wall time stayed within noise except on employees, where
+`queryStmt` + Field went from 124 to 143 ms and `query_` with values used from
+123 to 138 ms. Against master with the same fixes the merge runs 32% and 29%
+fewer instructions for an application decoding employees through `query_` or
+`queryStmt` (221 to 137 ms and 205 to 145 ms of wall time), 4 to 19% fewer on
+mixed_types, and allocates 22 to 62% less.
+
+Profiles put the added instructions in the checks the fixes need. With
+`query_` and values unused, `isValidUtf8` and the static helpers next to it in
+bytestring's C code are about 9.6% of the merge's instructions and the per-row `mask` of #102's `resultSetRows` about 2%; with
+`queryStmt` + Field on employees, validating dates
+(`monthAndDayToDayOfYearValid` and more `Integer` arithmetic than the clamping
+`fromGregorian` did) is the largest addition. Testing for ASCII first
+(`B.all (< 0x80)` before `isValidUtf8`) saved about 100 instructions per row on
+employees and cost about 190 on mixed_types, so it was left out.
 
 ## Step 3: persistent-mysql-haskell
 
