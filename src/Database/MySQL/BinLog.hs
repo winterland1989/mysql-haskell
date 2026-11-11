@@ -146,7 +146,7 @@ dumpBinLog conn@(MySQLConn is wp _ state) sid (BinLogTracker initfn initpos) wan
 -- 'DecodePacketException' when the packet holds no binlog event. See
 -- Note [Binlog event checksums] for which events carry a checksum.
 --
--- @since 1.4.2
+-- @since 1.5.0
 decodeBinLogPacket :: Bool        -- ^ whether the dump's events carry checksums, as 'isCheckSumEnabled' says
                    -> Bool        -- ^ whether the packet has a semi-sync header
                    -> ByteString  -- ^ the binlog file the dump is reading, for the exception
@@ -205,7 +205,7 @@ clearInUseFlag bytes =
 -- | A binlog event whose CRC32 checksum does not match its bytes, as when it
 -- was corrupted between the server's binlog and this client.
 --
--- @since 1.4.2
+-- @since 1.5.0
 data BinLogChecksumMismatch = BinLogChecksumMismatch
     { mismatchEventType :: !BinLogEventType
     , mismatchFileName  :: !ByteString
@@ -222,7 +222,7 @@ data BinLogChecksumMismatch = BinLogChecksumMismatch
 
 -- | The CRC32 checksum of a binlog event.
 --
--- @since 1.4.2
+-- @since 1.5.0
 newtype BinLogChecksum = BinLogChecksum Word32
     deriving (Show, Eq)
 

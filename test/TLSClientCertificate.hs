@@ -1,5 +1,5 @@
 -- | Logging in as an account that requires a client certificate, which
--- 'makeClientParams'' loaded but never sent before 1.4.2.
+-- 'makeClientParams'' loaded but never sent before 1.5.0.
 module TLSClientCertificate (tests) where
 
 import           Control.Exception     (bracket_)

@@ -21,6 +21,7 @@ import qualified MultipleResults
 import qualified MysqlTests
 import           QueryApi
 import qualified QueryWithoutResultSet
+import qualified ResetConnection
 import qualified RoundtripBit
 import qualified RoundtripYear
 import qualified RowDecoderQueries
@@ -54,6 +55,7 @@ main = do
         , BinLogRowEvents.tests
         , CABundle.tests
         , ZeroDateRoundtrip.typedDecoderTests
+        , ResetConnection.tests
         ]
         -- binlog_transaction_compression is MySQL 8.0.20+ only.
         ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]

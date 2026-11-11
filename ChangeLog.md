@@ -1,15 +1,18 @@
 # Revision history for mysql-haskell
 
-## 1.4.2 -- unreleased
+## 1.5.0 -- unreleased
 
-Security fixes; no API change beyond new functions and one new exception. A
+Security fixes and new functions. A major version because two behaviours
+change, described below; no existing export changes its type. A
 text or bytes parameter of `query`, `execute` or `executeMany` can no longer
 end its string literal under `NO_BACKSLASH_ESCAPES`; the binlog dump checks
 every event's CRC32 checksum when `binlog_checksum` is `CRC32`, the default,
 and raises `BinLogChecksumMismatch` on a corrupted event it used to decode as
 intact; MariaDB accounts identified via ed25519 can log in; and
 `makeClientParams'` sends its client certificate, so a `REQUIRE X509` account
-can log in.
+can log in. The new `resetConnection` returns a connection's session to that of
+a new one without reconnecting, so a pool can hand it to its next user (MySQL
+5.7.3 or MariaDB 10.2.4 and newer).
 
 Two behaviours change. A client certificate the server cannot verify now fails
 the TLS handshake, where 1.4.1 never sent it. `escapeText` and `escapeBytes`
@@ -19,6 +22,8 @@ in the default mode, and under `NO_BACKSLASH_ESCAPES` a backslash in a
 parameter is still stored twice. On a gbk, big5, sjis, cp932 or gb18030
 connection text parameters remain unsafe; use prepared statements there.
 
+* Reset a pooled connection's session without reconnecting
+  [#109](https://github.com/winterland1989/mysql-haskell/pull/109)
 * Parameters escaped safely under `NO_BACKSLASH_ESCAPES`
   [#110](https://github.com/winterland1989/mysql-haskell/pull/110)
 * Binlog event checksums checked instead of skipped

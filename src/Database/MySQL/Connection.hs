@@ -49,6 +49,7 @@ module Database.MySQL.Connection
     , decodeInputStream
     , close
     , ping
+    , resetConnection
     , command
     , waitCommandReply
     , waitCommandReplys
@@ -354,7 +355,7 @@ ed25519NonceLength = 32
 -- occur: crypton decodes a scalar from up to 64 bytes, and every scalar here
 -- comes from a SHA-512 digest.
 --
--- @since 1.4.2
+-- @since 1.5.0
 scrambleEd25519 :: ByteString -> ByteString -> Either CryptoError ByteString
 scrambleEd25519 nonce pass = eitherCryptoError $ do
     let digest = sha512 pass
@@ -368,7 +369,7 @@ scrambleEd25519 nonce pass = eitherCryptoError $ do
 -- password; @ed25519_password@ and @mysql.global_priv@ show it base64 encoded
 -- without the padding. The 'Left' does not occur, as for 'scrambleEd25519'.
 --
--- @since 1.4.2
+-- @since 1.5.0
 ed25519PublicKey :: ByteString -> Either CryptoError ByteString
 ed25519PublicKey pass = eitherCryptoError (publicKey <$> secretScalar (sha512 pass))
 
@@ -577,6 +578,47 @@ close (MySQLConn _ _ closeSocket _) = closeSocket
 ping :: MySQLConn -> IO OK
 ping = flip command COM_PING
 
+-- | Give the connection's session the state of a new one without reconnecting
+-- or authenticating again, so a pool can hand the connection to its next user.
+-- It sends COM_RESET_CONNECTION, which needs MySQL 5.7.3 or MariaDB 10.2.4; an
+-- older server's refusal raises 'ERRException'.
+--
+-- The session stays the same one (@CONNECTION_ID()@ and the user do not
+-- change), and the server
+--
+--   * rolls back an open transaction, and releases @LOCK TABLES@ locks and
+--     @GET_LOCK@ locks;
+--   * drops the session's temporary tables;
+--   * sets every user variable to @NULL@;
+--   * deallocates every prepared statement, so executing one of their
+--     'StmtID's afterwards raises 'ERRException' with code 1243
+--     (@ER_UNKNOWN_STMT_HANDLER@), while 'closeStmt' on one is harmless;
+--   * sets the session variables, such as @sql_mode@, @time_zone@,
+--     @autocommit@ and the transaction isolation level, to their global
+--     values, and @LAST_INSERT_ID()@ to 0.
+--
+-- The current database stays, also one chosen with @USE@ after connecting.
+--
+-- Two things differ from a new connection, measured on MySQL 8.0.45 and
+-- MariaDB 11.4.9. The session's @sql_mode@ loses the @IGNORE_SPACE@ that the
+-- handshake adds, so a query with a space after a function name, as in
+-- @COUNT (*)@, becomes a syntax error. And MariaDB returns to the character set
+-- and collation of 'ciCharset', where MySQL takes the server's global
+-- @character_set_client@ and @collation_connection@ (on 8.0 @utf8mb4@ with
+-- @utf8mb4_0900_ai_ci@, whichever 'ciCharset' the connection was made with);
+-- send @SET NAMES@ after the reset to keep 'ciCharset' on MySQL.
+--
+-- Like other commands it refuses with 'UnconsumedResultSet' while a result
+-- set's rows are unread, and with 'AbandonedReply' after an interrupted reply,
+-- whose unread rest would be taken for the reset's reply: such a connection
+-- has to be closed, not reset.
+--
+-- @since 1.5.0
+resetConnection :: MySQLConn -> IO ()
+resetConnection conn@(MySQLConn is os _ _) = runCommand conn $ do
+    writeResetConnection os
+    void (waitCommandReply is)
+
 --------------------------------------------------------------------------------
 -- helpers
 
@@ -626,6 +668,12 @@ readPacket is = Stream.read is >>= maybe
 writeCommand :: Command -> (Packet -> IO ()) -> IO ()
 writeCommand a = writePayload (Binary.runPut (putCommand a))
 {-# INLINE writeCommand #-}
+
+-- Decision: COM_RESET_CONNECTION (0x1F) is written here instead of as a
+-- 'Command' constructor, because 'Command' is exported and a new constructor
+-- would break exhaustive matches on it in code using this library.
+writeResetConnection :: (Packet -> IO ()) -> IO ()
+writeResetConnection = writePayload (Binary.runPut (Binary.putWord8 0x1F))
 
 -- | Send one command's payload, split into packets as the protocol requires
 -- for payloads of 16 MiB and more.

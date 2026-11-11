@@ -28,7 +28,7 @@ import qualified Unwitch.Convert.Word8 as Word8
 -- | The CRC-32 of IEEE 802.3 and zlib (reflected polynomial 0xEDB88320,
 -- initial and final XOR 0xFFFFFFFF): @crc32 "123456789" == 0xCBF43926@.
 --
--- @since 1.4.2
+-- @since 1.5.0
 crc32 :: L.ByteString -> Word32
 crc32 bytes = complement (L.foldl' crc32Step 0xFFFFFFFF bytes)
 
