@@ -75,8 +75,8 @@ instance QueryParam MySQLValue where
 -- quotes are read with MySQL's default escaping, where a backslash escapes
 -- the next character; under @NO_BACKSLASH_ESCAPES@ a string ending in a
 -- backslash, such as @\'C:\\\'@, looks unterminated, so the placeholders
--- after it are missed. That mode breaks the escaping of the rendered values
--- as well.
+-- after it are missed. In that mode a backslash in a rendered value is
+-- stored twice, see "Database.MySQL.Protocol.Escape".
 --
 -- Throws 'WrongParamsCount' when the number of placeholders and parameters
 -- differ.

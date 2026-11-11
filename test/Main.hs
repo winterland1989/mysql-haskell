@@ -7,6 +7,7 @@ import qualified JSON
 import qualified Sha1Scramble
 import qualified Sha256Scramble
 import qualified Ed25519Scramble
+import qualified StringLiterals
 import qualified Word24
 import qualified TCPStreams
 import qualified BoundsCheck
@@ -50,6 +51,7 @@ main = do
       , HandshakeGolden.tests
       , PacketClassification.tests
       , Placeholders.tests
+      , StringLiterals.tests
       , ZeroDates.tests
       , ResultCharsets.tests
       , BinLogEventCodes.tests
