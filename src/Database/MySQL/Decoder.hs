@@ -712,6 +712,13 @@ data FieldParser (protocol :: Type) a = FieldParser
     }
 
 -- | Fits a 'FieldDecoder' to column number @column@, whose definition this is.
+-- Prepare once per result set, with the columns
+-- 'Database.MySQL.Base.queryRawRows_' returns:
+--
+-- > (columns, rows) <- queryRawRows_ conn "SELECT emp_no, first_name FROM employees"
+-- > numberColumn : nameColumn : _ <- pure columns
+-- > numbers <- either throwIO pure (prepareFieldParser int32 (ColumnNumber 0) numberColumn)
+-- > names <- either throwIO pure (prepareFieldParser text (ColumnNumber 1) nameColumn)
 --
 -- @since 1.4.0
 prepareFieldParser :: RowProtocol protocol
@@ -724,7 +731,14 @@ prepareFieldParser decoder column definition =
 
 -- | Decodes field @column@ of a 'RawRow', passing the outcome to a continuation
 -- so that no 'Either' is allocated, as a library decoding by column number
--- needs.
+-- needs. With the parsers from 'prepareFieldParser', each row's fields chain
+-- through the continuations:
+--
+-- > rawRows <- Streams.toList rows
+-- > forM_ rawRows $ \row ->
+-- >     runFieldParser numbers row (ColumnNumber 0) throwIO $ \number ->
+-- >     runFieldParser names row (ColumnNumber 1) throwIO $ \name ->
+-- >     print (number, name)
 --
 -- @since 1.4.0
 runFieldParser :: FieldParser protocol a -> RawRow protocol -> ColumnNumber -> (FieldError -> r) -> (a -> r) -> r

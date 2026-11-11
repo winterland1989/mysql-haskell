@@ -250,12 +250,32 @@ queryVector_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
 -- A statement without a result-set, such as an INSERT, gives no columns and no
 -- rows, as with 'query_'.
 --
+-- > import qualified Database.MySQL.Decoder as Decode
+-- > import qualified System.IO.Streams as Streams
+-- >
+-- > data Employee = Employee { number :: Int32, born :: Day, name :: Text }
+-- >
+-- > employee :: Decode.RowDecoder Employee
+-- > employee = Employee
+-- >     <$> Decode.field Decode.int32
+-- >     <*> Decode.field Decode.day
+-- >     <*> Decode.field Decode.text
+-- >
+-- > (_, rows) <- queryRows_ employee conn "SELECT emp_no, birth_date, first_name FROM employees"
+-- > employees <- Streams.toList rows
+--
 -- @since 1.4.0
 queryRows_ :: Decoder.RowDecoder a -> MySQLConn -> Query -> IO ([ColumnDef], InputStream a)
 queryRows_ decoder conn qry =
     queryRowBodies_ conn qry >>= decodeRowBodies (Proxy :: Proxy TextProtocol) decoder
 
--- | 'queryRows_' with parameters, filled in as 'query' does.
+-- | 'queryRows_' with parameters, filled in as 'query' does. With the
+-- @employee@ decoder from 'queryRows_':
+--
+-- > (_, rows) <- queryRows employee conn
+-- >     "SELECT emp_no, birth_date, first_name FROM employees WHERE first_name = ?"
+-- >     [MySQLText "Georgi"]
+-- > georgis <- Streams.toList rows
 --
 -- @since 1.4.0
 queryRows :: QueryParam p => Decoder.RowDecoder a -> MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream a)
@@ -265,7 +285,12 @@ queryRows decoder conn qry params = queryRows_ decoder conn (renderParams qry pa
 {-# SPECIALIZE queryRows :: Decoder.RowDecoder a -> MySQLConn -> Query -> [Param]      -> IO ([ColumnDef], InputStream a) #-}
 
 -- | 'queryStmt' with each row decoded by a 'Decoder.RowDecoder', as
--- 'queryRows_' does.
+-- 'queryRows_' does. With the @employee@ decoder from 'queryRows_':
+--
+-- > statement <- prepareStmt conn
+-- >     "SELECT emp_no, birth_date, first_name FROM employees WHERE emp_no > ?"
+-- > (_, rows) <- queryStmtRows employee conn statement [MySQLInt32 10001]
+-- > later <- Streams.toList rows
 --
 -- @since 1.4.0
 queryStmtRows :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream a)
@@ -290,7 +315,22 @@ decodeRowBody prepared bodies row = case Decoder.runPreparedRow prepared row of
 
 -- | 'query_' handing each row over as a 'RawRow', with the bounds of its
 -- fields, for libraries that decode by column number with
--- 'Decoder.prepareFieldParser' and 'Decoder.runFieldParser'.
+-- 'Decoder.prepareFieldParser' and 'Decoder.runFieldParser'. A parser is
+-- prepared once per column from its definition, then run on every row; it
+-- passes the field to a continuation instead of returning an 'Either':
+--
+-- > import qualified Database.MySQL.Decoder as Decode
+-- > import qualified System.IO.Streams as Streams
+-- >
+-- > (columns, rows) <- queryRawRows_ conn "SELECT emp_no, first_name FROM employees"
+-- > numberColumn : nameColumn : _ <- pure columns
+-- > numbers <- either throwIO pure (Decode.prepareFieldParser Decode.int32 (ColumnNumber 0) numberColumn)
+-- > names <- either throwIO pure (Decode.prepareFieldParser Decode.text (ColumnNumber 1) nameColumn)
+-- > rawRows <- Streams.toList rows
+-- > forM_ rawRows $ \row ->
+-- >     Decode.runFieldParser numbers row (ColumnNumber 0) throwIO $ \number ->
+-- >     Decode.runFieldParser names row (ColumnNumber 1) throwIO $ \name ->
+-- >     print (number, name)
 --
 -- @since 1.4.0
 queryRawRows_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream (RawRow TextProtocol))
@@ -299,6 +339,19 @@ queryRawRows_ conn qry = do
     (,) fields <$> Stream.mapM (rawRowOrThrow (textRawRow (length fields))) bodies
 
 -- | 'queryStmt' handing each row over as a 'RawRow', as 'queryRawRows_' does.
+-- The parsers are prepared and run the same way; they read the binary
+-- protocol's fields because the rows are 'RawRow' 'BinaryProtocol':
+--
+-- > statement <- prepareStmt conn "SELECT emp_no, first_name FROM employees WHERE emp_no > ?"
+-- > (columns, rows) <- queryStmtRawRows conn statement [MySQLInt32 10001]
+-- > numberColumn : nameColumn : _ <- pure columns
+-- > numbers <- either throwIO pure (Decode.prepareFieldParser Decode.int32 (ColumnNumber 0) numberColumn)
+-- > names <- either throwIO pure (Decode.prepareFieldParser Decode.text (ColumnNumber 1) nameColumn)
+-- > rawRows <- Streams.toList rows
+-- > forM_ rawRows $ \row ->
+-- >     Decode.runFieldParser numbers row (ColumnNumber 0) throwIO $ \number ->
+-- >     Decode.runFieldParser names row (ColumnNumber 1) throwIO $ \name ->
+-- >     print (number, name)
 --
 -- @since 1.4.0
 queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
