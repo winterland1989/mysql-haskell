@@ -11,6 +11,9 @@ UTF-8, as a connection in another charset can send, now raises
 `InvalidUtf8Text` when the value is used, where 1.4.0 refused the whole row;
 the decoders of `Database.MySQL.Decoder` still refuse it while reading.
 
+* Text decoded when used, common dates without `Integer` arithmetic
+  [#107](https://github.com/winterland1989/mysql-haskell/pull/107)
+
 ## 1.4.0 -- 2026.11.11
 
 Fixes for MySQL and MariaDB alike, found comparing mysql-haskell with the
