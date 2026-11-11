@@ -2,7 +2,8 @@
 
 ## 1.4.1 -- 2026.11.11
 
-Faster decoding, no API change beyond one new exception. `query_` and
+Faster decoding. No type changes beyond one new exception, but one change of
+behaviour, described last. `query_` and
 `queryStmt` decode rows with dates and text up to a third faster than 1.4.0:
 a date in a common range is computed without `Integer` arithmetic, and a
 string is decoded as UTF-8 once, when its value is used, instead of checked

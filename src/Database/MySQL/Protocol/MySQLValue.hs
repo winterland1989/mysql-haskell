@@ -176,7 +176,8 @@ calendarDate :: RawDate -> Either RawDate Day
 calendarDate raw@(RawDate year month day) =
     -- Every month has 28 days, so these dates exist in every year and need no
     -- check; only the rest go through 'fromGregorianValid', whose Integer
-    -- arithmetic was most of a date row's cost (docs/direct-row-decoding.md).
+    -- arithmetic took about a quarter of the instructions on date-heavy rows
+    -- (docs/direct-row-decoding.md, 1.4.1).
     if month >= 1 && month <= 12 && day >= 1 && day <= 28
     then Right (dayOfCommonDate (Word16.toInt year) (Word8.toInt month) (Word8.toInt day))
     else maybe (Left raw) Right

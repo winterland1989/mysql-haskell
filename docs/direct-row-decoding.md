@@ -272,7 +272,9 @@ employees and cost about 190 on mixed_types, so it was left out.
 ## 1.4.1: text checked when used, common dates in Int
 
 The profiles above showed where 1.4.0's fixes cost the most, and 1.4.1 takes
-two of those costs out without giving up what the fixes protect against.
+two of those costs out. For text that means giving up one thing 1.4.0 chose:
+an invalid string no longer fails its row with a typed error, it raises an
+exception from pure code when its value is used, as in 1.3.
 
 A string's UTF-8 is no longer checked while the row is read. `query_`,
 `queryStmt` and the `Get` decoders leave a `MySQLText` to be decoded, in one
@@ -284,10 +286,13 @@ still check as they read, for callers who want the error up front.
 
 A date whose month is 1 to 12 and day 1 to 28 exists in every year, so
 `calendarDate` computes its `Day` in `Int` (Howard Hinnant's days_from_civil)
-and leaves `fromGregorianValid`, with its `Integer` arithmetic, to the rest:
-days 29 to 31 and the zero and partial dates that become `MySQLDateRaw`. A
-unit test compares the two on every month 0 to 13 and day 0 to 32 of two
-400-year cycles and the ends of `Word16`.
+and leaves `fromGregorianValid` to days 29 to 31 and to the zero and partial
+dates that become `MySQLDateRaw`. A profile of 1.4.0 on employees through
+`queryStmt` + Field put about 22% of the instructions in ghc-bignum's `Integer`
+operations (`integerSub`, `integerQuot`, `integerRem`, `integerAdd`,
+`integerMul`, `integerMod`, `integerDiv`), with `monthAndDayToDayOfYearValid`
+at 3% and `isLeapYear` at 1.5%. A unit test compares the two on every month 0
+to 13 and day 0 to 32 of two 400-year cycles and the ends of `Word16`.
 
 Measured as above on MySQL 8.0.45, 1 thread, `perf stat -e instructions:u -r 5`,
 median of three rounds, master (1.4.0, `0e4dd87`) against this change; the
