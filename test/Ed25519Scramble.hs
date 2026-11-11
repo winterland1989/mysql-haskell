@@ -74,7 +74,7 @@ tests = testGroup "ed25519 scramble"
         mariadbKey <$> ed25519PublicKey "foo bar" @?= Right "Y5fV74JAVRMOK2cdnUsYS+WW9sXaaL/o+6WGKOgqnzc"
         mariadbKey <$> ed25519PublicKey "secret" @?= Right "ZIgUREUg5PVgQ6LskhXmO+eZLS0nC8be6HPjYWR4YJY"
         mariadbKey <$> ed25519PublicKey "ed25519Pass123" @?= Right "j2VKy3t+tdtEQXXes18uKRvK1XL9crguh3AregMR6kk"
-      -- Signatures from ma_crypto_sign of mariadb-connector-c 3.4's ref10.
+      -- Signatures from ma_crypto_sign of mariadb-connector-c 3.3.5's ref10.
     , testCase "an AuthSwitchRequest is answered with libmariadb's signature, a nonce ending in 0 included" $ do
         nonce <- hex "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00"
         signature <- hex "0c9e13ccd52e9dbb7957836f1c48ae216bf28da17c4b027f93534b0e5a348917\
