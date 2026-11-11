@@ -10,6 +10,7 @@ import qualified Word24
 import qualified TCPStreams
 import qualified BoundsCheck
 import qualified FieldRoundtrip
+import qualified HandshakeGolden
 import qualified BinLogEventCodes
 import qualified PacketClassification
 import qualified Placeholders
@@ -35,6 +36,7 @@ main = do
       , Sha256Scramble.tests
       , BoundsCheck.tests
       , FieldRoundtrip.tests
+      , HandshakeGolden.tests
       , PacketClassification.tests
       , Placeholders.tests
       , ZeroDates.tests

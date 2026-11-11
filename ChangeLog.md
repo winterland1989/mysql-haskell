@@ -10,6 +10,12 @@ string or a comment is no longer taken for a placeholder; dates such as
 decode; the binlog row decoder no longer drops a statement's rows events after
 its first; and the Mozilla CA bundle is installed with the library.
 
+New in `Database.MySQL.MariaDB`: connecting with a request for capabilities
+only MariaDB has, and learning which ones the server agreed to. The first is
+extended column metadata, which names JSON, UUID, INET6 and geometry columns
+through `prepareStmtMetadata`. Connections that ask for nothing, and every
+connection to MySQL, send the same handshake as before.
+
 Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
 `MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
 cannot hold, `DecodeError` gains `DecodeUnrepresentableDate`, and
@@ -25,6 +31,8 @@ used to crash or skip it.
 
 * Fix eight defects for MySQL and MariaDB, each with a reproducer
   [#102](https://github.com/winterland1989/mysql-haskell/pull/102)
+* A MariaDB module with capability negotiation and extended column metadata
+  [#100](https://github.com/winterland1989/mysql-haskell/pull/100)
 
 ## 1.3.3 -- 2026.10.07
 

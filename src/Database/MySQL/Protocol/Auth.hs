@@ -52,6 +52,54 @@ import           Database.MySQL.Protocol.Packet
 #define CLIENT_CONNECT_ATTRS                  0x00100000
 #define CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA 0x00200000
 
+-- MariaDB reuses the obsolete CLIENT_LONG_PASSWORD bit to mean "MySQL client
+-- or server". See Note [MariaDB extended capabilities].
+#define CLIENT_MYSQL                          CLIENT_LONG_PASSWORD
+
+{- Note [MariaDB extended capabilities]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+MariaDB has capabilities beyond the 32 bits of the MySQL handshake
+(MARIADB_CLIENT_* in mariadb-connector-c's mariadb_com.h, bits 32 to 36). A
+MariaDB server leaves CLIENT_MYSQL out of its greeting and puts the upper 32
+bits in the last four of the greeting's ten reserved bytes. A client answers
+with its own upper bits in the last four of the 23 reserved bytes of the SSL
+request and the handshake response, and must leave CLIENT_MYSQL out as well,
+or the server ignores those bytes.
+
+mysql-haskell sets CLIENT_MYSQL by default and writes zeroes there, so a
+MariaDB server treats it as a MySQL client. Only a connection that asks for an
+extended capability, to a server that offers it, sends anything different:
+'negotiateExtended' yields 'noExtendedCapabilities' otherwise, and every
+encoder below writes exactly the bytes it wrote before extended capabilities
+existed. A MySQL server always sets CLIENT_MYSQL, so it never sees the change.
+-}
+
+-- | MariaDB's capabilities above bit 31, shifted down by 32, so bit 0 here is
+-- MARIADB_CLIENT_PROGRESS. See Note [MariaDB extended capabilities].
+--
+-- @since 1.4.0
+newtype ExtendedCapabilities = ExtendedCapabilities Word32 deriving (Show, Eq)
+
+-- | What every connection sent before extended capabilities existed.
+--
+-- @since 1.4.0
+noExtendedCapabilities :: ExtendedCapabilities
+noExtendedCapabilities = ExtendedCapabilities 0
+
+-- | The extended capabilities a connection uses: those the client asked for
+-- that the server offered, or none when the server is not a MariaDB server
+-- reading them.
+--
+-- @since 1.4.0
+negotiateExtended :: ExtendedCapabilities  -- ^ requested by the client
+                  -> Greeting
+                  -> ExtendedCapabilities  -- ^ offered in that greeting
+                  -> ExtendedCapabilities
+negotiateExtended (ExtendedCapabilities requested) greeting (ExtendedCapabilities offered) =
+    if greetingCaps greeting .&. CLIENT_MYSQL == 0
+    then ExtendedCapabilities (requested .&. offered)
+    else noExtendedCapabilities
+
 data Greeting = Greeting
     { greetingProtocol :: !Word8
     , greetingVersion  :: !B.ByteString
@@ -85,7 +133,14 @@ putGreeting (Greeting pv sv cid salt1 cap charset st salt2 authPlugin) = do
         (putByteString authPlugin)
 
 getGreeting :: Get Greeting
-getGreeting = do
+getGreeting = fst <$> getGreetingExtended
+
+-- | 'getGreeting' together with the extended capabilities a MariaDB server
+-- offers; MySQL servers send zeroes there.
+--
+-- @since 1.4.0
+getGreetingExtended :: Get (Greeting, ExtendedCapabilities)
+getGreetingExtended = do
     pv <- getWord8
     sv <- getByteStringNul
     cid <- getWord32le
@@ -97,7 +152,8 @@ getGreeting = do
     capH <- getWord16le
     let cap = fromIntegral capH `shiftL` 16 .|. fromIntegral capL
     _authPluginLen <- getWord8   -- this will issue an unused warning, see the notes below
-    skipN 10 -- 10 * 0x00
+    skipN 6
+    extended <- ExtendedCapabilities <$> getWord32le
     salt2 <- if (cap .&. CLIENT_SECURE_CONNECTION) == 0
         then pure B.empty
         else getByteStringNul   -- This is different with the MySQL document here
@@ -109,7 +165,7 @@ getGreeting = do
         then pure B.empty
         else getByteStringNul
 
-    return (Greeting pv sv cid salt1 cap charset status salt2 authPlugin)
+    return (Greeting pv sv cid salt1 cap charset status salt2 authPlugin, extended)
 
 instance Binary Greeting where
     get = getGreeting
@@ -135,11 +191,19 @@ getAuth = do
     return $ Auth a m c n B.empty B.empty B.empty
 
 putAuth :: Auth -> Put
-putAuth (Auth cap m c n p s plugin) = do
+putAuth = putAuthExtended noExtendedCapabilities
+
+-- | 'putAuth' carrying negotiated extended capabilities; 'authCaps' must then
+-- leave CLIENT_MYSQL out, see 'clientCapFor'.
+--
+-- @since 1.4.0
+putAuthExtended :: ExtendedCapabilities -> Auth -> Put
+putAuthExtended (ExtendedCapabilities extended) (Auth cap m c n p s plugin) = do
     putWord32le cap
     putWord32le m
     putWord8 c
-    replicateM_ 23 (putWord8 0x00)
+    replicateM_ 19 (putWord8 0x00)
+    putWord32le extended
     putByteString n >> putWord8 0x00
     putWord8 $ fromIntegral (B.length p)
     putByteString p
@@ -162,11 +226,19 @@ getSSLRequest :: Get SSLRequest
 getSSLRequest = SSLRequest <$> getWord32le <*> getWord32le <*> getWord8 <* skipN 23
 
 putSSLRequest :: SSLRequest -> Put
-putSSLRequest (SSLRequest cap m c) = do
+putSSLRequest = putSSLRequestExtended noExtendedCapabilities
+
+-- | 'putSSLRequest' carrying negotiated extended capabilities. MariaDB reads
+-- them from the SSL request too, before the TLS handshake.
+--
+-- @since 1.4.0
+putSSLRequestExtended :: ExtendedCapabilities -> SSLRequest -> Put
+putSSLRequestExtended (ExtendedCapabilities extended) (SSLRequest cap m c) = do
     putWord32le cap
     putWord32le m
     putWord8 c
-    replicateM_ 23 (putWord8 0x00)
+    replicateM_ 19 (putWord8 0x00)
+    putWord32le extended
 
 instance Binary SSLRequest where
     get = getSSLRequest
@@ -187,6 +259,15 @@ clientCap =  CLIENT_LONG_PASSWORD
                 .|. CLIENT_SECURE_CONNECTION
                 .|. CLIENT_PLUGIN_AUTH
 
+-- | 'clientCap' for a connection using these extended capabilities.
+--
+-- @since 1.4.0
+clientCapFor :: ExtendedCapabilities -> Word32
+clientCapFor negotiated =
+    if negotiated == noExtendedCapabilities
+    then clientCap
+    else clientCap .&. complement CLIENT_MYSQL
+
 clientMaxPacketSize :: Word32
 clientMaxPacketSize = 0x00ffffff :: Word32
 
@@ -195,4 +276,12 @@ supportTLS :: Word32 -> Bool
 supportTLS x = (x .&. CLIENT_SSL) /= 0
 
 sslRequest :: Word8 -> SSLRequest
-sslRequest charset = SSLRequest (clientCap .|. CLIENT_SSL) clientMaxPacketSize charset
+sslRequest = sslRequestFor noExtendedCapabilities
+
+-- | 'sslRequest' for a connection using these extended capabilities; encode
+-- it with 'putSSLRequestExtended'.
+--
+-- @since 1.4.0
+sslRequestFor :: ExtendedCapabilities -> Word8 -> SSLRequest
+sslRequestFor negotiated charset =
+    SSLRequest (clientCapFor negotiated .|. CLIENT_SSL) clientMaxPacketSize charset

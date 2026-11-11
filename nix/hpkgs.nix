@@ -13,6 +13,7 @@ pkgs.haskellPackages.override {
           postBuild = ''
             mkdir -p $out/bin/integration
             cp ./dist/build/integration/integration $out/bin/integration/integration
+            cp ./dist/build/integration-mariadb/integration-mariadb $out/bin/integration/integration-mariadb
             mkdir -p $out/test/cert
             cp ./test/cert/ca.pem $out/test/cert/ca.pem
             cp ./test/cert/server-cert.pem $out/test/cert/server-cert.pem

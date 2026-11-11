@@ -8,6 +8,8 @@ import qualified AbandonedReplies
 import qualified BinLogRowEvents
 import qualified CABundle
 import qualified CachingSha2
+import qualified MariaDBNegotiation
+import           Database.MySQL.MariaDB (serverFlavour)
 import qualified LargeRows
 import qualified Latin1Results
 import qualified PlaceholderLiterals
@@ -44,6 +46,7 @@ main = do
         , MysqlTests.tests
         , QueryWithoutResultSet.tests
         , MultipleResults.tests
+        , MariaDBNegotiation.tests (serverFlavour greet)
         , LargeRows.tests
         , UnsignedInsertId.tests
         , PlaceholderLiterals.tests

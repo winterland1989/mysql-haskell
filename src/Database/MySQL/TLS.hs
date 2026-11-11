@@ -14,23 +14,19 @@ This module provides secure MySQL connection using 'tls' package, please make su
 module Database.MySQL.TLS (
       connect
     , connectDetail
+    , connectDetailExtended
     , module Data.TLSSetting
     ) where
 
-import           Control.Exception              (bracketOnError, throwIO, catch, SomeException)
-import           Control.Monad                  (void)
-import qualified Data.Binary                    as Binary
-import qualified Data.Binary.Put                as Binary
+import           Control.Exception              (bracketOnError, throwIO)
 import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Lazy           as L
 import           Data.Word                      (Word8)
 import qualified Data.Connection                as Conn
-import           Data.IORef                     (newIORef)
 import           Data.TLSSetting
-import           Database.MySQL.Connection      hiding (connect, connectDetail)
+import           Database.MySQL.Connection      hiding (connect, connectDetail, connectDetailExtended)
 import           Database.MySQL.Protocol.Auth
-import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.Packet
 import           System.IO.Streams               (InputStream)
 import qualified Network.TLS                    as TLS
@@ -46,43 +42,47 @@ connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
-connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
-    bracketOnError (connectWithBufferSize host port bUFSIZE)
-       (TCP.close) $ \ c -> do
-            let is = TCP.source c
-            is' <- decodeInputStream is
-            p <- readPacket is'
-            greet <- decodeFromPacket p
-            if supportTLS (greetingCaps greet)
-            then do
-                let cparams' = cparams {
-                            TLS.clientUseServerNameIndication = False
-                        ,   TLS.clientServerIdentification = (subName, "")
-                        }
-                let (sock, sockAddr) = Conn.connExtraInfo c
-                write c (encodeToPacket 1 $ sslRequest charset)
-                bracketOnError (TLS.contextNew sock cparams')
-                               ( \ ctx -> TLS.bye ctx >> TCP.close c ) $ \ ctx -> do
-                    TLS.handshake ctx
-                    tc <- TLS.tLsToConnection (ctx, sockAddr)
-                    let tlsIs = TCP.source tc
-                    tlsIs' <- decodeInputStream tlsIs
-                    let auth = mkAuth db user pass charset greet
-                    write tc (encodeToPacket 2 auth)
-                    q <- readPacket tlsIs'
-                    completeAuth tlsIs' (write tc) pass q tlsFullAuth
-                    state <- newIORef RepliesRead
-                    let waitNotMandatoryOK = catch
-                            (void (waitCommandReply tlsIs'))
-                            ((\ _ -> return ()) :: SomeException -> IO ())
-                        conn = MySQLConn tlsIs' (write tc)
-                            (writeCommand COM_QUIT (write tc) >> waitNotMandatoryOK >> TCP.close tc)
-                            state
-                    return (greet, conn)
-            else error "Database.MySQL.TLS: server doesn't support TLS connection"
-  where
-    connectWithBufferSize h p bs = TCP.connectSocket h p >>= TCP.socketToConnection bs
-    write c a = TCP.send c $ Binary.runPut . Binary.put $ a
+connectDetail c cp = fmap withoutNegotiated (connectDetailExtended noExtendedCapabilities c cp)
+
+-- | 'connectDetail' asking a MariaDB server for extended capabilities, also
+-- returning those the server agreed to. Asking for none gives exactly
+-- 'connectDetail'. See Note [MariaDB extended capabilities].
+--
+-- @since 1.4.0
+connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String)
+                      -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+connectDetailExtended requested ci tlsParams =
+    bracketOnError
+        (TCP.connectSocket (ciHost ci) (ciPort ci) >>= TCP.socketToConnection bUFSIZE)
+        TCP.close
+        (handshakeTLS requested ci tlsParams)
+
+handshakeTLS :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String) -> TCP.TCPConnection
+             -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+handshakeTLS requested (ConnectInfo _host _port db user pass charset) (cparams, subName) c = do
+    is' <- decodeInputStream (TCP.source c)
+    p <- readPacket is'
+    (greet, offered) <- getFromPacket getGreetingExtended p
+    let negotiated = negotiateExtended requested greet offered
+    if supportTLS (greetingCaps greet)
+    then do
+        let cparams' = cparams {
+                    TLS.clientUseServerNameIndication = False
+                ,   TLS.clientServerIdentification = (subName, "")
+                }
+        let (sock, sockAddr) = Conn.connExtraInfo c
+        sendPacket c (sslRequestPacket negotiated charset)
+        bracketOnError (TLS.contextNew sock cparams')
+                       ( \ ctx -> TLS.bye ctx >> TCP.close c ) $ \ ctx -> do
+            TLS.handshake ctx
+            tc <- TLS.tLsToConnection (ctx, sockAddr)
+            tlsIs' <- decodeInputStream (TCP.source tc)
+            sendPacket tc (handshakeResponsePacket 2 negotiated db user pass charset greet)
+            q <- readPacket tlsIs'
+            completeAuth tlsIs' (sendPacket tc) pass q tlsFullAuth
+            conn <- authenticatedConnection tlsIs' tc
+            return (greet, negotiated, conn)
+    else error "Database.MySQL.TLS: server doesn't support TLS connection"
 
 -- | Full auth handler for TLS connections: sends the cleartext password
 -- as a NUL-terminated packet, which MySQL accepts over encrypted connections.
