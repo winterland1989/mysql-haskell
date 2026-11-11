@@ -221,6 +221,7 @@ test-suite integration
     PlaceholderLiterals
     QueryApi
     QueryWithoutResultSet
+    ResetConnection
     RoundtripBit
     RowDecoderQueries
     RoundtripYear

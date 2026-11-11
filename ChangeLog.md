@@ -1,5 +1,13 @@
 # Revision history for mysql-haskell
 
+## 1.4.2 -- unreleased
+
+New functions only; existing code is unaffected. `resetConnection` returns a
+connection's session to that of a new one without reconnecting, so a pool can
+hand it to its next user (MySQL 5.7.3 or MariaDB 10.2.4 and newer).
+
+* Reset a pooled connection's session without reconnecting
+
 ## 1.4.1 -- 2026.11.11
 
 Faster decoding. No type changes beyond one new exception, but one change of

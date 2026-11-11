@@ -40,6 +40,7 @@ module Database.MySQL.Base
     , connectUnixSocketDetail
     , close
     , ping
+    , resetConnection
       -- * Direct query
     , execute
     , executeMany
