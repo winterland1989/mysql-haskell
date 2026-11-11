@@ -97,9 +97,11 @@ employeeRow :: ByteString
 employeeRow = encodeRow
     [Just "10001", Just "1953-09-02", Just "Georgi", Just "Facello", Just "M", Just "1986-06-26"]
 
-utf8, binary :: Word16
+utf8, binary, latin1, gbk :: Word16
 utf8 = 33
 binary = 63
+latin1 = 8
+gbk = 28
 
 unsigned :: Word16
 unsigned = 32
@@ -149,7 +151,7 @@ genColumn = columnOf
         , FieldType 0xf5
         ]
     <*> elements [0, unsigned]
-    <*> elements [utf8, binary]
+    <*> elements [utf8, binary, latin1, gbk]
 
 -- | A column of type NULL always holds the NULL marker.
 genField :: ColumnKind -> Gen (Maybe ByteString)
@@ -157,9 +159,8 @@ genField column = case column of
     NullColumn          -> pure Nothing
     ValueColumn _ value -> frequency [(1, pure Nothing), (6, Just <$> genValueBytes value)]
 
--- | Mostly what the server sends for the column, sometimes bytes it would not.
--- Text in a non-binary character set stays valid UTF-8: 'getTextRow' decodes it
--- lazily, so invalid bytes would throw while the values are compared.
+-- | Mostly what the server sends for the column, sometimes bytes it would not,
+-- such as a string that is not UTF-8 in a character set read as UTF-8.
 genValueBytes :: ValueKind -> Gen ByteString
 genValueBytes value = case value of
     KindDecimal     -> renderedOrArbitrary (arbitrary :: Gen Double)
@@ -179,7 +180,8 @@ genValueBytes value = case value of
     KindDate        -> renderedOrArbitrary (arbitrary :: Gen Day)
     KindTime        -> oneof [genTime, renderedOrArbitrary (arbitrary :: Gen TimeOfDay)]
     KindGeometry    -> arbitrary
-    KindText        -> T.encodeUtf8 <$> arbitrary
+    KindText _      -> frequency [(9, T.encodeUtf8 <$> arbitrary), (1, arbitrary)]
+    KindLatin1Text  -> arbitrary
     KindBytes       -> frequency [(9, arbitrary), (1, genLongBytes)]
     KindBit         -> B.pack <$> (choose (1, 10) >>= vector)
     KindUnsupported -> arbitrary

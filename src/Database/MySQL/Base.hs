@@ -16,6 +16,8 @@ By using this library you will meet:
 
     * 'NetworkException':  underline network is broken.
     * 'UnconsumedResultSet':  you should consume previous resultset before sending new command.
+    * 'AbandonedReply': reading an earlier reply stopped part-way, e.g. on a timeout;
+      connect again.
     * 'ERRException':  you receive a 'ERR' packet when you shouldn't.
     * 'UnexpectedPacket':  you receive a unexpected packet when you shouldn't.
     * 'DecodePacketException': there's a packet we can't decode.
@@ -78,6 +80,7 @@ module Database.MySQL.Base
       -- * Exceptions
     , NetworkException(..)
     , UnconsumedResultSet(..)
+    , AbandonedReply(..)
     , ERRException(..)
     , UnexpectedPacket(..)
     , DecodePacketException(..)
@@ -92,13 +95,15 @@ module Database.MySQL.Base
     , module  Database.MySQL.Protocol.RawRow
     ) where
 
-import           Control.Exception                  (mask, onException, throwIO)
+import           Control.Exception                  (SomeException, catch, fromException,
+                                                     mask, onException, throwIO)
 import           Control.Monad
 import           Data.Bits                          ((.&.))
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
 import qualified Data.ByteString.Lazy               as L
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
+import           Data.Maybe                         (isJust)
 import           Data.Proxy                         (Proxy (..))
 import           Database.MySQL.Connection
 import qualified Database.MySQL.Decoder             as Decoder
@@ -143,12 +148,11 @@ execute conn qry params = execute_ conn (renderParams qry params)
 -- @since 0.2.0.0
 --
 executeMany :: QueryParam p => MySQLConn -> Query -> [[p]] -> IO [OK]
-executeMany conn@(MySQLConn is os _ _) qry paramsList = do
-    guardUnconsumed conn
+executeMany conn@(MySQLConn is os _ _) qry paramsList =
     case paramsList of
         -- Joining no statements would send an empty query, which the server refuses.
-        [] -> pure []
-        _ : _ -> do
+        [] -> guardUnconsumed conn >> pure []
+        _ : _ -> runCommand conn $ do
             let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
             writeCommand (COM_QUERY qry') os
             readStatementResults is >>= onlyOKs
@@ -167,8 +171,7 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList = do
 -- @since 0.8.4.0
 --
 executeMany_ :: MySQLConn -> Query -> IO [OK]
-executeMany_ conn@(MySQLConn is os _ _) qry = do
-    guardUnconsumed conn
+executeMany_ conn@(MySQLConn is os _ _) qry = runCommand conn $ do
     writeCommand (COM_QUERY (fromQuery qry)) os
     readStatementResults is >>= onlyOKs
 
@@ -208,8 +211,7 @@ queryVector conn qry params = queryVector_ conn (renderParams qry params)
 -- rows; use 'execute_' to get its 'OK'.
 --
 query_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream [MySQLValue])
-query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
-    guardUnconsumed conn
+query_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
     writeCommand (COM_QUERY qry) os
     reply <- readQueryReply is
     case reply of
@@ -217,8 +219,8 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeTextRowPacket (map columnKind fields))
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state (decodeTextRowPacket (map columnKind fields))
             return (fields, rows)
 
 -- | 'V.Vector' version of 'query_'.
@@ -226,8 +228,7 @@ query_ conn@(MySQLConn is os _ consumed) (Query qry) = do
 -- @since 0.5.1.0
 --
 queryVector_ :: MySQLConn -> Query -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
-queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
-    guardUnconsumed conn
+queryVector_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
     writeCommand (COM_QUERY qry) os
     reply <- readQueryReply is
     case reply of
@@ -235,8 +236,8 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         ResultSetColumns len -> do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed (decodeTextRowVectorPacket (V.map columnKind fields))
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state (decodeTextRowVectorPacket (V.map columnKind fields))
             return (fields, rows)
 
 -- | 'query_' with each row decoded by a 'Decoder.RowDecoder' instead of into
@@ -249,14 +250,14 @@ queryVector_ conn@(MySQLConn is os _ consumed) (Query qry) = do
 -- A statement without a result-set, such as an INSERT, gives no columns and no
 -- rows, as with 'query_'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 queryRows_ :: Decoder.RowDecoder a -> MySQLConn -> Query -> IO ([ColumnDef], InputStream a)
 queryRows_ decoder conn qry =
     queryRowBodies_ conn qry >>= decodeRowBodies (Proxy :: Proxy TextProtocol) decoder
 
 -- | 'queryRows_' with parameters, filled in as 'query' does.
 --
--- @since 1.3.4
+-- @since 1.4.0
 queryRows :: QueryParam p => Decoder.RowDecoder a -> MySQLConn -> Query -> [p] -> IO ([ColumnDef], InputStream a)
 queryRows decoder conn qry params = queryRows_ decoder conn (renderParams qry params)
 
@@ -266,7 +267,7 @@ queryRows decoder conn qry params = queryRows_ decoder conn (renderParams qry pa
 -- | 'queryStmt' with each row decoded by a 'Decoder.RowDecoder', as
 -- 'queryRows_' does.
 --
--- @since 1.3.4
+-- @since 1.4.0
 queryStmtRows :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream a)
 queryStmtRows decoder conn stid params =
     queryStmtRowBodies conn stid params >>= decodeRowBodies (Proxy :: Proxy BinaryProtocol) decoder
@@ -291,7 +292,7 @@ decodeRowBody prepared bodies row = case Decoder.runPreparedRow prepared row of
 -- fields, for libraries that decode by column number with
 -- 'Decoder.prepareFieldParser' and 'Decoder.runFieldParser'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 queryRawRows_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream (RawRow TextProtocol))
 queryRawRows_ conn qry = do
     (fields, bodies) <- queryRowBodies_ conn qry
@@ -299,7 +300,7 @@ queryRawRows_ conn qry = do
 
 -- | 'queryStmt' handing each row over as a 'RawRow', as 'queryRawRows_' does.
 --
--- @since 1.3.4
+-- @since 1.4.0
 queryStmtRawRows :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream (RawRow BinaryProtocol))
 queryStmtRawRows conn stid params = do
     (fields, bodies) <- queryStmtRowBodies conn stid params
@@ -310,8 +311,7 @@ rawRowOrThrow toRawRow row = either (throwRowError row) pure (toRawRow row)
 
 -- | The bodies of a text-protocol result set's row packets.
 queryRowBodies_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream ByteString)
-queryRowBodies_ conn@(MySQLConn is os _ consumed) (Query qry) = do
-    guardUnconsumed conn
+queryRowBodies_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
     writeCommand (COM_QUERY qry) os
     reply <- readQueryReply is
     case reply of
@@ -319,14 +319,13 @@ queryRowBodies_ conn@(MySQLConn is os _ consumed) (Query qry) = do
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed (pure . L.toStrict . pBody)
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state (pure . L.toStrict . pBody)
             return (fields, rows)
 
 -- | The bodies of a prepared statement's row packets.
 queryStmtRowBodies :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream ByteString)
-queryStmtRowBodies conn@(MySQLConn is os _ consumed) stid params = do
-    guardUnconsumed conn
+queryStmtRowBodies conn@(MySQLConn is os _ state) stid params = runCommand conn $ do
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     reply <- readQueryReply is
     case reply of
@@ -334,8 +333,8 @@ queryStmtRowBodies conn@(MySQLConn is os _ consumed) stid params = do
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed binaryRowBody
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state binaryRowBody
             return (fields, rows)
 
 -- | A binary-protocol row, whose packets start with 0x00 like an OK packet.
@@ -361,8 +360,7 @@ data StatementResult
 --
 -- @since 1.3.3
 queryMulti_ :: MySQLConn -> Query -> IO [StatementResult]
-queryMulti_ conn@(MySQLConn is os _ _) (Query qry) = do
-    guardUnconsumed conn
+queryMulti_ conn@(MySQLConn is os _ _) (Query qry) = runCommand conn $ do
     writeCommand (COM_QUERY qry) os
     readStatementResults is
 
@@ -469,20 +467,38 @@ throwRowError row rowError =
 --
 -- Once finished, also when 'finishAfterEOF' throws, further reads answer
 -- Nothing rather than wait on the socket for packets that will never come.
-resultSetRows :: InputStream Packet -> IORef Bool -> (Packet -> IO row) -> IO (InputStream row)
-resultSetRows is consumed decodeRow = do
+-- A read stopped part-way leaves the connection at 'ReplyAbandoned', see
+-- Note [Abandoned replies].
+resultSetRows :: InputStream Packet -> IORef ReplyState -> (Packet -> IO row) -> IO (InputStream row)
+resultSetRows is state decodeRow = do
     finished <- newIORef False
-    Stream.makeInputStream $ do
+    Stream.makeInputStream $ mask $ \restore -> do
         alreadyFinished <- readIORef finished
-        if alreadyFinished then pure Nothing else do
-            q <- readPacket is
-            if  | isEOF q -> do
-                    writeIORef finished True
-                    writeIORef consumed True
-                    finishAfterEOF is q
-                    pure Nothing
-                | isERR q -> decodeFromPacket q >>= throwIO . ERRException
-                | otherwise -> Just <$> decodeRow q
+        current <- readIORef state
+        if  | alreadyFinished -> pure Nothing
+            | current == ReplyAbandoned -> throwIO AbandonedReply
+            | otherwise -> restore (nextRow is state finished decodeRow)
+                `catch` settleFailedRowRead state finished
+
+nextRow :: InputStream Packet -> IORef ReplyState -> IORef Bool -> (Packet -> IO row) -> IO (Maybe row)
+nextRow is state finished decodeRow = do
+    q <- readPacket is
+    if  | isEOF q -> do
+            writeIORef finished True
+            finishAfterEOF is q
+            writeIORef state RepliesRead
+            pure Nothing
+        | isERR q -> decodeFromPacket q >>= throwIO . ERRException
+        | otherwise -> Just <$> decodeRow q
+
+-- | Like 'settleFailedExchange', and a row that failed to decode was still
+-- read in full, so the rest of the rows can be read or skipped.
+settleFailedRowRead :: IORef ReplyState -> IORef Bool -> SomeException -> IO a
+settleFailedRowRead state finished failure = do
+    if  | endsReply failure -> writeIORef finished True >> writeIORef state RepliesRead
+        | isJust (fromException failure :: Maybe DecodePacketException) -> pure ()
+        | otherwise -> writeIORef state ReplyAbandoned
+    throwIO failure
 
 -- | A binary-protocol row, whose packets start with 0x00 like an OK packet. A
 -- row that does not decode raises 'DecodePacketFailed', as it did when rows
@@ -558,8 +574,7 @@ throwOnResultSet further = case further of
 -- | Ask MySQL to prepare a query statement.
 --
 prepareStmt :: MySQLConn -> Query -> IO StmtID
-prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
-    guardUnconsumed conn
+prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = runCommand conn $ do
     writeCommand (COM_STMT_PREPARE stmt) os
     p <- readPacket is
     if isERR p
@@ -578,8 +593,7 @@ prepareStmt conn@(MySQLConn is os _ _) (Query stmt) = do
 -- params's 'ColumnDef', result's 'ColumnDef'.
 --
 prepareStmtDetail :: MySQLConn -> Query -> IO (StmtPrepareOK, [ColumnDef], [ColumnDef])
-prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = do
-    guardUnconsumed conn
+prepareStmtDetail conn@(MySQLConn is os _ _) (Query stmt) = runCommand conn $ do
     writeCommand (COM_STMT_PREPARE stmt) os
     p <- readPacket is
     if isERR p
@@ -598,15 +612,18 @@ closeStmt :: MySQLConn -> StmtID -> IO ()
 closeStmt (MySQLConn _ os _ _) stid = do
     writeCommand (COM_STMT_CLOSE stid) os
 
--- | Ask MySQL to reset a query statement, all previous resultset will be cleared.
+-- | Ask MySQL to reset a query statement: discard the data sent for its
+-- parameters and close its cursor.
+--
+-- It does not discard a result-set the statement returned: the server has
+-- already sent its rows, so they must be read or skipped first, or this throws
+-- 'UnconsumedResultSet'.
 --
 resetStmt :: MySQLConn -> StmtID -> IO ()
-resetStmt (MySQLConn is os _ consumed) stid = do
-    writeCommand (COM_STMT_RESET stid) os  -- previous result-set may still be unconsumed
+resetStmt conn@(MySQLConn is os _ _) stid = runCommand conn $ do
+    writeCommand (COM_STMT_RESET stid) os
     p <- readPacket is
-    if isERR p
-    then decodeFromPacket p >>= throwIO . ERRException
-    else writeIORef consumed True
+    when (isERR p) (decodeFromPacket p >>= throwIO . ERRException)
 
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
@@ -619,8 +636,7 @@ executeStmt conn stid params =
 -- a CALL running one), is read off the connection and raises 'ExtraResultSets',
 -- unless a later statement fails: its 'ERRException' is raised instead.
 executeCommand :: MySQLConn -> Command -> IO OK
-executeCommand conn@(MySQLConn is os _ _) cmd = do
-    guardUnconsumed conn
+executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
     writeCommand cmd os
     p <- readPacket is
     if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
@@ -639,8 +655,7 @@ executeCommand conn@(MySQLConn is os _ _) cmd = do
 -- result-set gives no columns and no rows; use 'executeStmt' to get its 'OK'.
 --
 queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
-queryStmt conn@(MySQLConn is os _ consumed) stid params = do
-    guardUnconsumed conn
+queryStmt conn@(MySQLConn is os _ state) stid params = runCommand conn $ do
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     reply <- readQueryReply is
     case reply of
@@ -648,8 +663,8 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed (binaryValuesPacket (Decoder.binaryValueColumns fields))
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state (binaryValuesPacket (Decoder.binaryValueColumns fields))
             return (fields, rows)
 
 -- | 'V.Vector' version of 'queryStmt'
@@ -657,8 +672,7 @@ queryStmt conn@(MySQLConn is os _ consumed) stid params = do
 -- @since 0.5.1.0
 --
 queryStmtVector :: MySQLConn -> StmtID -> [MySQLValue] -> IO (V.Vector ColumnDef, InputStream (V.Vector MySQLValue))
-queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
-    guardUnconsumed conn
+queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ do
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
     reply <- readQueryReply is
     case reply of
@@ -666,18 +680,31 @@ queryStmtVector conn@(MySQLConn is os _ consumed) stid params = do
         ResultSetColumns len -> do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
             _ <- readPacket is -- eof packet, we don't verify this though
-            writeIORef consumed False
-            rows <- resultSetRows is consumed
+            writeIORef state RowsUnread
+            rows <- resultSetRows is state
                 (fmap V.fromList . binaryValuesPacket (Decoder.binaryValueColumns (V.toList fields)))
             return (fields, rows)
 
 -- | Run querys inside a transaction, querys will be rolled back if exception arise.
+--
+-- The procedure's exception is the one rethrown. When the connection cannot
+-- take the ROLLBACK, because the procedure left a result-set unread or was
+-- interrupted mid-reply, it is left at 'AbandonedReply' instead, and the server
+-- rolls the transaction back when the connection closes.
 --
 -- @since 0.2.0.0
 --
 withTransaction :: MySQLConn -> IO a -> IO a
 withTransaction conn procedure = mask $ \restore -> do
   _ <- execute_ conn "BEGIN"
-  r <- restore procedure `onException` (execute_ conn "ROLLBACK")
+  r <- restore procedure `onException` rollbackOrAbandon conn
   _ <- execute_ conn "COMMIT"
   pure r
+
+rollbackOrAbandon :: MySQLConn -> IO ()
+rollbackOrAbandon conn@(MySQLConn _ _ _ state) = do
+  current <- readIORef state
+  case current of
+    RepliesRead -> void (execute_ conn "ROLLBACK")
+    RowsUnread -> writeIORef state ReplyAbandoned
+    ReplyAbandoned -> pure ()

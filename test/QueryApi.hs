@@ -6,6 +6,7 @@ module QueryApi
     ( QueryApi (..)
     , ColumnCount (..)
     , queryApis
+    , mysqlValueApis
     ) where
 
 import           Control.Exception                  (throwIO)
@@ -37,7 +38,12 @@ data QueryApi = QueryApi
     }
 
 queryApis :: [QueryApi]
-queryApis = [valueApi, rowDecoderApi, rawRowApi, typedRawRowApi]
+queryApis = mysqlValueApis ++ [typedRawRowApi]
+
+-- | The APIs that give every field as the 'MySQLValue' the old API does, also
+-- the dates a 'Data.Time.Calendar.Day' cannot hold.
+mysqlValueApis :: [QueryApi]
+mysqlValueApis = [valueApi, rowDecoderApi, rawRowApi]
 
 -- | The API the tests were written for.
 valueApi :: QueryApi

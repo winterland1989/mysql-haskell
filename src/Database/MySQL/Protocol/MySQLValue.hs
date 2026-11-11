@@ -18,6 +18,7 @@ Core text and binary row decoder/encoder machinery.
 module Database.MySQL.Protocol.MySQLValue
   ( -- * MySQLValue decoder and encoder
     MySQLValue(..)
+  , RawDate(..)
   , putParamMySQLType
   , getTextField
   , putTextField
@@ -39,14 +40,19 @@ module Database.MySQL.Protocol.MySQLValue
   , putBinaryField
   , getBinaryRow
   , getBinaryRowVector
+  , decodeMySQLLatin1
   -- * Internal utilities
   , decodeTextValue
   , decodeTextBit
   , lengthEncodedInt
   , lexSignedIntegral
   , lexSignedFraction
-  , lexDate
-  , lexLocalTime
+  , textDateParts
+  , lexDateTimeParts
+  , calendarDate
+  , dateValue
+  , dateTimeValue
+  , timeStampValue
   , lexSignedTime
   , getBits
   , BitMap(..)
@@ -75,7 +81,7 @@ import           Data.Int
 import           Data.Scientific                    (Scientific)
 import           Data.Text                          (Text)
 import qualified Data.Text.Encoding                 as T
-import           Data.Time.Calendar                 (Day, fromGregorian,
+import           Data.Time.Calendar                 (Day, fromGregorianValid,
                                                      toGregorian)
 import           Data.Time.Format                   (defaultTimeLocale,
                                                      formatTime)
@@ -87,7 +93,11 @@ import           Database.MySQL.Protocol.Escape
 import           Database.MySQL.Protocol.FloatingPoint (readDouble, readFloat)
 import           Database.MySQL.Protocol.Packet
 import           GHC.Generics                       (Generic)
+import           Text.Printf                        (printf)
+import qualified Data.Text                          as T
 import qualified Data.Vector                        as V
+import qualified Unwitch.Convert.Int                as Int
+import qualified Unwitch.Convert.Word16             as Word16
 import qualified Unwitch.Convert.Word64             as Word64
 import qualified Unwitch.Convert.Word8              as Word8
 
@@ -108,6 +118,10 @@ import qualified Unwitch.Convert.Word8              as Word8
 --  for more info on timezone support, please read <http://dev.mysql.com/doc/refman/5.7/en/time-zone-support.html>
 --
 --  So we use 'LocalTime' to present both @DATETIME@ and @TIMESTAMP@, but the local here is different.
+--
+-- A @DATE@, @DATETIME@ or @TIMESTAMP@ whose date a 'Day' cannot hold, such as the zero
+-- date @0000-00-00@, arrives as 'MySQLDateRaw', 'MySQLDateTimeRaw' or 'MySQLTimeStampRaw'
+-- and is sent back unchanged, see 'RawDate'.
 --
 -- MySQL's @TIME@ type can present time of day, but also elapsed time or a time interval between two events.
 -- @TIME@ values may range from @-838:59:59@ to @838:59:59@, so 'MySQLTime' values consist of a sign and a
@@ -132,6 +146,9 @@ data MySQLValue
     | MySQLDateTime      !LocalTime    -- ^ DATETIME
     | MySQLTimeStamp     !LocalTime    -- ^ TIMESTAMP
     | MySQLDate          !Day              -- ^ DATE
+    | MySQLDateRaw       !RawDate              -- ^ DATE that a 'Day' cannot hold
+    | MySQLDateTimeRaw   !RawDate !TimeOfDay   -- ^ DATETIME whose date a 'Day' cannot hold
+    | MySQLTimeStampRaw  !RawDate !TimeOfDay   -- ^ TIMESTAMP whose date a 'Day' cannot hold
     | MySQLTime          !Word8 !TimeOfDay -- ^ sign(0 = non-negative, 1 = negative) hh mm ss microsecond
                                            -- The sign is OPPOSITE to binlog one !!!
     | MySQLGeometry      !ByteString       -- ^ todo: parsing to something meanful
@@ -140,6 +157,33 @@ data MySQLValue
     | MySQLText          !Text
     | MySQLNull
   deriving (Show, Eq, Generic)
+
+-- | A date as the server stores it, when a 'Day' cannot hold it: the zero date
+-- @0000-00-00@, a date with a zero month or day such as @2024-05-00@ (unless
+-- @NO_ZERO_DATE@ and @NO_ZERO_IN_DATE@ are set), or under @ALLOW_INVALID_DATES@
+-- a day past the end of its month such as @2024-02-30@.
+data RawDate = RawDate
+    { rawDateYear  :: !Word16
+    , rawDateMonth :: !Word8
+    , rawDateDay   :: !Word8
+    } deriving (Show, Eq, Generic)
+
+-- | 'Right' when a 'Day' can hold the date.
+calendarDate :: RawDate -> Either RawDate Day
+calendarDate raw@(RawDate year month day) =
+    maybe (Left raw) Right
+        (fromGregorianValid (Word16.toInteger year) (Word8.toInt month) (Word8.toInt day))
+
+dateValue :: RawDate -> MySQLValue
+dateValue = either MySQLDateRaw MySQLDate . calendarDate
+
+dateTimeValue :: RawDate -> TimeOfDay -> MySQLValue
+dateTimeValue raw time =
+    either (`MySQLDateTimeRaw` time) (\day -> MySQLDateTime (LocalTime day time)) (calendarDate raw)
+
+timeStampValue :: RawDate -> TimeOfDay -> MySQLValue
+timeStampValue raw time =
+    either (`MySQLTimeStampRaw` time) (\day -> MySQLTimeStamp (LocalTime day time)) (calendarDate raw)
 
 -- | Put 'FieldType' and usigned bit(0x80/0x00) for 'MySQLValue's.
 --
@@ -159,6 +203,9 @@ putParamMySQLType (MySQLYear         _)  = putFieldType mySQLTypeShort    >> put
 putParamMySQLType (MySQLDateTime     _)  = putFieldType mySQLTypeDateTime >> putWord8 0x00
 putParamMySQLType (MySQLTimeStamp    _)  = putFieldType mySQLTypeTimestamp>> putWord8 0x00
 putParamMySQLType (MySQLDate         _)  = putFieldType mySQLTypeDate     >> putWord8 0x00
+putParamMySQLType (MySQLDateRaw      _)  = putFieldType mySQLTypeDate     >> putWord8 0x00
+putParamMySQLType (MySQLDateTimeRaw _ _) = putFieldType mySQLTypeDateTime >> putWord8 0x00
+putParamMySQLType (MySQLTimeStampRaw _ _) = putFieldType mySQLTypeTimestamp >> putWord8 0x00
 putParamMySQLType (MySQLTime       _ _)  = putFieldType mySQLTypeTime     >> putWord8 0x00
 putParamMySQLType (MySQLBytes        _)  = putFieldType mySQLTypeBlob     >> putWord8 0x00
 putParamMySQLType (MySQLGeometry     _)  = putFieldType mySQLTypeGeometry >> putWord8 0x00
@@ -189,10 +236,12 @@ The query functions in "Database.MySQL.Base" instead resolve each column to a
 with 'decodeTextRow': a walk over the row as one strict 'ByteString' that
 returns unboxed sums, so no 'Either' or tuple is allocated per field.
 
-Decision: values stay as lazy as 'getTextField' leaves them, so invalid UTF-8
-still raises when the value is used. Evaluating every value while decoding
-saved 3% of the instructions when a caller uses every value, and cost 2.75
-times the instructions when it uses none (docs/direct-row-decoding.md).
+Decision: values stay as lazy as 'getTextField' leaves them. Evaluating every
+value while decoding saved 3% of the instructions when a caller uses every
+value, and cost 2.75 times the instructions when it uses none
+(docs/direct-row-decoding.md). Only a string's bytes are checked at once, as
+UTF-8, so bytes that are not fail the row with a 'TextFieldInvalidUtf8' rather
+than raise an exception from pure code when the value is used.
 
 'getTextField' and 'getTextRow' keep their 'Get' interface and share
 'columnKind' and 'decodeTextValue', so both paths turn the same bytes into the
@@ -204,7 +253,7 @@ BIT field, which is now 0 instead of the byte after it.
 -- | How a column's fields decode, in either protocol, resolved once per result
 -- set by 'columnKind'. See Note [Text rows decoded once per result set].
 --
--- @since 1.3.4
+-- @since 1.4.0
 data ColumnKind
     = NullColumn
       -- ^ a column of type NULL: every field of it is NULL, so no bytes of a
@@ -215,7 +264,7 @@ data ColumnKind
 
 -- | The 'MySQLValue' constructor a column's non-NULL fields become.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data ValueKind
     = KindDecimal
     | KindInt8U
@@ -234,7 +283,10 @@ data ValueKind
     | KindDate
     | KindTime
     | KindGeometry
-    | KindText         -- ^ a string column in any character set but binary
+    | KindText !Word16
+      -- ^ a string column in a character set other than binary or latin1, read
+      -- as UTF-8; the character set id is kept for error messages
+    | KindLatin1Text   -- ^ a string column in latin1, which MySQL means as Windows-1252
     | KindBytes        -- ^ a string column in the binary character set
     | KindBit
     | KindUnsupported  -- ^ a column type without a decoder
@@ -242,7 +294,7 @@ data ValueKind
 
 -- | How a column's fields decode.
 --
--- @since 1.3.4
+-- @since 1.4.0
 columnKind :: ColumnDef -> ColumnKind
 columnKind f =
     if  | t == mySQLTypeNull -> NullColumn
@@ -272,17 +324,16 @@ columnKind f =
             || t == mySQLTypeBlob
             || t == mySQLTypeVarString
             || t == mySQLTypeString ->
-            ValueColumn t (if isText then KindText else KindBytes)
+            ValueColumn t (stringKind (columnCharSet f))
         | t == mySQLTypeBit -> ValueColumn t KindBit
         | otherwise -> ValueColumn t KindUnsupported
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
-    isText = columnCharSet f /= 63
 
 -- | Why the bytes of a text-protocol field did not decode.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data TextFieldError
     = TextFieldUnparsable !FieldType !ByteString
       -- ^ the bytes are not a value of the column's type
@@ -290,6 +341,8 @@ data TextFieldError
       -- ^ a BIT field longer than the 8 bytes of a 'Word64'
     | TextFieldUnsupportedType !FieldType
       -- ^ a column type without a text decoder
+    | TextFieldInvalidUtf8 !Word16 !ByteString
+      -- ^ a string in this character set id whose bytes are not UTF-8
     deriving (Show, Eq)
 
 -- | The message 'getTextField' fails with.
@@ -302,9 +355,14 @@ describeTextFieldError fieldError = case fieldError of
         "Database.MySQL.Protocol.MySQLValue: wrong bit length size: " ++ show width
     TextFieldUnsupportedType fieldType ->
         "Database.MySQL.Protocol.MySQLValue: missing text decoder for " ++ show fieldType
+    TextFieldInvalidUtf8 charsetId _ ->
+        "Database.MySQL.Protocol.MySQLValue: a string column arrived in character set id "
+            ++ show charsetId ++ ", which mysql-haskell can only decode as UTF-8 or latin1,"
+            ++ " and its bytes are not valid UTF-8. Use a UTF-8 connection charset such as"
+            ++ " defaultConnectInfoMB4's, or select the column as BINARY to get its bytes."
 
 -- | The value of a field's bytes. The lexer runs at once, so a malformed field
--- fails while the row is read; a lexed value and any 'Text' are left lazy,
+-- fails while the row is read; a lexed value and the 'Text' of a string are left lazy,
 -- while a constructor around bytes already in hand is built at once, as that
 -- is cheaper than a thunk. See Note [Text rows decoded once per result set].
 -- Inlined so that 'decodeTextFieldAt' matches the 'Right' away instead of
@@ -323,16 +381,26 @@ decodeTextValue fieldType value bytes = case value of
     KindFloat       -> lexedValue fieldType MySQLFloat readFloat bytes
     KindDouble      -> lexedValue fieldType MySQLDouble readDouble bytes
     KindYear        -> lexedValue fieldType MySQLYear lexSignedIntegral bytes
-    KindTimeStamp   -> lexedValue fieldType MySQLTimeStamp lexLocalTime bytes
-    KindDateTime    -> lexedValue fieldType MySQLDateTime lexLocalTime bytes
-    KindDate        -> lexedValue fieldType MySQLDate lexDate bytes
+    KindTimeStamp   -> lexedValue fieldType (uncurry timeStampValue) lexDateTimeParts bytes
+    KindDateTime    -> lexedValue fieldType (uncurry dateTimeValue) lexDateTimeParts bytes
+    KindDate        -> lexedValue fieldType dateValue textDateParts bytes
     KindTime        -> lexedValue fieldType id lexTime bytes
     KindGeometry    -> Right $! MySQLGeometry bytes
-    KindText        -> Right (MySQLText (T.decodeUtf8 bytes))
+    KindText charsetId -> utf8Value charsetId bytes
+    KindLatin1Text  -> Right (MySQLText (decodeMySQLLatin1 bytes))
     KindBytes       -> Right $! MySQLBytes bytes
     KindBit         -> decodeTextBit bytes
     KindUnsupported -> Left (TextFieldUnsupportedType fieldType)
 {-# INLINE decodeTextValue #-}
+
+-- | Checked by 'B.isValidUtf8' at once, so the lazy 'T.decodeUtf8' cannot fail
+-- when the value is used. See Note [Text rows decoded once per result set].
+utf8Value :: Word16 -> ByteString -> Either TextFieldError MySQLValue
+utf8Value charsetId bytes =
+    if B.isValidUtf8 bytes
+    then Right (MySQLText (T.decodeUtf8 bytes))
+    else Left (TextFieldInvalidUtf8 charsetId bytes)
+{-# INLINE utf8Value #-}
 
 lexedValue :: FieldType -> (a -> MySQLValue) -> (ByteString -> Maybe a) -> ByteString
            -> Either TextFieldError MySQLValue
@@ -370,21 +438,12 @@ lexSignedFraction bytes = fst <$> LexFrac.readSigned LexFrac.readDecimal bytes
 {-# SPECIALIZE lexSignedFraction :: ByteString -> Maybe Scientific #-}
 
 
--- | @YYYY-MM-DD hh:mm:ss[.fraction]@, as DATETIME and TIMESTAMP fields come.
-lexLocalTime :: ByteString -> Maybe LocalTime
-lexLocalTime bytes = do
+-- | @YYYY-MM-DD hh:mm:ss[.fraction]@, as DATETIME and TIMESTAMP fields come;
+-- the date may be one a 'Day' cannot hold.
+lexDateTimeParts :: ByteString -> Maybe (RawDate, TimeOfDay)
+lexDateTimeParts bytes = do
     guard (B.length bytes >= 12)
-    LocalTime <$> lexDate bytes <*> lexTimeOfDay (B.drop 11 bytes)
-
--- | @YYYY-MM-DD@.
-lexDate :: ByteString -> Maybe Day
-lexDate bytes = do
-    (yyyy, rest) <- LexInt.readDecimal bytes
-    guard (not (B.null rest))
-    (mm, rest') <- LexInt.readDecimal (B.tail rest)
-    guard (not (B.null rest'))
-    (dd, _) <- LexInt.readDecimal (B.tail rest')
-    return (fromGregorian yyyy mm dd)
+    (,) <$> textDateParts bytes <*> lexTimeOfDay (B.drop 11 bytes)
 
 lexTime :: ByteString -> Maybe MySQLValue
 lexTime bytes = uncurry MySQLTime <$> lexSignedTime bytes
@@ -410,24 +469,24 @@ lexTimeOfDay bytes = do
 
 -- | A column's position in a result set, counting from 0.
 --
--- @since 1.3.4
+-- @since 1.4.0
 newtype ColumnNumber = ColumnNumber Int
     deriving (Show, Eq, Ord)
 
--- | @since 1.3.4
+-- | @since 1.4.0
 nextColumn :: ColumnNumber -> ColumnNumber
 nextColumn (ColumnNumber column) = ColumnNumber (column + 1)
 
 -- | Where and why a text-protocol row did not decode.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data RowError = RowError
     { rowErrorColumn :: !ColumnNumber
     , rowErrorOffset :: !Int               -- ^ byte offset of that column's field in the row
     , rowErrorKind   :: !RowErrorKind
     } deriving (Show, Eq)
 
--- | @since 1.3.4
+-- | @since 1.4.0
 data RowErrorKind
     = RowEndsEarly
       -- ^ the row ends before this column's field does
@@ -439,7 +498,7 @@ data RowErrorKind
       -- ^ the field's bytes did not decode
     deriving (Show, Eq)
 
--- | @since 1.3.4
+-- | @since 1.4.0
 describeRowError :: RowError -> String
 describeRowError (RowError (ColumnNumber column) offset kind) =
     "Database.MySQL.Protocol.MySQLValue: column " ++ show column ++ " at byte "
@@ -455,7 +514,7 @@ describeRowError (RowError (ColumnNumber column) offset kind) =
 -- last column are ignored, as 'getTextRow' ignores them.
 -- See Note [Text rows decoded once per result set].
 --
--- @since 1.3.4
+-- @since 1.4.0
 decodeTextRow :: [ColumnKind] -> ByteString -> Either RowError [MySQLValue]
 decodeTextRow columns row = case decodeTextFields row (ColumnNumber 0) 0 columns of
     (# rowError | #) -> Left rowError
@@ -463,7 +522,7 @@ decodeTextRow columns row = case decodeTextFields row (ColumnNumber 0) 0 columns
 
 -- | 'V.Vector' version of 'decodeTextRow'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 decodeTextRowVector :: V.Vector ColumnKind -> ByteString -> Either RowError (V.Vector MySQLValue)
 decodeTextRowVector columns row =
     V.fromListN (V.length columns) <$> decodeTextRow (V.toList columns) row
@@ -525,6 +584,84 @@ littleEndianLength row start width =
 prependLittleEndianByte :: Word8 -> Word64 -> Word64
 prependLittleEndianByte byte higherBytes = unsafeShiftL higherBytes 8 .|. Word8.toWord64 byte
 
+-- | The @YYYY-MM-DD@ that starts a text-protocol date, which may be zero.
+textDateParts :: ByteString -> Maybe RawDate
+textDateParts bs = do
+    (yyyy, rest) <- LexInt.readDecimal bs :: Maybe (Int, ByteString)
+    guard (not (B.null rest))
+    (mm, rest') <- LexInt.readDecimal (B.tail rest) :: Maybe (Int, ByteString)
+    guard (not (B.null rest'))
+    (dd, _) <- LexInt.readDecimal (B.tail rest') :: Maybe (Int, ByteString)
+    RawDate <$> Int.toWord16 yyyy <*> Int.toWord8 mm <*> Int.toWord8 dd
+
+-- | How the bytes of a string column decode, by the character set id the
+-- server sent them in. See Note [Result character sets].
+stringKind :: Word16 -> ValueKind
+stringKind charsetId =
+    if  | charsetId == 63 -> KindBytes
+        | charsetId `elem` latin1Collations -> KindLatin1Text
+        | otherwise -> KindText charsetId
+
+-- | The ids of @information_schema.collations@ whose character set is latin1,
+-- in MySQL 8.0 and MariaDB 11.4 (which adds the two nopad ones).
+latin1Collations :: [Word16]
+latin1Collations = [5, 8, 15, 31, 47, 48, 49, 94, 1032, 1071]
+
+-- Note [Result character sets]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The server converts string columns to character_set_results, so with a
+-- UTF-8 connection charset every text column arrives as UTF-8. A connection
+-- set to another charset, as after @SET NAMES latin1@, gets that charset's
+-- bytes. latin1 is decoded here; any other charset is read as UTF-8, which
+-- keeps ASCII-only values working as they always did, and fails with a
+-- 'TextFieldInvalidUtf8' naming the charset on bytes that are not UTF-8,
+-- rather than return mangled text.
+
+stringColumnValue :: ColumnDef -> ByteString -> Get MySQLValue
+stringColumnValue column bytes =
+    case decodeTextValue (columnType column) (stringKind (columnCharSet column)) bytes of
+        Right value -> pure value
+        Left fieldError ->
+            fail (describeTextFieldError fieldError ++ " Column: " ++ show (columnName column))
+
+-- | MySQL's latin1, which is Windows-1252 with its five unassigned bytes
+-- (0x81, 0x8D, 0x8F, 0x90, 0x9D) mapped to the C1 controls of the same number.
+-- 'T.decodeLatin1' alone is ISO-8859-1, which reads all of 0x80 to 0x9F as
+-- C1 controls, so the 27 bytes Windows-1252 assigns are remapped after it.
+decodeMySQLLatin1 :: ByteString -> Text
+decodeMySQLLatin1 = T.map windows1252Char . T.decodeLatin1
+
+windows1252Char :: Char -> Char
+windows1252Char char = case char of
+    '\x80' -> '\x20AC'
+    '\x82' -> '\x201A'
+    '\x83' -> '\x0192'
+    '\x84' -> '\x201E'
+    '\x85' -> '\x2026'
+    '\x86' -> '\x2020'
+    '\x87' -> '\x2021'
+    '\x88' -> '\x02C6'
+    '\x89' -> '\x2030'
+    '\x8A' -> '\x0160'
+    '\x8B' -> '\x2039'
+    '\x8C' -> '\x0152'
+    '\x8E' -> '\x017D'
+    '\x91' -> '\x2018'
+    '\x92' -> '\x2019'
+    '\x93' -> '\x201C'
+    '\x94' -> '\x201D'
+    '\x95' -> '\x2022'
+    '\x96' -> '\x2013'
+    '\x97' -> '\x2014'
+    '\x98' -> '\x02DC'
+    '\x99' -> '\x2122'
+    '\x9A' -> '\x0161'
+    '\x9B' -> '\x203A'
+    '\x9C' -> '\x0153'
+    '\x9E' -> '\x017E'
+    '\x9F' -> '\x0178'
+    sameCodePoint -> sameCodePoint
+
 feedLenEncBytes :: FieldType -> (t -> b) -> (ByteString -> Maybe t) -> Get b
 feedLenEncBytes typ con parser = do
     bs <- getLenEncBytes
@@ -555,6 +692,11 @@ putTextField (MySQLTimeStamp dt) = putInQuotes $
                                       putByteString (BC.pack (formatTime defaultTimeLocale "%F %T%Q" dt))
 putTextField (MySQLDate       d) = putInQuotes $
                                       putByteString (BC.pack (formatTime defaultTimeLocale "%F" d))
+putTextField (MySQLDateRaw    d) = putInQuotes $ putByteString (BC.pack (rawDateText d))
+putTextField (MySQLDateTimeRaw d t) = putInQuotes $
+                                      putByteString (BC.pack (rawDateText d ++ formatTime defaultTimeLocale " %T%Q" t))
+putTextField (MySQLTimeStampRaw d t) = putInQuotes $
+                                      putByteString (BC.pack (rawDateText d ++ formatTime defaultTimeLocale " %T%Q" t))
 putTextField (MySQLTime  sign t) = putInQuotes $ do
                                       when (sign == 1) (putCharUtf8 '-')
                                       putByteString (BC.pack (formatTime defaultTimeLocale "%T%Q" t))
@@ -573,6 +715,9 @@ putTextField (MySQLBit        b) = do putBuilder "b\'"
     {-# INLINE putTextBits #-}
 
 putTextField MySQLNull           = putBuilder "NULL"
+
+rawDateText :: RawDate -> String
+rawDateText (RawDate year month day) = printf "%04d-%02d-%02d" year month day
 
 putInQuotes :: Put -> Put
 putInQuotes p = putCharUtf8 '\'' >> p >> putCharUtf8 '\''
@@ -619,43 +764,43 @@ getBinaryField f
         || t == mySQLTypeTimestamp2   = do
             n <- getLenEncInt
             case n of
-               0 -> pure $ MySQLTimeStamp (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
+               0 -> pure $ timeStampValue (RawDate 0 0 0) (TimeOfDay 0 0 0)
                4 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   pure $ MySQLTimeStamp (LocalTime d (TimeOfDay 0 0 0))
+                   d <- getBinaryDateParts
+                   pure $ timeStampValue d (TimeOfDay 0 0 0)
                7 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- getBinaryDateParts
                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4
-                   pure $ MySQLTimeStamp (LocalTime d td)
+                   pure $ timeStampValue d td
                11 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- getBinaryDateParts
                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
-                   pure $ MySQLTimeStamp (LocalTime d td)
+                   pure $ timeStampValue d td
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong TIMESTAMP length"
     | t == mySQLTypeDateTime
         || t == mySQLTypeDateTime2    = do
             n <- getLenEncInt
             case n of
-               0 -> pure $ MySQLDateTime (LocalTime (fromGregorian 0 0 0) (TimeOfDay 0 0 0))
+               0 -> pure $ dateTimeValue (RawDate 0 0 0) (TimeOfDay 0 0 0)
                4 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
-                   pure $ MySQLDateTime (LocalTime d (TimeOfDay 0 0 0))
+                   d <- getBinaryDateParts
+                   pure $ dateTimeValue d (TimeOfDay 0 0 0)
                7 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- getBinaryDateParts
                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond4
-                   pure $ MySQLDateTime (LocalTime d td)
+                   pure $ dateTimeValue d td
                11 -> do
-                   d <- fromGregorian <$> getYear <*> getInt8' <*> getInt8'
+                   d <- getBinaryDateParts
                    td <- TimeOfDay <$> getInt8' <*> getInt8' <*> getSecond8
-                   pure $ MySQLDateTime (LocalTime d td)
+                   pure $ dateTimeValue d td
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATETIME length"
 
     | t == mySQLTypeDate
         || t == mySQLTypeNewDate      = do
             n <- getLenEncInt
             case n of
-               0 -> pure $ MySQLDate (fromGregorian 0 0 0)
-               4 -> MySQLDate <$> (fromGregorian <$> getYear <*> getInt8' <*> getInt8')
+               0 -> pure $ dateValue (RawDate 0 0 0)
+               4 -> dateValue <$> getBinaryDateParts
                _ -> fail "Database.MySQL.Protocol.MySQLValue: wrong DATE length"
 
     | t == mySQLTypeTime
@@ -685,18 +830,14 @@ getBinaryField f
         || t == mySQLTypeLongBlob
         || t == mySQLTypeBlob
         || t == mySQLTypeVarString
-        || t == mySQLTypeString       = if isText then MySQLText . T.decodeUtf8 <$> getLenEncBytes
-                                                  else MySQLBytes <$> getLenEncBytes
+        || t == mySQLTypeString       = getLenEncBytes >>= stringColumnValue f
     | t == mySQLTypeBit               = MySQLBit <$> (getBits =<< getLenEncInt)
     | otherwise                       = fail $ "Database.MySQL.Protocol.MySQLValue:\
                                                \ missing binary decoder for " ++ show t
   where
     t = columnType f
     isUnsigned = flagUnsigned (columnFlags f)
-    isText = columnCharSet f /= 63
     fracLexer bs = fst <$> LexFrac.readSigned LexFrac.readDecimal bs
-    getYear :: Get Integer
-    getYear = fromIntegral <$> getWord16le
     getInt8' :: Get Int
     getInt8' = fromIntegral <$> getWord8
     getSecond4 :: Get Pico
@@ -707,6 +848,9 @@ getBinaryField f
         ms <- fromIntegral <$> getWord32le :: Get Int
         pure $! (realToFrac s + realToFrac ms / 1000000 :: Pico)
 
+
+getBinaryDateParts :: Get RawDate
+getBinaryDateParts = RawDate <$> getWord16le <*> getWord8 <*> getWord8
 
 -- | Get a bit sequence as a Word64
 --
@@ -751,6 +895,14 @@ putBinaryField (MySQLDateTime  (LocalTime date time)) = do putWord8 11    -- alw
                                                            putBinaryTime' time
 putBinaryField (MySQLDate    d)    = do putWord8 4
                                         putBinaryDay d
+putBinaryField (MySQLDateRaw d)    = do putWord8 4
+                                        putRawDate d
+putBinaryField (MySQLDateTimeRaw d time) = do putWord8 11
+                                              putRawDate d
+                                              putBinaryTime' time
+putBinaryField (MySQLTimeStampRaw d time) = do putWord8 11
+                                               putRawDate d
+                                               putBinaryTime' time
 putBinaryField (MySQLTime sign t)  = do putWord8 12    -- always put full
                                         putWord8 sign
                                         putBinaryTime t
@@ -766,6 +918,9 @@ putBinaryDay d = do let (yyyy, mm, dd) = toGregorian d
                     putWord8 (fromIntegral mm)
                     putWord8 (fromIntegral dd)
 {-# INLINE putBinaryDay #-}
+
+putRawDate :: RawDate -> Put
+putRawDate (RawDate year month day) = putWord16le year >> putWord8 month >> putWord8 day
 
 putBinaryTime' :: TimeOfDay -> Put
 putBinaryTime' (TimeOfDay hh mm ss) = do let s = floor ss

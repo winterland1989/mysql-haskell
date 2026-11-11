@@ -31,7 +31,8 @@ typedDecoder column = fromMaybe MySQLNull <$> Decode.nullable (case column of
         KindDate        -> MySQLDate <$> Decode.day
         KindTime        -> Decode.mysqlValue
         KindGeometry    -> Decode.mysqlValue
-        KindText        -> MySQLText <$> Decode.text
+        KindText _      -> MySQLText <$> Decode.text
+        KindLatin1Text  -> MySQLText <$> Decode.text
         KindBytes       -> MySQLBytes <$> Decode.bytes
         KindBit         -> Decode.mysqlValue
         KindUnsupported -> Decode.mysqlValue)

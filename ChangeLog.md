@@ -1,32 +1,50 @@
 # Revision history for mysql-haskell
 
-## 1.3.4 -- 2026.10.08
+## 1.4.0 -- 2026.11.11
 
-No exported function changes its type. Rows decode faster: the query functions resolve each
-column's type once per result set and walk each row once, so an application
-decoding rows into its own types through `query_` or `queryStmt` runs up to
-22% fewer instructions and allocates 22 to 40% less. The new
-`Database.MySQL.Decoder` decodes rows straight into Haskell values with
-`queryRows_`, `queryRows` and `queryStmtRows`, raising typed errors instead of
-exceptions from inside values; `queryRawRows_` and `queryStmtRawRows` hand over
-rows with their field bounds for libraries that decode by column number.
+Fixes for MySQL and MariaDB alike, found comparing mysql-haskell with the
+mariadb-haskell fork, and faster row decoding. A text query no longer loses a
+row whose first value is 16 MiB or longer; insert IDs above 2^63 come back
+intact; a `?` inside a quoted string or a comment is no longer taken for a
+placeholder; dates such as `0000-00-00` round-trip instead of turning into
+`0000-01-01`; latin1 results decode; FLOAT and DOUBLE values in exponent form
+no longer lose their exponent through `query_` (`1e20` came back as 1); the
+binlog row decoder no longer drops a statement's rows events after its first;
+and the Mozilla CA bundle is installed with the library. `query_` and
+`queryStmt` resolve each column's type once per result set, and the new
+`Database.MySQL.Decoder` decodes rows straight into Haskell values with typed
+errors through `queryRows_`, `queryRows` and `queryStmtRows`, or by column
+number through `queryRawRows_` and `queryStmtRawRows`.
 
-Fixes FLOAT and DOUBLE values that MySQL writes in exponent form: through
-`query_` and the other plain queries, `1e20` came back as 1 and `1.5e300` as
-1.5. Text-protocol FLOAT and DOUBLE values are now read correctly rounded;
-prepared statements were not affected.
+Upgrading can break code. `okLastInsertID` is a `Word64`. `MySQLValue` gains
+`MySQLDateRaw`, `MySQLDateTimeRaw` and `MySQLTimeStampRaw` for dates a `Day`
+cannot hold, `DecodeError` gains `DecodeUnrepresentableDate`, and
+`BinLogEventType` gains `BINLOG_UNRECOGNIZED_EVENT` and loses its `Enum`
+instance (use `binLogEventTypeCode`). A connection whose reply was interrupted,
+for example by a timeout, now refuses further commands with `AbandonedReply`
+instead of handing the rest of that reply to the next query (#10); discard it
+and reconnect. `resetStmt` with rows still unread raises `UnconsumedResultSet`,
+`withTransaction` rethrows the procedure's own exception, and
+`decodeRowBinLogEvent` raises `RowEventDecodeException` on an event that may
+hold rows it cannot decode, such as MySQL's compressed transactions, where it
+used to crash or skip it. `Database.MySQL.Base` now also exports the five new
+query functions and re-exports `Database.MySQL.Protocol.RawRow`, which can clash
+with same-named definitions under an unqualified import.
 
-`Database.MySQL.Base` now also exports those five functions and re-exports
-`Database.MySQL.Protocol.RawRow`, which can clash with same-named definitions
-under an unqualified import. The new `unwitch` dependency needs GHC 9.6 or
-newer; projects on older compilers keep resolving to 1.3.3.
+It needs GHC 9.6 or newer, for the new `unwitch` dependency, and bytestring
+0.11.2; projects on older compilers keep resolving to 1.3.3.
 
-+ Faster row decoding, decoders straight into Haskell values, and FLOAT and
+* Fix eight defects for MySQL and MariaDB, each with a reproducer
+  [#102](https://github.com/winterland1989/mysql-haskell/pull/102)
+* Faster row decoding, decoders straight into Haskell values, and FLOAT and
   DOUBLE in exponent form read correctly
   [#98](https://github.com/winterland1989/mysql-haskell/pull/98)
-+ Benchmark figures re-measured on current hardware
+* A comparison with the mariadb-haskell fork and a plan to adopt its
+  features, in `docs/`
+  [#99](https://github.com/winterland1989/mysql-haskell/pull/99)
+* Benchmark figures re-measured on current hardware
   [#95](https://github.com/winterland1989/mysql-haskell/pull/95)
-+ A profile of where the CPU time goes, in `benchmark/`
+* A profile of where the CPU time goes, in `benchmark/`
   [#96](https://github.com/winterland1989/mysql-haskell/pull/96)
 
 ## 1.3.3 -- 2026.10.07

@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               mysql-haskell
-version:            1.3.4
+version:            1.4.0
 synopsis:           pure haskell MySQL driver
 description:        pure haskell MySQL driver.
 license:            BSD-3-Clause
@@ -11,8 +11,10 @@ copyright:          (c) 2016 Winterland
 category:           Database
 build-type:         Simple
 extra-doc-files:    ChangeLog.md
+-- mozillaCAStorePath reads the bundle through getDataFileName, which only
+-- finds files cabal installs: data-files, not extra-source-files.
+data-files:         mozillaCAStore.pem
 extra-source-files:
-  mozillaCAStore.pem
   README.md
   test/cert/ca-key.pem
   test/cert/ca.pem
@@ -93,7 +95,8 @@ library
     asn1-types >=0.3 && <0.4,
     binary >=0.8.3 && <0.9,
     blaze-textual >=0.2 && <0.3,
-    bytestring >=0.10.2.0 && <0.12 || ^>=0.12.0,
+    -- 0.11.2 added isValidUtf8, which checks a string column's bytes.
+    bytestring >=0.11.2 && <0.12 || ^>=0.12.0,
     bytestring-lexing >=0.5 && <0.6,
     crypton-x509 >=1.5 && <2.0,
     crypton-x509-store >=1.5 && <2.0,
@@ -141,22 +144,27 @@ test-suite test
   other-modules:
     Aeson
     AesonBP
+    BinLogEventCodes
     BoundsCheck
     DecoderRoundtrip
     DirectDecoding
     FieldRoundtrip
     FloatingPointText
     JSON
+    PacketClassification
+    Placeholders
     QC.ByteString
     QC.Combinator
     QC.Common
     Orphans
+    ResultCharsets
     Sha1Scramble
     Sha256Scramble
     TCPStreams
     TextRowDecoding
     TypedValue
     Word24
+    ZeroDates
 
   hs-source-dirs:     test
   build-depends:
@@ -192,26 +200,35 @@ test-suite integration
   type:               exitcode-stdio-1.0
   main-is:            Integration.hs
   other-modules:
+    AbandonedReplies
     BinaryRow
     BinaryRowNew
     BinLog
     BinLogNew
+    BinLogRowEvents
+    CABundle
     CachingSha2
     ExecuteMany
     FloatingPoint
+    LargeRows
+    Latin1Results
     MultipleResults
     MysqlTests
+    PlaceholderLiterals
     QueryApi
     QueryWithoutResultSet
     RoundtripBit
     RowDecoderQueries
     RoundtripYear
     SelectOne
+    TestUser
     TextRow
     TLSConnection
     TextRowNew
     TypedValue
     UnixSocket
+    UnsignedInsertId
+    ZeroDateRoundtrip
 
   hs-source-dirs:     test
   build-depends:

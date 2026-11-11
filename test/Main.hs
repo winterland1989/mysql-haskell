@@ -14,6 +14,11 @@ import qualified TextRowDecoding
 import qualified DirectDecoding
 import qualified DecoderRoundtrip
 import qualified FloatingPointText
+import qualified BinLogEventCodes
+import qualified PacketClassification
+import qualified Placeholders
+import qualified ResultCharsets
+import qualified ZeroDates
 
 main :: IO ()
 main = do
@@ -38,4 +43,9 @@ main = do
       , DirectDecoding.tests
       , DecoderRoundtrip.tests
       , FloatingPointText.tests
+      , PacketClassification.tests
+      , Placeholders.tests
+      , ZeroDates.tests
+      , ResultCharsets.tests
+      , BinLogEventCodes.tests
       ]

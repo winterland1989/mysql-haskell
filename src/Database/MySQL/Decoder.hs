@@ -84,7 +84,7 @@ import           Data.Int                           (Int16, Int32, Int64, Int8)
 import           Data.Scientific                    (Scientific)
 import           Data.Text                          (Text)
 import qualified Data.Text.Encoding                 as T
-import           Data.Time.Calendar                 (Day, fromGregorian)
+import           Data.Time.Calendar                 (Day)
 import           Data.Time.LocalTime                (LocalTime (..),
                                                      TimeOfDay (..), midnight)
 import qualified Data.Vector                        as V
@@ -94,13 +94,19 @@ import           Database.MySQL.Protocol.ColumnDef
 import           Database.MySQL.Protocol.FloatingPoint (readDouble, readFloat)
 import           Database.MySQL.Protocol.MySQLValue (ColumnKind (..),
                                                      MySQLValue (..),
+                                                     RawDate (..),
                                                      RowErrorKind (..),
                                                      nextColumn,
                                                      TextFieldError (..),
                                                      ValueKind (..),
-                                                     columnKind, decodeTextBit,
+                                                     calendarDate, columnKind,
+                                                     dateTimeValue, dateValue,
+                                                     decodeMySQLLatin1,
+                                                     decodeTextBit,
                                                      decodeTextValue,
-                                                     lexDate, lexLocalTime,
+                                                     lexDateTimeParts,
+                                                     textDateParts,
+                                                     timeStampValue,
                                                      lexSignedFraction,
                                                      lexSignedIntegral,
                                                      lengthEncodedInt,
@@ -121,7 +127,6 @@ import           GHC.Int                            (Int16 (I16#), Int32 (I32#),
 import           GHC.Word                           (Word16 (W16#),
                                                      Word32 (W32#),
                                                      Word64 (W64#), Word8 (W8#))
-import qualified Unwitch.Convert.Word16             as Word16
 import qualified Unwitch.Convert.Word32             as Word32
 import qualified Unwitch.Convert.Word8              as Word8
 
@@ -131,7 +136,7 @@ type ParseBytes a = ByteString -> (# FieldErrorKind | a #)
 
 -- | Turns the fields of one column into @a@. See the module header.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data FieldDecoder a = FieldDecoder
     { decoderTypeName :: !Text
       -- ^ the Haskell type, for 'ColumnTypeMismatch'
@@ -159,7 +164,7 @@ mapParse f parse = \fieldBytes -> case parse fieldBytes of
 
 -- | NULL becomes 'Nothing'; any other field is decoded as before.
 --
--- @since 1.3.4
+-- @since 1.4.0
 nullable :: FieldDecoder a -> FieldDecoder (Maybe a)
 nullable decoder = (Just <$> decoder)
     { decoderTypeName = "Maybe " <> decoderTypeName decoder
@@ -237,23 +242,59 @@ scientific :: FieldDecoder Scientific
 scientific = kindDecoder "Scientific" [KindDecimal] (lexedField lexSignedFraction)
     (lexedField lexSignedFraction)
 
--- | The string columns in a character set other than binary. Invalid UTF-8 is
--- a 'FieldInvalidUtf8'.
+-- | The string columns in a character set other than binary. latin1 is read as
+-- MySQL means it, as Windows-1252, and any other as UTF-8, where invalid UTF-8
+-- is a 'FieldInvalidUtf8'.
 text :: FieldDecoder Text
-text = kindDecoder "Text" [KindText] utf8Field utf8Field
+text = FieldDecoder
+    { decoderTypeName = "Text"
+    , decoderNull     = Nothing
+    , decoderText     = stringColumnParse
+    , decoderBinary   = stringColumnParse
+    }
+
+stringColumnParse :: ColumnKind -> Maybe (ParseBytes Text)
+stringColumnParse column = case column of
+    NullColumn -> Just utf8Field
+    ValueColumn _ kind -> case kind of
+        KindText _      -> Just utf8Field
+        KindLatin1Text  -> Just latin1Field
+        KindDecimal     -> Nothing
+        KindInt8U       -> Nothing
+        KindInt8        -> Nothing
+        KindInt16U      -> Nothing
+        KindInt16       -> Nothing
+        KindInt32U      -> Nothing
+        KindInt32       -> Nothing
+        KindInt64U      -> Nothing
+        KindInt64       -> Nothing
+        KindFloat       -> Nothing
+        KindDouble      -> Nothing
+        KindYear        -> Nothing
+        KindTimeStamp   -> Nothing
+        KindDateTime    -> Nothing
+        KindDate        -> Nothing
+        KindTime        -> Nothing
+        KindGeometry    -> Nothing
+        KindBytes       -> Nothing
+        KindBit         -> Nothing
+        KindUnsupported -> Nothing
 
 -- | The string columns in the binary character set: BINARY, VARBINARY, BLOB.
 bytes :: FieldDecoder ByteString
 bytes = kindDecoder "ByteString" [KindBytes] bytesField bytesField
 
--- | DATE.
+-- | DATE. A date a 'Day' cannot hold, such as @0000-00-00@, is a
+-- 'FieldUnrepresentableDate'.
 day :: FieldDecoder Day
-day = kindDecoder "Day" [KindDate] (lexedField lexDate) binaryDay
+day = kindDecoder "Day" [KindDate] (calendarDay (lexedField textDateParts))
+    (calendarDay binaryDateParts)
 
--- | DATETIME and TIMESTAMP.
+-- | DATETIME and TIMESTAMP. A date a 'Day' cannot hold is a
+-- 'FieldUnrepresentableDate'.
 localTime :: FieldDecoder LocalTime
-localTime = kindDecoder "LocalTime" [KindDateTime, KindTimeStamp] (lexedField lexLocalTime)
-    binaryLocalTime
+localTime = kindDecoder "LocalTime" [KindDateTime, KindTimeStamp]
+    (calendarLocalTime (lexedField lexDateTimeParts)) (calendarLocalTime binaryDateTimeParts)
 
 -- | TIME, when not negative; a negative one is a 'FieldNegativeTime'. The
 -- hours may exceed 24, as TIME spans up to 838 hours.
@@ -320,12 +361,14 @@ binaryMySQLValue column fieldBytes = case column of
         KindFloat       -> mapParse MySQLFloat (fixedField 4 (castWord32ToFloat . littleEndian32)) fieldBytes
         KindDouble      -> mapParse MySQLDouble (fixedField 8 (castWord64ToDouble . littleEndian64)) fieldBytes
         KindYear        -> mapParse MySQLYear (fixedField 2 littleEndian16) fieldBytes
-        KindTimeStamp   -> mapParse MySQLTimeStamp binaryLocalTime fieldBytes
-        KindDateTime    -> mapParse MySQLDateTime binaryLocalTime fieldBytes
-        KindDate        -> mapParse MySQLDate binaryDay fieldBytes
+        KindTimeStamp   -> mapParse (uncurry timeStampValue) binaryDateTimeParts fieldBytes
+        KindDateTime    -> mapParse (uncurry dateTimeValue) binaryDateTimeParts fieldBytes
+        KindDate        -> mapParse dateValue binaryDateParts fieldBytes
         KindTime        -> mapParse (uncurry MySQLTime) binarySignedTime fieldBytes
         KindGeometry    -> (# | MySQLGeometry fieldBytes #)
-        KindText        -> (# | MySQLText (T.decodeUtf8 fieldBytes) #)
+        -- Both protocols send a string as its bytes, so 'decodeTextValue' decodes it.
+        KindText _      -> textMySQLValue column fieldBytes
+        KindLatin1Text  -> textMySQLValue column fieldBytes
         KindBytes       -> (# | MySQLBytes fieldBytes #)
         KindBit         -> case decodeTextBit fieldBytes of
             Left fieldError -> (# textFieldErrorKind fieldError | #)
@@ -337,6 +380,7 @@ textFieldErrorKind fieldError = case fieldError of
     TextFieldUnparsable _ fieldBytes     -> FieldUnparsable fieldBytes
     TextFieldBitTooWide width            -> FieldBitTooWide width
     TextFieldUnsupportedType fieldType   -> FieldUnsupportedType fieldType
+    TextFieldInvalidUtf8 _ fieldBytes    -> FieldInvalidUtf8 fieldBytes
 
 -- | A text field the lexer reads, evaluated.
 lexedField :: (ByteString -> Maybe a) -> ParseBytes a
@@ -349,6 +393,9 @@ utf8Field :: ParseBytes Text
 utf8Field fieldBytes = case T.decodeUtf8' fieldBytes of
     Right !decoded -> (# | decoded #)
     Left _         -> (# FieldInvalidUtf8 fieldBytes | #)
+
+latin1Field :: ParseBytes Text
+latin1Field fieldBytes = let !decoded = decodeMySQLLatin1 fieldBytes in (# | decoded #)
 
 bytesField :: ParseBytes ByteString
 bytesField fieldBytes = (# | fieldBytes #)
@@ -394,31 +441,46 @@ prependByte64 :: Word8 -> Word64 -> Word64
 prependByte64 byte higherBytes = unsafeShiftL higherBytes 8 .|. Word8.toWord64 byte
 
 -- | A binary DATE: no bytes for the zero date, or a 2-byte year, month and day.
-binaryDay :: ParseBytes Day
-binaryDay fieldBytes =
-    if  | B.null fieldBytes        -> (# | fromGregorian 0 0 0 #)
+binaryDateParts :: ParseBytes RawDate
+binaryDateParts fieldBytes =
+    if  | B.null fieldBytes        -> (# | RawDate 0 0 0 #)
         | B.length fieldBytes == 4 -> let !date = binaryDate fieldBytes in (# | date #)
         | otherwise                -> (# FieldUnparsable fieldBytes | #)
 
-binaryDate :: ByteString -> Day
-binaryDate fieldBytes = fromGregorian
-    (Word16.toInteger (littleEndian16 (B.unsafeTake 2 fieldBytes)))
-    (Word8.toInt (B.unsafeIndex fieldBytes 2))
-    (Word8.toInt (B.unsafeIndex fieldBytes 3))
+binaryDate :: ByteString -> RawDate
+binaryDate fieldBytes = RawDate
+    (littleEndian16 (B.unsafeTake 2 fieldBytes))
+    (B.unsafeIndex fieldBytes 2)
+    (B.unsafeIndex fieldBytes 3)
 
 -- | A binary DATETIME or TIMESTAMP: its length says which parts are present,
 -- 0 (the zero date), 4 (the date), 7 (and the time) or 11 (and microseconds).
-binaryLocalTime :: ParseBytes LocalTime
-binaryLocalTime fieldBytes =
+binaryDateTimeParts :: ParseBytes (RawDate, TimeOfDay)
+binaryDateTimeParts fieldBytes =
     if  | B.null fieldBytes ->
-            (# | LocalTime (fromGregorian 0 0 0) midnight #)
+            (# | (RawDate 0 0 0, midnight) #)
         | B.length fieldBytes == 4 ->
-            let !value = LocalTime (binaryDate fieldBytes) midnight in (# | value #)
+            let !value = (binaryDate fieldBytes, midnight) in (# | value #)
         | B.length fieldBytes == 7 || B.length fieldBytes == 11 ->
-            let !value = LocalTime (binaryDate fieldBytes)
-                                   (binaryClock (B.unsafeDrop 4 fieldBytes))
+            let !value = (binaryDate fieldBytes, binaryClock (B.unsafeDrop 4 fieldBytes))
             in (# | value #)
         | otherwise -> (# FieldUnparsable fieldBytes | #)
+
+calendarDay :: ParseBytes RawDate -> ParseBytes Day
+calendarDay parse = \fieldBytes -> case parse fieldBytes of
+    (# kind | #) -> (# kind | #)
+    (# | raw #) -> case calendarDate raw of
+        Right !date -> (# | date #)
+        Left unrepresentable -> (# FieldUnrepresentableDate unrepresentable | #)
+{-# INLINE calendarDay #-}
+
+calendarLocalTime :: ParseBytes (RawDate, TimeOfDay) -> ParseBytes LocalTime
+calendarLocalTime parse = \fieldBytes -> case parse fieldBytes of
+    (# kind | #) -> (# kind | #)
+    (# | (raw, time) #) -> case calendarDate raw of
+        Right date -> let !value = LocalTime date time in (# | value #)
+        Left unrepresentable -> (# FieldUnrepresentableDate unrepresentable | #)
+{-# INLINE calendarLocalTime #-}
 
 -- | Hours, minutes and seconds, then microseconds when 7 bytes are left.
 binaryClock :: ByteString -> TimeOfDay
@@ -463,7 +525,7 @@ nonNegativeTime parse = \fieldBytes -> case parse fieldBytes of
 -- | Decodes a row, one 'field' per column, in order. It is checked against the
 -- result set's column definitions once, before the first row.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data RowDecoder a = RowDecoder
     !Int
     -- ^ how many columns it reads
@@ -493,7 +555,7 @@ instance Applicative RowDecoder where
 
 -- | Decodes the next column with this decoder.
 --
--- @since 1.3.4
+-- @since 1.4.0
 field :: FieldDecoder a -> RowDecoder a
 field decoder = RowDecoder 1 (\columns column@(ColumnNumber number) -> case columns V.!? number of
     Nothing -> Left (ColumnCountMismatch (number + 1) (V.length columns))
@@ -534,7 +596,7 @@ apSteps (FieldSteps runFunction) (FieldSteps runArgument) = FieldSteps (\row off
 
 -- | A 'RowDecoder' fitted to a result set's columns.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data PreparedRow (protocol :: Type) a = PreparedRow (RowStart protocol) (FieldSteps protocol a)
 
 -- | Where a row's first field starts, or why the row is too short to have one.
@@ -543,7 +605,7 @@ newtype RowStart (protocol :: Type) = RowStart (ByteString -> (# FieldError | In
 -- | Fits a 'RowDecoder' to a result set's columns. It must read exactly as many
 -- columns as there are, each of a type its decoder accepts.
 --
--- @since 1.3.4
+-- @since 1.4.0
 prepareRowDecoder :: RowProtocol protocol
                   => RowDecoder a -> V.Vector ColumnDef -> Either ColumnMismatch (PreparedRow protocol a)
 prepareRowDecoder (RowDecoder width prepare) columns =
@@ -554,7 +616,7 @@ prepareRowDecoder (RowDecoder width prepare) columns =
 -- | Decodes the body of a row packet of the protocol. Bytes after the last
 -- field are ignored, as 'decodeTextRow' ignores them.
 --
--- @since 1.3.4
+-- @since 1.4.0
 runPreparedRow :: PreparedRow protocol a -> ByteString -> Either FieldError a
 runPreparedRow (PreparedRow (RowStart start) (FieldSteps run)) row = case start row of
     (# fieldError | #) -> Left fieldError
@@ -565,7 +627,7 @@ runPreparedRow (PreparedRow (RowStart start) (FieldSteps run)) row = case start 
 -- | 'TextProtocol' or 'BinaryProtocol': how the rows of that protocol lay out
 -- their fields, and which of a 'FieldDecoder''s parsers they need.
 --
--- @since 1.3.4
+-- @since 1.4.0
 class RowProtocol (protocol :: Type) where
     protocolParser :: FieldDecoder a -> ColumnKind -> Maybe (FieldParser protocol a)
     fieldSteps     :: ColumnNumber -> ColumnDef -> FieldParser protocol a -> FieldSteps protocol a
@@ -643,7 +705,7 @@ lengthErrorKind kind = case kind of
 
 -- | A 'FieldDecoder' fitted to one column of a result set.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data FieldParser (protocol :: Type) a = FieldParser
     { parserNull  :: !(Maybe a)
     , parserBytes :: ParseBytes a
@@ -651,7 +713,7 @@ data FieldParser (protocol :: Type) a = FieldParser
 
 -- | Fits a 'FieldDecoder' to column number @column@, whose definition this is.
 --
--- @since 1.3.4
+-- @since 1.4.0
 prepareFieldParser :: RowProtocol protocol
                    => FieldDecoder a -> ColumnNumber -> ColumnDef -> Either ColumnMismatch (FieldParser protocol a)
 prepareFieldParser decoder column definition =
@@ -664,7 +726,7 @@ prepareFieldParser decoder column definition =
 -- so that no 'Either' is allocated, as a library decoding by column number
 -- needs.
 --
--- @since 1.3.4
+-- @since 1.4.0
 runFieldParser :: FieldParser protocol a -> RawRow protocol -> ColumnNumber -> (FieldError -> r) -> (a -> r) -> r
 runFieldParser parser row column onError onValue = case parseRawField column parser row of
     (# fieldError | #) -> onError fieldError
@@ -684,12 +746,12 @@ parseRawField column parser row = case rawField row column of
 -- | A prepared statement's columns, resolved once per result set for
 -- 'decodeBinaryValues'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data BinaryValueColumns = BinaryValueColumns !Int [BinaryValueColumn]
 
 data BinaryValueColumn = BinaryValueColumn !ColumnKind !BinaryWidth
 
--- | @since 1.3.4
+-- | @since 1.4.0
 binaryValueColumns :: [ColumnDef] -> BinaryValueColumns
 binaryValueColumns definitions = BinaryValueColumns (length definitions)
     (map (\definition -> BinaryValueColumn (columnKind definition) (binaryWidth definition)) definitions)
@@ -699,7 +761,7 @@ binaryValueColumns definitions = BinaryValueColumns (length definitions)
 -- over the row that calls the value parser directly, as 'decodeTextRow' does
 -- for the text protocol. Bytes after the last field are ignored.
 --
--- @since 1.3.4
+-- @since 1.4.0
 decodeBinaryValues :: BinaryValueColumns -> ByteString -> Either FieldError [MySQLValue]
 decodeBinaryValues (BinaryValueColumns columnCount columns) row = case binaryRowStart columnCount row of
     (# fieldError | #) -> Left fieldError
@@ -719,7 +781,7 @@ binaryValueFields row column offset columns = case columns of
 
 -- | A result set that does not fit a 'RowDecoder', raised before any row is read.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data ColumnMismatch
     = ColumnTypeMismatch !ColumnNumber !ByteString !FieldType !Text
       -- ^ column number, column name, its type, and the Haskell type of the
@@ -732,7 +794,7 @@ instance Exception ColumnMismatch
 
 -- | A field that did not decode, with its column number.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data FieldError = FieldError
     { fieldErrorColumn :: !ColumnNumber
     , fieldErrorKind   :: !FieldErrorKind
@@ -740,13 +802,16 @@ data FieldError = FieldError
 
 instance Exception FieldError
 
--- | @since 1.3.4
+-- | @since 1.4.0
 data FieldErrorKind
     = FieldUnexpectedNull
       -- ^ a NULL for a decoder that takes none; see 'nullable'
     | FieldUnparsable !ByteString
       -- ^ the bytes are not a value of the column's type
     | FieldInvalidUtf8 !ByteString
+    | FieldUnrepresentableDate !RawDate
+      -- ^ a date 'day' or 'localTime' cannot give as a 'Day', such as @0000-00-00@;
+      -- 'mysqlValue' gives it as a 'MySQLDateRaw' instead
     | FieldNegativeTime !ByteString
       -- ^ a negative TIME for 'timeOfDay'
     | FieldBitTooWide !Int

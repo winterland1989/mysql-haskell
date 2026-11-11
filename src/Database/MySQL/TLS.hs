@@ -71,13 +71,13 @@ connectDetail (ConnectInfo host port db user pass charset) (cparams, subName) =
                     write tc (encodeToPacket 2 auth)
                     q <- readPacket tlsIs'
                     completeAuth tlsIs' (write tc) pass q tlsFullAuth
-                    consumed <- newIORef True
+                    state <- newIORef RepliesRead
                     let waitNotMandatoryOK = catch
                             (void (waitCommandReply tlsIs'))
                             ((\ _ -> return ()) :: SomeException -> IO ())
                         conn = MySQLConn tlsIs' (write tc)
                             (writeCommand COM_QUIT (write tc) >> waitNotMandatoryOK >> TCP.close tc)
-                            consumed
+                            state
                     return (greet, conn)
             else error "Database.MySQL.TLS: server doesn't support TLS connection"
   where

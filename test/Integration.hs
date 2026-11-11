@@ -4,8 +4,16 @@ import qualified Data.ByteString as B
 import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
 import           Test.Tasty (TestTree, defaultMain, testGroup)
+import qualified AbandonedReplies
+import qualified BinLogRowEvents
+import qualified CABundle
 import qualified CachingSha2
 import qualified FloatingPoint
+import qualified LargeRows
+import qualified Latin1Results
+import qualified PlaceholderLiterals
+import qualified UnsignedInsertId
+import qualified ZeroDateRoundtrip
 import qualified MultipleResults
 import qualified MysqlTests
 import           QueryApi
@@ -36,8 +44,17 @@ main = do
         [ MysqlTests.tests
         , MultipleResults.tests
         , RowDecoderQueries.tests
+        , UnsignedInsertId.tests
+        , BinLogRowEvents.tests
+        , CABundle.tests
+        , ZeroDateRoundtrip.typedDecoderTests
         ]
+        -- binlog_transaction_compression is MySQL 8.0.20+ only.
+        ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]
         ++ map (apiTests isMySql80 mSockPath mTlsCaPath) queryApis
+        -- The typed decoders give a date a 'Day' cannot hold as an error instead
+        -- of a value to write back, which 'ZeroDateRoundtrip.typedDecoderTests' checks.
+        ++ map ZeroDateRoundtrip.tests mysqlValueApis
 
 -- | The suites that read rows, through one of the 'QueryApi's.
 apiTests :: Bool -> Maybe FilePath -> Maybe FilePath -> QueryApi -> TestTree
@@ -48,6 +65,10 @@ apiTests isMySql80 mSockPath mTlsCaPath api = testGroup (apiName api) $
     , QueryWithoutResultSet.tests api
     , MultipleResults.rowTests api
     , FloatingPoint.tests api
+    , LargeRows.tests api
+    , PlaceholderLiterals.tests api
+    , Latin1Results.tests api
+    , AbandonedReplies.tests api
     ]
     -- caching_sha2_password is MySQL 8.0+ only (MariaDB does not support it).
     -- The sha2 test users are created by the nix CI config for the MySQL 8.0 VM.

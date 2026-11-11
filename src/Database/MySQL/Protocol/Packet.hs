@@ -28,6 +28,10 @@ import           Data.Int
 import           Data.Word
 import           Data.Typeable
 import           Data.Word.Word24
+import qualified Unwitch.Convert.Word16 as Word16
+import qualified Unwitch.Convert.Word32 as Word32
+import qualified Unwitch.Convert.Word64 as Word64
+import qualified Unwitch.Convert.Word8  as Word8
 
 --------------------------------------------------------------------------------
 -- | MySQL packet type
@@ -60,28 +64,37 @@ instance Binary Packet where
     {-# INLINE get #-}
 
 isERR :: Packet -> Bool
-isERR p = L.index (pBody p) 0 == 0xFF
+isERR = packetStartsWith 0xFF
 {-# INLINE isERR #-}
 
 isOK :: Packet -> Bool
-isOK p  = L.index (pBody p) 0 == 0x00
+isOK = packetStartsWith 0x00
 {-# INLINE isOK #-}
 
+-- | A row can start with 0xFE too: the length prefix of a text field of
+-- 16 MiB or more. Such a row is at least 9 bytes long, an EOF packet at most 5.
 isEOF :: Packet -> Bool
-isEOF p = L.index (pBody p) 0 == 0xFE
+isEOF p = pLen p < 9 && packetStartsWith 0xFE p
 {-# INLINE isEOF #-}
 
 -- | Is this an AuthMoreData packet? (first byte 0x01)
 -- Used during authentication handshake for caching_sha2_password.
 isAuthMoreData :: Packet -> Bool
-isAuthMoreData p = L.index (pBody p) 0 == 0x01
+isAuthMoreData = packetStartsWith 0x01
 {-# INLINE isAuthMoreData #-}
 
 -- | Is this an AuthSwitchRequest packet? (first byte 0xFE)
 -- Same marker as EOF but used in authentication context.
 isAuthSwitch :: Packet -> Bool
-isAuthSwitch p = L.index (pBody p) 0 == 0xFE
+isAuthSwitch = packetStartsWith 0xFE
 {-# INLINE isAuthSwitch #-}
+
+-- | False for an empty packet, which has no marker byte to classify it by.
+packetStartsWith :: Word8 -> Packet -> Bool
+packetStartsWith marker p = case L.uncons (pBody p) of
+    Just (firstByte, _) -> firstByte == marker
+    Nothing -> False
+{-# INLINE packetStartsWith #-}
 
 -- | Is there more packet to be read?
 --
@@ -125,12 +138,18 @@ putToPacket seqN payload =
 --------------------------------------------------------------------------------
 -- OK, ERR, EOF
 
+-- Decision: okLastInsertID is a Word64 because the server sends the unsigned
+-- 64-bit value of LAST_INSERT_ID(), which an Int wraps above 2^63.
+-- okAffectedRows stays an Int (changing it would break every
+-- @sum . map okAffectedRows@ for a count no table reaches); a count above
+-- maxBound fails to decode rather than wrap, see getLenEncInt.
+
 -- | You may get interested in 'OK' packet because it provides information about
 -- successful operations.
 --
 data OK = OK
     { okAffectedRows :: !Int      -- ^ affected row number
-    , okLastInsertID :: !Int      -- ^ last insert's ID
+    , okLastInsertID :: !Word64   -- ^ last insert's ID
     , okStatus       :: !Word16
     , okWarningCnt   :: !Word16
     } deriving (Show, Eq)
@@ -138,7 +157,7 @@ data OK = OK
 getOK :: Get OK
 getOK = OK <$ skipN 1
            <*> getLenEncInt
-           <*> getLenEncInt
+           <*> getLenEncWord64
            <*> getWord16le
            <*> getWord16le
 {-# INLINE getOK #-}
@@ -147,7 +166,7 @@ putOK :: OK -> Put
 putOK (OK row lid stat wcnt) = do
     putWord8 0x00
     putLenEncInt row
-    putLenEncInt lid
+    putLenEncWord64 lid
     putWord16le stat
     putWord16le wcnt
 {-# INLINE putOK #-}
@@ -234,6 +253,8 @@ getLenEncBytes = getLenEncInt >>= getByteString
 
 -- | length encoded int
 -- https://dev.mysql.com/doc/internals/en/integer.html#packet-Protocol::LengthEncodedInteger
+--
+-- Fails on a value above @maxBound :: Int@; 'getLenEncWord64' reads the full range.
 getLenEncInt:: Get Int
 getLenEncInt = getWord8 >>= word2Len
   where
@@ -241,9 +262,37 @@ getLenEncInt = getWord8 >>= word2Len
          | l <  0xFB  = pure (fromIntegral l)
          | l == 0xFC  = fromIntegral <$> getWord16le
          | l == 0xFD  = fromIntegral <$> getWord24le
-         | l == 0xFE  = fromIntegral <$> getWord64le
+         | l == 0xFE  = getWord64le >>= lenEncWord64ToInt
          | otherwise = fail $ "invalid length val " ++ show l
 {-# INLINE getLenEncInt #-}
+
+lenEncWord64ToInt :: Word64 -> Get Int
+lenEncWord64ToInt value = case Word64.toInt value of
+    Just int -> pure int
+    Nothing -> fail ("length-encoded integer " ++ show value ++ " does not fit in an Int")
+
+-- | A length-encoded integer over its full unsigned 64-bit range.
+getLenEncWord64 :: Get Word64
+getLenEncWord64 = do
+    marker <- getWord8
+    if  | marker < 0xFB -> pure (Word8.toWord64 marker)
+        | marker == 0xFC -> Word16.toWord64 <$> getWord16le
+        | marker == 0xFD -> Word32.toWord64 <$> getWord24le
+        | marker == 0xFE -> getWord64le
+        | otherwise -> fail ("invalid length-encoded integer marker " ++ show marker)
+
+putLenEncWord64 :: Word64 -> Put
+putLenEncWord64 value = case Word64.toWord8 value of
+    Just byte -> if byte < 0xFB
+        then putWord8 byte
+        else putWord8 0xFC >> putWord16le (Word8.toWord16 byte)
+    Nothing -> case Word64.toWord16 value of
+        Just short -> putWord8 0xFC >> putWord16le short
+        Nothing -> case Word64.toWord32 value of
+            Just word -> if word < 0x1000000
+                then putWord8 0xFD >> putWord24le word
+                else putWord8 0xFE >> putWord64le value
+            Nothing -> putWord8 0xFE >> putWord64le value
 
 putLenEncInt:: Int -> Put
 putLenEncInt x

@@ -225,7 +225,8 @@ comparisonFor column = case columnKind column of
         KindDate        -> Just (Comparison Decode.day decodeDay)
         KindTime        -> Just (Comparison Decode.timeOfDay decodeTimeOfDay)
         KindGeometry    -> Nothing
-        KindText        -> Just (Comparison Decode.text decodeText)
+        KindText _      -> Just (Comparison Decode.text decodeText)
+        KindLatin1Text  -> Just (Comparison Decode.text decodeText)
         KindBytes       -> Just (Comparison Decode.bytes decodeByteString)
         KindBit         -> Nothing
         KindUnsupported -> Nothing
@@ -270,9 +271,8 @@ genBinaryField column = case columnKind column of
     NullColumn         -> pure Nothing
     ValueColumn _ kind -> frequency [(1, pure Nothing), (6, Just <$> genBinaryValue kind)]
 
--- | Mostly what the server sends, sometimes lengths it would not. Text stays
--- valid UTF-8, as 'getBinaryRow' decodes it lazily and invalid bytes would
--- throw while the values are compared.
+-- | Mostly what the server sends, sometimes lengths or bytes it would not, such
+-- as a string that is not UTF-8 in a character set read as UTF-8.
 genBinaryValue :: ValueKind -> Gen ByteString
 genBinaryValue kind = case kind of
     KindDecimal     -> lengthEncoded . BC.pack . show <$> (arbitrary :: Gen Double)
@@ -292,7 +292,8 @@ genBinaryValue kind = case kind of
     KindDate        -> lengthEncoded <$> (elements [0, 4, 3] >>= genBytes)
     KindTime        -> lengthEncoded <$> (elements [0, 8, 12, 9] >>= genBytes)
     KindGeometry    -> lengthEncoded <$> arbitrary
-    KindText        -> lengthEncoded . T.encodeUtf8 <$> arbitrary
+    KindText _      -> lengthEncoded <$> frequency [(9, T.encodeUtf8 <$> arbitrary), (1, arbitrary)]
+    KindLatin1Text  -> lengthEncoded <$> arbitrary
     KindBytes       -> lengthEncoded <$> arbitrary
     KindBit         -> lengthEncoded <$> (choose (1, 10) >>= genBytes)
     KindUnsupported -> lengthEncoded <$> arbitrary

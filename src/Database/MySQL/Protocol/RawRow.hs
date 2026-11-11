@@ -55,19 +55,19 @@ import           Database.MySQL.Protocol.MySQLValue (ColumnNumber (..),
 
 -- | Rows of a plain query, whose fields are text.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data TextProtocol
 
 -- | Rows of a prepared statement, whose fields are binary.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data BinaryProtocol
 
 -- | A row's bytes and the bounds of each of its fields. The @protocol@,
 -- 'TextProtocol' or 'BinaryProtocol', says how the fields are encoded, so a
 -- decoder for the other protocol cannot be run on it.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data RawRow (protocol :: Type) = RawRow
     { rawRowBytes  :: !ByteString
       -- ^ the row packet's body
@@ -76,13 +76,13 @@ data RawRow (protocol :: Type) = RawRow
       -- or 'nullFieldLength' for a NULL
     }
 
--- | @since 1.3.4
+-- | @since 1.4.0
 rawRowFieldCount :: RawRow protocol -> Int
 rawRowFieldCount row = VU.length (rawRowBounds row) `unsafeShiftR` 1
 
 -- | One field of a 'RawRow'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data RawField
     = RawNull
     | RawBytes !ByteString
@@ -95,7 +95,7 @@ data RawField
 -- | The field of a column, counting from 0. Inlined so that a caller matching
 -- on the result never allocates the 'RawField'.
 --
--- @since 1.3.4
+-- @since 1.4.0
 rawField :: RawRow protocol -> ColumnNumber -> RawField
 rawField row@(RawRow bytes bounds) (ColumnNumber column) =
     -- Compared with the field count, not @2 * column + 1@ with the bounds'
@@ -116,7 +116,7 @@ nullFieldLength = -1
 -- | The bounds of the first @columnCount@ fields of a text-protocol row. Bytes
 -- after the last field are ignored, as 'decodeTextRow' ignores them.
 --
--- @since 1.3.4
+-- @since 1.4.0
 textRawRow :: Int -> ByteString -> Either RowError (RawRow TextProtocol)
 textRawRow columnCount row = runST $ do
     bounds <- VUM.unsafeNew (2 * columnCount)
@@ -150,7 +150,7 @@ writeBounds bounds (ColumnNumber column) start fieldLength = do
 
 -- | How the binary protocol lays out the non-NULL fields of a column.
 --
--- @since 1.3.4
+-- @since 1.4.0
 data BinaryWidth
     = BinaryFixed !Int
       -- ^ always this many bytes: the integers, FLOAT, DOUBLE and YEAR
@@ -161,7 +161,7 @@ data BinaryWidth
       -- ^ a column of type NULL, whose fields the NULL map marks
     deriving (Show, Eq)
 
--- | @since 1.3.4
+-- | @since 1.4.0
 binaryWidth :: ColumnDef -> BinaryWidth
 binaryWidth column =
     if  | t == mySQLTypeTiny -> BinaryFixed 1
@@ -177,7 +177,7 @@ binaryWidth column =
 -- map with a bit per column from bit 2 on, then the non-NULL fields, laid out
 -- as each column's 'BinaryWidth' says.
 --
--- @since 1.3.4
+-- @since 1.4.0
 binaryRawRow :: V.Vector BinaryWidth -> ByteString -> Either RowError (RawRow BinaryProtocol)
 binaryRawRow widths row =
     let nullMapLength = binaryNullMapLength (V.length widths)
