@@ -71,6 +71,11 @@ prop_enum3I :: Int -> Bool
 prop_enum4I :: Int24 -> Property
 prop_enum5I :: Int24 -> Word8 -> Bool
 prop_enum6I :: Int24 -> Int24 -> Bool
+-- | Int24 division throws for a zero divisor and, like 'Int' quot, for
+-- minBound divided by -1 (Data.Int.Int24 raises overflowError there).
+int24DivisionDefined :: Int24 -> Int24 -> Bool
+int24DivisionDefined a b = b /= 0 && not (a == minBound && b == (-1))
+
 prop_quotI :: Int24 -> Int24 -> Property
 prop_remI :: Int24 -> Int24 -> Property
 prop_divI :: Int24 -> Int24 -> Property
@@ -246,24 +251,24 @@ prop_enum5I a b = let b' = fromIntegral b in
 prop_enum6I a b = take 2 (enumFromThen a b) == [a,b]
 
 -- Int24 Integral properties
-prop_quotI a b = b /= 0 ==>
+prop_quotI a b = int24DivisionDefined a b ==>
   quot a b == fromIntegral (quot (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_remI a b = b /= 0 ==>
+prop_remI a b = int24DivisionDefined a b ==>
   rem a b == fromIntegral (rem (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_divI a b = b /= 0 ==>
+prop_divI a b = int24DivisionDefined a b ==>
   div a b == fromIntegral (div (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
-prop_modI a b = b /= 0 ==>
+prop_modI a b = int24DivisionDefined a b ==>
   mod a b == fromIntegral (mod (fromIntegral a :: Int32) (fromIntegral b :: Int32))
 
 prop_quotremI :: Int24 -> Int24 -> Property
-prop_quotremI a b = b /= 0 ==> let (j, k) = quotRem a b in
+prop_quotremI a b = int24DivisionDefined a b ==> let (j, k) = quotRem a b in
   a == (b * j) + k
 
 prop_divmodI :: Int24 -> Int24 -> Property
-prop_divmodI a b = b /= 0 ==>
+prop_divmodI a b = int24DivisionDefined a b ==>
   divMod a b == (div a b, mod a b)
 
 
