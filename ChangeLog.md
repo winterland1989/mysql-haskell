@@ -6,7 +6,7 @@
   proxies and managed databases that route by it work; set
   `clientUseServerNameIndication = False` on the `ClientParams` to send none.
   `show` of a `ConnectInfo` hides the password
-  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+  [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
 
 ## 1.5.0 -- 2026.11.11 
 
