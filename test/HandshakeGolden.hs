@@ -1,4 +1,4 @@
-module HandshakeGolden (tests) where
+module HandshakeGolden (tests, mysqlGreeting) where
 
 import qualified Data.Binary                as Binary
 import           Data.Bits                  ((.|.))
