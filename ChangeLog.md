@@ -7,6 +7,7 @@
   `WithLimits` connect functions) raises `MessageTooLarge`, and a column count
   no server sends or more OK packets than the query has statements are refused
   instead of read without end
+  [#116](https://github.com/winterland1989/mysql-haskell/pull/116)
 
 ## 1.5.0 -- 2026.11.11 
 
