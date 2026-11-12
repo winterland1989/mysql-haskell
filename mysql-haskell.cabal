@@ -93,7 +93,9 @@ library
   other-modules:      Paths_mysql_haskell
   autogen-modules:    Paths_mysql_haskell
   hs-source-dirs:     src
-  other-modules:      Database.MySQL.Query
+  other-modules:
+    Database.MySQL.Cursor
+    Database.MySQL.Query
   build-depends:
     -- The CRC32 table of binlog event checksums.
     array >=0.5 && <0.6,
@@ -237,6 +239,7 @@ test-suite integration
     RowDecoderQueries
     RoundtripYear
     SelectOne
+    StatementCursor
     TestUser
     TextRow
     TLSClientCertificate

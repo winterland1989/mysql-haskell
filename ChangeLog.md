@@ -1,5 +1,10 @@
 # Revision history for mysql-haskell
 
+## 1.5.1 -- unreleased
+
+* Prepared statements read through a server-side cursor, a batch of rows at a
+  time, with `queryStmtCursor` and `queryStmtRowsCursor`
+
 ## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours
