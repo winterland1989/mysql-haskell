@@ -190,7 +190,7 @@ executeMany_ conn@(MySQLConn is os _ _) qry = runCommand conn $ do
 -- ones are read and discarded ('executeMany_' returns them all).
 --
 execute_ :: MySQLConn -> Query -> IO OK
-execute_ conn (Query qry) = executeCommand conn (COM_QUERY qry)
+execute_ conn (Query qry) = executeCommand conn (COM_QUERY qry) skipResultSet
 
 -- | Execute a MySQL query which return a result-set with parameters.
 --
@@ -617,14 +617,17 @@ skipResultSet :: InputStream Packet -> Packet -> IO EOF
 skipResultSet is columnCountPacket = do
     columnCount <- getFromPacket getLenEncInt columnCountPacket
     replicateM_ columnCount (readPacket is)
-    columnsEnd <- readPacket is
-    -- An OK means the rows wait in a cursor, see Note [Statements that keep a cursor].
-    if isOK columnsEnd
-    then okAsEOF <$> decodeFromPacket columnsEnd
-    else skipRows is
+    _ <- readPacket is -- eof packet after the column definitions
+    skipRows is
 
-okAsEOF :: OK -> EOF
-okAsEOF ok = EOF (okWarningCnt ok) (okStatus ok)
+-- | 'skipResultSet' for the first result-set of a prepared statement, whose
+-- rows can wait in a cursor, see Note [Statements that keep a cursor].
+skipStmtResultSet :: (Packet -> IO ()) -> StmtID -> InputStream Packet -> Packet -> IO EOF
+skipStmtResultSet os stid is columnCountPacket = do
+    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    replicateM_ columnCount (readPacket is)
+    finishStmtColumns is os stid
+    skipRows is
 
 -- | Read a result-set's rows up to and including the EOF packet that ends them.
 skipRows :: InputStream Packet -> IO EOF
@@ -696,15 +699,16 @@ resetStmt conn@(MySQLConn is os _ _) stid = runCommand conn $ do
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
-executeStmt conn stid params =
-  executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params))
+executeStmt conn@(MySQLConn _ os _ _) stid params =
+  executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params)) (skipStmtResultSet os stid)
 
 -- | Send a statement that should answer with an 'OK' and read its whole reply,
 -- see 'skipFurtherResults'. A result-set, also as the first reply (a SELECT or
--- a CALL running one), is read off the connection and raises 'ExtraResultSets',
--- unless a later statement fails: its 'ERRException' is raised instead.
-executeCommand :: MySQLConn -> Command -> IO OK
-executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
+-- a CALL running one), is read off the connection with @skipFirst@ and raises
+-- 'ExtraResultSets', unless a later statement fails: its 'ERRException' is
+-- raised instead.
+executeCommand :: MySQLConn -> Command -> (InputStream Packet -> Packet -> IO EOF) -> IO OK
+executeCommand conn@(MySQLConn is os _ _) cmd skipFirst = runCommand conn $ do
     writeCommand cmd os
     p <- readPacket is
     if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
@@ -713,7 +717,7 @@ executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
             finishAfterOK is ok
             pure ok
         | otherwise -> do
-            eof <- skipResultSet is p
+            eof <- skipFirst is p
             when (isThereMoreAfterEOF eof) (void (skipFurtherResults SomeResultSet is))
             throwIO ExtraResultSets
 
@@ -768,10 +772,20 @@ finishStmtColumns is os stid = do
 -- definitions end in an OK packet in place of the EOF packet, and the rows wait
 -- in an open cursor instead of following. Seen on MySQL 8.0.45, whose
 -- Prepared_statement::execute, like the one on MySQL's trunk, keeps the result
--- object of a statement's first execution for the ones after it. Waiting for
--- the rows would hang, so queryStmt and its relatives fetch them all with one
--- COM_STMT_FETCH, and executeStmt, which discards them anyway, leaves them in
--- the cursor. MariaDB answers such an execution as usual.
+-- object of a statement's first execution for the ones after it. MariaDB
+-- answers such an execution as usual. Waiting for the rows would hang.
+--
+-- Rows left in that cursor without a single fetch stay there, ahead of the
+-- next execution's rows: a queryStmt from 9998 after an executeStmt from 9998
+-- gave 9998, 9999, 9998, 9999. A fetch of any size, a COM_STMT_RESET or an
+-- execution asking for a cursor ends them.
+--
+-- Decision: an execution without a cursor that finds its rows in one fetches
+-- them all in the same exchange with one COM_STMT_FETCH, after whose last row
+-- the server closes the cursor: queryStmt and its relatives hand them out, and
+-- executeStmt skips them as it skips any result-set's rows. A COM_STMT_RESET
+-- after executeStmt would end them too, but queryStmt needs the fetch anyway,
+-- so one workaround serves both.
 
 -- | 'queryStmt' reading the rows through a server-side cursor, at most
 -- @rowsPerFetch@ of them per round trip, so a large result is held in memory

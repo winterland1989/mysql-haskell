@@ -104,12 +104,51 @@ tests = testGroup "server-side cursors"
             Stream.toList rows >>= assertEqual "the cursor's rows" (map single [9997 .. 9999])
             plain <- timeout 10000000 (queryStmt c stmt [MySQLInt32 9998] >>= Stream.toList . snd)
             assertEqual "queryStmt's rows" (Just (map single [9998, 9999])) plain
-            executed <- timeout 10000000 (try (executeStmt c stmt [MySQLInt32 9998]))
-            case executed of
-                Just (Left ExtraResultSets) -> pure ()
-                Just (Right ok) -> assertFailure ("executeStmt gave " ++ show ok)
-                Nothing -> assertFailure "executeStmt waited for rows that never came"
+            executeRefusingRows c stmt 9998
             selectAll c "SELECT 'next'" >>= assertEqual "a query afterwards" [[MySQLText "next"]]
+    -- MySQL keeps the rows of an execution nobody fetched in the statement's
+    -- cursor, ahead of the next execution's rows.
+    , testCase "queryStmt after a cursor and an executeStmt gives only its own rows" $
+        withNumbers $ \c stmt -> do
+            readThroughCursor c stmt
+            executeRefusingRows c stmt 9998
+            plain <- timeout 10000000 (queryStmt c stmt [MySQLInt32 9998] >>= Stream.toList . snd)
+            assertEqual "queryStmt's rows" (Just (numbersFrom 9998)) plain
+    , testCase "queryStmtCursor after a cursor and an executeStmt gives only its own rows" $
+        withNumbers $ \c stmt -> do
+            readThroughCursor c stmt
+            executeRefusingRows c stmt 9998
+            queryStmtCursor c stmt [MySQLInt32 9998] 100 >>= Stream.toList . snd
+                >>= assertEqual "the cursor's rows" (numbersFrom 9998)
+    , testCase "queryStmt after a cursor and two executeStmts gives only its own rows" $
+        withNumbers $ \c stmt -> do
+            readThroughCursor c stmt
+            executeRefusingRows c stmt 9998
+            executeRefusingRows c stmt 9997
+            plain <- timeout 10000000 (queryStmt c stmt [MySQLInt32 9999] >>= Stream.toList . snd)
+            assertEqual "queryStmt's rows" (Just (numbersFrom 9999)) plain
+    , testCase "queryStmt and queryStmtCursor after a cursor left part-way give only their own rows" $
+        withNumbers $ \c stmt -> do
+            (_, rows) <- queryStmtCursor c stmt [MySQLInt32 0] 100
+            void (replicateM 150 (Stream.read rows))
+            queryStmt c stmt [MySQLInt32 9998] >>= Stream.toList . snd
+                >>= assertEqual "queryStmt's rows" (numbersFrom 9998)
+            queryStmtCursor c stmt [MySQLInt32 9997] 100 >>= Stream.toList . snd
+                >>= assertEqual "the next cursor's rows" (numbersFrom 9997)
+    , testCase "closing the statement ends its cursor's stream" $
+        withNumbers $ \c stmt -> do
+            (_, rows) <- queryStmtCursor c stmt [MySQLInt32 0] 100
+            void (replicateM 200 (Stream.read rows))
+            closeStmt c stmt
+            refused <- try (Stream.read rows)
+            case refused of
+                -- ER_UNKNOWN_STMT_HANDLER
+                Left (ERRException err) -> assertEqual ("error " ++ show (errMsg err)) 1243 (errCode err)
+                Right row -> assertFailure ("the fetch after closeStmt gave " ++ show row)
+            Stream.read rows >>= assertEqual "a read after the refusal" Nothing
+            again <- prepareStmt c "SELECT n, label FROM statement_cursor_numbers WHERE n >= ? ORDER BY n"
+            queryStmt c again [MySQLInt32 9998] >>= Stream.toList . snd
+                >>= assertEqual "the statement prepared again" (numbersFrom 9998)
     , testCase "0 rows per fetch is refused before the statement runs" $
         withNumbers $ \c stmt -> do
             refused <- try (queryStmtCursor c stmt [MySQLInt32 0] 0)
@@ -169,6 +208,21 @@ numberDecoder = (,) <$> Decode.field Decode.int32 <*> Decode.field Decode.text
 
 single :: Int32 -> [MySQLValue]
 single n = [MySQLInt32 n]
+
+-- | The statement's first execution, through a cursor read to the end.
+readThroughCursor :: MySQLConn -> StmtID -> IO ()
+readThroughCursor c stmt =
+    queryStmtCursor c stmt [MySQLInt32 9999] 100 >>= Stream.toList . snd
+        >>= assertEqual "the cursor's rows" (numbersFrom 9999)
+
+-- | 'executeStmt' on a statement with rows, which it reads and refuses.
+executeRefusingRows :: MySQLConn -> StmtID -> Int32 -> Assertion
+executeRefusingRows c stmt from = do
+    executed <- timeout 10000000 (try (executeStmt c stmt [MySQLInt32 from]))
+    case executed of
+        Just (Left ExtraResultSets) -> pure ()
+        Just (Right ok) -> assertFailure ("executeStmt gave " ++ show ok)
+        Nothing -> assertFailure "executeStmt waited for rows that never came"
 
 -- | The session's COM_STMT_FETCH count, which both servers keep.
 fetchCount :: MySQLConn -> IO Int
