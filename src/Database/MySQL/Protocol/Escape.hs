@@ -11,11 +11,19 @@ Portability : PORTABLE
 
 Escaping for the body of a single-quoted string literal, the form
 'Database.MySQL.Protocol.MySQLValue.putTextField' renders text and bytes in.
-The result is only safe between single quotes: a double quote is not escaped.
 
-A quote is doubled and a backslash escaped with a backslash; every other
-character is kept as it is. Under @NO_BACKSLASH_ESCAPES@ the literal reads the
-same, except that each backslash is stored twice.
+A quote is doubled. A backslash, a double quote and NUL get a backslash in
+front of them, and backspace, tab, newline, carriage return and Control-Z
+(0x1A) are written as @\\b@, @\\t@, @\\n@, @\\r@ and @\\Z@; every other
+character is kept as it is. In the default @sql_mode@ the server reads the
+literal back as the original value, and the result cannot end a double-quoted
+literal either, though a quote reads as two there.
+
+Under @NO_BACKSLASH_ESCAPES@ the literal still ends at its closing quote, but
+a backslash is an ordinary character, so the server stores every backslash
+written: a backslash is stored twice, and a double quote or one of those
+control characters is stored after a backslash. That changes the stored
+value; it cannot end the literal.
 
 Not safe on a connection whose character set lets a multibyte character end
 in the backslash byte, 0x5C: gbk, big5, sjis, cp932 and gb18030. There the
@@ -43,21 +51,20 @@ import           Foreign.Ptr              (Ptr, minusPtr, plusPtr)
 import           Foreign.Storable         (peek, poke, pokeByteOff)
 import           GHC.IO                   (unsafeDupablePerformIO)
 
--- Decision: escape only the quote, by doubling it, and the backslash, with a
--- backslash: the MySQL manual says only these two must be escaped in a
--- single-quoted literal. Escaping the quote as @\'@ ended the literal under
--- @NO_BACKSLASH_ESCAPES@, and the other escapes mysql_real_escape_string
--- writes (@\0 \n \r \Z \"@) only make logs readable while storing a
--- stray backslash in that mode. test/ParameterEscaping.hs round-trips every
--- byte 0x00 to 0xFF raw on MariaDB and MySQL. See Note [Backslashes without
--- backslash escapes].
+-- Decision: keep 1.4.1's escapes but double the quote, whose @\'@ ended the
+-- literal under @NO_BACKSLASH_ESCAPES@. 1.5.0 also sent control characters
+-- and the double quote raw, which changed the SQL text of many more
+-- parameters. See Note [Backslashes without backslash escapes].
 
 -- Note [Backslashes without backslash escapes]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--- Under @NO_BACKSLASH_ESCAPES@ a backslash is an ordinary character, so
--- @C:\@, rendered as @'C:\\'@, is stored as @C:\\@. Leaving the backslash
--- unescaped is no way out: in the default mode @'C:\'@ escapes its own
--- closing quote. Rendering for the session's mode needs the
+-- Under @NO_BACKSLASH_ESCAPES@ a backslash is an ordinary character, so the
+-- server stores every backslash the escaping writes: @C:\@, rendered as
+-- @'C:\\'@, is stored as @C:\\@, and a newline, rendered as @'\n'@, as a
+-- backslash and an @n@. Sending control characters and the double quote raw,
+-- as 1.5.0 did, stores those right in both modes, but the backslash itself
+-- cannot be sent raw: in the default mode @'C:\'@ escapes its own closing
+-- quote. Rendering for the session's mode needs the
 -- SERVER_STATUS_NO_BACKSLASH_ESCAPES flag of the server's OK packets, kept
 -- per connection. 'Database.MySQL.Connection.MySQLConn' and its
 -- 'Database.MySQL.Connection.ReplyState' are exported with their
@@ -75,21 +82,23 @@ escapeText (T.Text array offset len) = if len <= 0
         in T.Text escaped 0 escapedLength
 
 -- | Copies the code units from @source@ to @sourceEnd@ into @target@, from
--- @targetIndex@ on, doubling quotes and backslashes; it returns @target@ and
--- the index after the last unit written. A unit is a byte of UTF-8 (text 2)
--- or a 16-bit unit of UTF-16 (text 1); neither encoding puts a quote or a
--- backslash inside a longer character, so units can be copied one by one.
+-- @targetIndex@ on, escaped; it returns @target@ and the index after the last
+-- unit written. A unit is a byte of UTF-8 (text 2) or a 16-bit unit of
+-- UTF-16 (text 1); neither encoding puts an ASCII unit inside a longer
+-- character, so units can be escaped one by one.
 escapeUnits :: TA.Array -> Int -> TA.MArray s -> Int -> Int -> ST s (TA.MArray s, Int)
 escapeUnits array sourceEnd target !source !targetIndex = if source == sourceEnd
     then return (target, targetIndex)
     else do
         let unit = TA.unsafeIndex array source
-        TA.unsafeWrite target targetIndex unit
-        if unit == quote || unit == backslash
-            then do
-                TA.unsafeWrite target (targetIndex + 1) unit
+        case unitEscape unit of
+            Kept -> do
+                TA.unsafeWrite target targetIndex unit
+                escapeUnits array sourceEnd target (source + 1) (targetIndex + 1)
+            Escaped first second -> do
+                TA.unsafeWrite target targetIndex first
+                TA.unsafeWrite target (targetIndex + 1) second
                 escapeUnits array sourceEnd target (source + 1) (targetIndex + 2)
-            else escapeUnits array sourceEnd target (source + 1) (targetIndex + 1)
 
 -- | Escape bytes for a single-quoted literal, see the module header.
 escapeBytes :: ByteString -> ByteString
@@ -98,20 +107,40 @@ escapeBytes (B.PS fp s len) = unsafeDupablePerformIO $ withForeignPtr fp $ \ a -
         b' <- escapeByteRange (a `plusPtr` s) (a `plusPtr` s `plusPtr` len) b
         return (b' `minusPtr` b)
 
--- | Copies the bytes from @source@ to @sourceEnd@ to @target@, doubling
--- quotes and backslashes; it returns the address after the last byte written.
+-- | Copies the bytes from @source@ to @sourceEnd@ to @target@, escaped; it
+-- returns the address after the last byte written.
 escapeByteRange :: Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO (Ptr Word8)
 escapeByteRange !source sourceEnd !target = if source == sourceEnd
     then return target
     else do
         byte <- peek source
-        poke target byte
-        if byte == quote || byte == backslash
-            then do
-                pokeByteOff target 1 byte
+        case unitEscape byte of
+            Kept -> do
+                poke target byte
+                escapeByteRange (source `plusPtr` 1) sourceEnd (target `plusPtr` 1)
+            Escaped first second -> do
+                poke target first
+                pokeByteOff target 1 second
                 escapeByteRange (source `plusPtr` 1) sourceEnd (target `plusPtr` 2)
-            else escapeByteRange (source `plusPtr` 1) sourceEnd (target `plusPtr` 1)
 
-quote, backslash :: Num unit => unit
+-- | How one byte, or one 16-bit unit of UTF-16, is written.
+data UnitEscape unit = Kept | Escaped unit unit
+
+-- | NUL becomes a backslash and a NUL rather than @\\0@, as in 1.4.1; the
+-- server reads both as NUL.
+unitEscape :: (Eq unit, Num unit) => unit -> UnitEscape unit
+unitEscape unit = if
+    | unit == quote -> Escaped quote quote
+    | unit == backslash || unit == doubleQuote || unit == 0 -> Escaped backslash unit
+    | unit == 8 -> Escaped backslash 0x62 -- \b
+    | unit == 9 -> Escaped backslash 0x74 -- \t
+    | unit == 10 -> Escaped backslash 0x6E -- \n
+    | unit == 13 -> Escaped backslash 0x72 -- \r
+    | unit == 26 -> Escaped backslash 0x5A -- \Z
+    | otherwise -> Kept
+{-# INLINE unitEscape #-}
+
+quote, doubleQuote, backslash :: Num unit => unit
 quote = 0x27
+doubleQuote = 0x22
 backslash = 0x5C

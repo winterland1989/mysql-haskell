@@ -1,5 +1,18 @@
 # Revision history for mysql-haskell
 
+## 1.5.1 -- unreleased
+
+No API change. `escapeText` and `escapeBytes`, used for the text and bytes
+parameters of `query`, `execute` and `executeMany`, escape as in 1.4.1 again
+except for the quote, which stays doubled, so a parameter still cannot end its
+literal under `NO_BACKSLASH_ESCAPES`. In the default mode the server stores
+the same values; coming from 1.5.0, the SQL text of a parameter with a control
+character or a double quote changes back to 1.4.1's, and under
+`NO_BACKSLASH_ESCAPES` those characters are again stored after a backslash.
+
+* Parameters escaped as in 1.4.1 apart from the quote
+  [#113](https://github.com/winterland1989/mysql-haskell/pull/113)
+
 ## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours

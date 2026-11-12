@@ -8,6 +8,7 @@ module ParameterEscaping (tests) where
 import qualified Data.ByteString     as B
 import           Data.Text           (Text)
 import qualified Data.Text           as T
+import qualified Data.Text.Encoding  as T
 import           Data.Word           (Word8)
 import           Database.MySQL.Base
 import           QueryApi
@@ -32,14 +33,14 @@ tests api = testGroup "parameters rendered into the query text"
                     "UPDATE escaping_users SET secret = 'changed' WHERE name = ?"
                     [[MySQLText endsLiteral]]
                 assertEqual "rows changed" 0 (sum (map okAffectedRows oks))
-        , testCase "text with quotes and control characters round-trips" $
+        , testCase "text with quotes round-trips" $
             withTestConnection $ \c -> do
                 setNoBackslashEscapes c
-                assertTextRoundTrip api c (T.filter (/= '\\') trickyText)
-        , testCase "every byte but the backslash round-trips" $
+                assertTextRoundTrip api c (T.filter (`notElem` backslashEscaped) trickyText)
+        , testCase "every byte not escaped with a backslash round-trips" $
             withTestConnection $ \c -> do
                 setNoBackslashEscapes c
-                assertBytesRoundTrip api c (B.filter (/= backslash) everyByte)
+                assertBytesRoundTrip api c (B.filter (`notElem` backslashEscapedBytes) everyByte)
         ]
     , testGroup "default sql_mode"
         [ testCase "text with quotes, backslashes and control characters round-trips" $
@@ -61,8 +62,13 @@ trickyText = "it's \"quoted\" '' \\' \\\\ \0 \n \r \t \b \SUB % _ \252nic\246de 
 everyByte :: B.ByteString
 everyByte = B.pack [minBound .. maxBound]
 
-backslash :: Word8
-backslash = 0x5C
+-- | The characters the escaping writes after a backslash, which
+-- NO_BACKSLASH_ESCAPES stores along with it.
+backslashEscaped :: String
+backslashEscaped = "\0\b\t\n\r\SUB\"\\"
+
+backslashEscapedBytes :: [Word8]
+backslashEscapedBytes = B.unpack (T.encodeUtf8 (T.pack backslashEscaped))
 
 -- | A connection under NO_BACKSLASH_ESCAPES with one row in @escaping_users@
 -- whose name is not 'endsLiteral'.
