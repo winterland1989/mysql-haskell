@@ -1,5 +1,13 @@
 # Revision history for mysql-haskell
 
+## 1.5.1 -- unreleased
+
+* Limits on what a server can make the client read: a message above
+  `messageSizeLimit` (1 GiB plus 64 KiB unless set through the new
+  `WithLimits` connect functions) raises `MessageTooLarge`, and a column count
+  no server sends or more OK packets than the query has statements are refused
+  instead of read without end
+
 ## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours

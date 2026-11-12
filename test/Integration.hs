@@ -10,6 +10,7 @@ import qualified CABundle
 import qualified CachingSha2
 import qualified FloatingPoint
 import qualified MariaDBNegotiation
+import qualified MessageSizeLimit
 import qualified LargeRows
 import qualified Latin1Results
 import qualified NonUtf8Results
@@ -56,6 +57,7 @@ main = do
         , CABundle.tests
         , ZeroDateRoundtrip.typedDecoderTests
         , ResetConnection.tests
+        , MessageSizeLimit.tests mSockPath mTlsCaPath
         ]
         -- binlog_transaction_compression is MySQL 8.0.20+ only.
         ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]

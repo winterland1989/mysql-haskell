@@ -152,6 +152,7 @@ test-suite test
     AesonBP
     BinLogChecksum
     BinLogEventCodes
+    BoundedReplies
     BoundsCheck
     DecoderRoundtrip
     DirectDecoding
@@ -225,6 +226,7 @@ test-suite integration
     LargeRows
     Latin1Results
     MariaDBNegotiation
+    MessageSizeLimit
     MultipleResults
     MysqlTests
     NonUtf8Results

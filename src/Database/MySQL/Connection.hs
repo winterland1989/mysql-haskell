@@ -28,6 +28,16 @@ module Database.MySQL.Connection
     , connectUnixSocketDetail
     , connectDetailExtended
     , connectUnixSocketDetailExtended
+      -- * Limits on what a server sends
+    , ConnectionLimits
+    , messageSizeLimit
+    , defaultConnectionLimits
+    , connectWithLimits
+    , connectDetailWithLimits
+    , connectDetailExtendedWithLimits
+    , connectUnixSocketWithLimits
+    , connectUnixSocketDetailWithLimits
+    , connectUnixSocketDetailExtendedWithLimits
     , withoutNegotiated
     , authenticatedConnection
       -- * Authentication
@@ -47,6 +57,7 @@ module Database.MySQL.Connection
     , AuthException (..)
       -- * Commands and replies
     , decodeInputStream
+    , decodeInputStreamWithLimits
     , close
     , ping
     , resetConnection
@@ -69,6 +80,8 @@ module Database.MySQL.Connection
     , ERRException (..)
     , UnexpectedPacket (..)
     , ExtraResultSets (..)
+    , MessageTooLarge (..)
+    , MoreResultsThanStatements (..)
     ) where
 
 import           Control.Exception               (Exception (displayException),
@@ -110,6 +123,8 @@ import           System.IO.Streams               (InputStream)
 import qualified System.IO.Streams               as Stream
 import qualified System.IO.Streams.TCP           as TCP
 import qualified Data.Connection                 as TCP
+import qualified Unwitch.Convert.Int             as Int
+import qualified Unwitch.Convert.Word8           as Word8
 
 --------------------------------------------------------------------------------
 
@@ -191,6 +206,65 @@ utf8_general_ci = 33
 utf8mb4_unicode_ci :: Word8
 utf8mb4_unicode_ci = 224
 
+-- | Bounds on what a server can make the client read, given to the
+-- @WithLimits@ connect functions; see Note [Bounded replies]. Change a limit
+-- by updating 'defaultConnectionLimits':
+--
+-- > defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 }
+--
+-- The constructor is not exported, so that limits can be added later.
+--
+-- @since 1.5.1
+data ConnectionLimits = ConnectionLimits
+    { messageSizeLimit :: !Int64
+      -- ^ The largest message the server may send, in bytes: one packet, or
+      -- one together with the packets continuing it. A larger message raises
+      -- 'MessageTooLarge' before more than the limit is read of it.
+    } deriving (Show, Eq)
+
+-- | A 'messageSizeLimit' of 1 GiB plus 64 KiB, which refuses no reply a
+-- server sends and no binlog event a replica accepts.
+--
+-- @since 1.5.1
+defaultConnectionLimits :: ConnectionLimits
+defaultConnectionLimits = ConnectionLimits { messageSizeLimit = 1073741824 + 65536 }
+
+-- Note [Bounded replies]
+-- ~~~~~~~~~~~~~~~~~~~~~~
+-- What the client reads is up to the server, or to whoever sits between them
+-- on a connection without TLS. Three things in a reply let them decide how
+-- much memory the client takes:
+--
+-- * A packet of 16 MiB says another continues its message, without end. The
+--   packet stream refuses the packet that would take a message past
+--   'messageSizeLimit', before reading its body. The default is 1 GiB plus
+--   64 KiB. 1 GiB is the most max_allowed_packet can be set to on MySQL and
+--   MariaDB, and MySQL's manual says the server sends a client no more than
+--   it. Binlog events may exceed that by their header, so replicas accept
+--   1 GiB plus MAX_LOG_EVENT_HEADER (4197 bytes on MySQL 8.0, 1192 on MariaDB
+--   11.4; set_replica_max_allowed_packet in MySQL's sql/rpl_replica.cc,
+--   set_slave_max_allowed_packet in MariaDB's sql/slave.cc), and 64 KiB covers
+--   that with room to spare.
+--
+-- * A column count comes before the column definitions. A count above
+--   2^32 - 1, which neither server can send as both hold it in an unsigned
+--   int, is refused, and the definitions are read one at a time instead of
+--   into a vector of the count's size.
+--
+-- * The functions returning a whole reply keep its results while the server
+--   flags another one (SERVER_MORE_RESULTS_EXISTS). A statement gives at most
+--   one OK packet and a query holds at most one statement more than it has
+--   semicolons, so more OK packets than that raise
+--   'MoreResultsThanStatements'. The execute functions skip a result set
+--   instead of keeping it, as they raise 'ExtraResultSets' for it anyway.
+--   The rows queryMulti_ returns, and the result sets a CALL returns, are not
+--   bounded: no count follows from the query, and a limit set at connect
+--   time cannot reach them.
+--
+-- Decision: the message limit lives in the packet stream, as 'MySQLConn' is
+-- an exported record a new field would break. For the same reason the other
+-- bounds are fixed rather than part of 'ConnectionLimits'.
+
 --------------------------------------------------------------------------------
 
 -- | Socket buffer size.
@@ -203,12 +277,12 @@ bUFSIZE = 16384
 -- | Establish a MySQL connection.
 --
 connect :: ConnectInfo -> IO MySQLConn
-connect = fmap snd . connectDetail
+connect = connectWithLimits defaultConnectionLimits
 
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail = fmap withoutNegotiated . connectDetailExtended noExtendedCapabilities
+connectDetail = connectDetailWithLimits defaultConnectionLimits
 
 -- | 'connectDetail' asking a MariaDB server for extended capabilities, also
 -- returning those the server agreed to. Asking for none gives exactly
@@ -216,23 +290,18 @@ connectDetail = fmap withoutNegotiated . connectDetailExtended noExtendedCapabil
 --
 -- @since 1.4.0
 connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectDetailExtended requested ci =
-    bracketOnError
-        (TCP.connectSocket (ciHost ci) (ciPort ci) >>= TCP.socketToConnection bUFSIZE)
-        TCP.close
-        (handshakePlain requested ci)
+connectDetailExtended = connectDetailExtendedWithLimits defaultConnectionLimits
 
 -- | Connect to MySQL via a Unix domain socket.
 --
 connectUnixSocket :: FilePath -> ConnectInfo -> IO MySQLConn
-connectUnixSocket socketPath ci = fmap snd (connectUnixSocketDetail socketPath ci)
+connectUnixSocket = connectUnixSocketWithLimits defaultConnectionLimits
 
 -- | Connect to MySQL via a Unix domain socket with 'Greeting' back,
 -- so you can find server's version .etc.
 --
 connectUnixSocketDetail :: FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
-connectUnixSocketDetail socketPath =
-    fmap withoutNegotiated . connectUnixSocketDetailExtended noExtendedCapabilities socketPath
+connectUnixSocketDetail = connectUnixSocketDetailWithLimits defaultConnectionLimits
 
 -- | 'connectUnixSocketDetail' asking for extended capabilities, as
 -- 'connectDetailExtended' does.
@@ -240,8 +309,55 @@ connectUnixSocketDetail socketPath =
 -- @since 1.4.0
 connectUnixSocketDetailExtended :: ExtendedCapabilities -> FilePath -> ConnectInfo
                                 -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectUnixSocketDetailExtended requested socketPath ci =
-    bracketOnError (openUnixSocket socketPath) TCP.close (handshakePlain requested ci)
+connectUnixSocketDetailExtended = connectUnixSocketDetailExtendedWithLimits defaultConnectionLimits
+
+-- | 'connect' refusing what the server sends beyond these limits.
+--
+-- > conn <- connectWithLimits defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 } defaultConnectInfo
+--
+-- @since 1.5.1
+connectWithLimits :: ConnectionLimits -> ConnectInfo -> IO MySQLConn
+connectWithLimits limits = fmap snd . connectDetailWithLimits limits
+
+-- | 'connectDetail' refusing what the server sends beyond these limits.
+--
+-- @since 1.5.1
+connectDetailWithLimits :: ConnectionLimits -> ConnectInfo -> IO (Greeting, MySQLConn)
+connectDetailWithLimits limits =
+    fmap withoutNegotiated . connectDetailExtendedWithLimits limits noExtendedCapabilities
+
+-- | 'connectDetailExtended' refusing what the server sends beyond these limits.
+--
+-- @since 1.5.1
+connectDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo
+                                -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+connectDetailExtendedWithLimits limits requested connectInfo =
+    bracketOnError
+        (TCP.connectSocket (ciHost connectInfo) (ciPort connectInfo) >>= TCP.socketToConnection bUFSIZE)
+        TCP.close
+        (handshakePlain limits requested connectInfo)
+
+-- | 'connectUnixSocket' refusing what the server sends beyond these limits.
+--
+-- @since 1.5.1
+connectUnixSocketWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO MySQLConn
+connectUnixSocketWithLimits limits socketPath = fmap snd . connectUnixSocketDetailWithLimits limits socketPath
+
+-- | 'connectUnixSocketDetail' refusing what the server sends beyond these limits.
+--
+-- @since 1.5.1
+connectUnixSocketDetailWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
+connectUnixSocketDetailWithLimits limits socketPath =
+    fmap withoutNegotiated . connectUnixSocketDetailExtendedWithLimits limits noExtendedCapabilities socketPath
+
+-- | 'connectUnixSocketDetailExtended' refusing what the server sends beyond
+-- these limits.
+--
+-- @since 1.5.1
+connectUnixSocketDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> FilePath -> ConnectInfo
+                                          -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+connectUnixSocketDetailExtendedWithLimits limits requested socketPath connectInfo =
+    bracketOnError (openUnixSocket socketPath) TCP.close (handshakePlain limits requested connectInfo)
 
 openUnixSocket :: FilePath -> IO TCP.TCPConnection
 openUnixSocket socketPath = bracketOnError
@@ -256,10 +372,10 @@ withoutNegotiated :: (Greeting, ExtendedCapabilities, MySQLConn) -> (Greeting, M
 withoutNegotiated (greet, _, conn) = (greet, conn)
 
 -- | Authenticate over a connection without TLS, TCP or Unix socket alike.
-handshakePlain :: ExtendedCapabilities -> ConnectInfo -> TCP.TCPConnection
+handshakePlain :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo -> TCP.TCPConnection
                -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-handshakePlain requested (ConnectInfo _host _port db user pass charset) c = do
-    is' <- decodeInputStream (TCP.source c)
+handshakePlain limits requested (ConnectInfo _host _port db user pass charset) c = do
+    is' <- decodeInputStreamWithLimits limits (TCP.source c)
     p <- readPacket is'
     (greet, offered) <- getFromPacket getGreetingExtended p
     let salt = greetingSalt1 greet `B.append` greetingSalt2 greet
@@ -543,30 +659,77 @@ doRSAAuth writePacket seqN pass nonce pemKey = do
 data AuthException = AuthException String deriving (Typeable, Show)
 instance Exception AuthException
 
--- | A specialized 'decodeInputStream' here for speed
+-- | 'decodeInputStreamWithLimits' with 'defaultConnectionLimits'.
 decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
-decodeInputStream is = Stream.makeInputStream $ do
-    bs <- Stream.readExactly 4 is
-    let len =  fromIntegral (bs `B.unsafeIndex` 0)
-           .|. fromIntegral (bs `B.unsafeIndex` 1) `shiftL` 8
-           .|. fromIntegral (bs `B.unsafeIndex` 2) `shiftL` 16
-        seqN = bs `B.unsafeIndex` 3
-    body <- loopRead [] len is
-    return . Just $ Packet len seqN body
-  where
-    loopRead acc 0 _  = return $! L.fromChunks (reverse acc)
-    loopRead acc k is' = do
-        bs <- Stream.read is'
-        case bs of Nothing -> throwIO NetworkException
-                   Just bs' -> do let l = fromIntegral (B.length bs')
-                                  if l >= k
-                                  then do
-                                      let (a, rest) = B.splitAt (fromIntegral k) bs'
-                                      unless (B.null rest) (Stream.unRead rest is')
-                                      return $! L.fromChunks (reverse (a:acc))
-                                  else do
-                                      let k' = k - l
-                                      k' `seq` loopRead (bs':acc) k' is'
+decodeInputStream = decodeInputStreamWithLimits defaultConnectionLimits
+
+-- | The packets of a connection's byte stream. A message larger than the
+-- 'messageSizeLimit' raises 'MessageTooLarge' before more than the limit is
+-- read of it, and so does every read after that, as the message's unread rest
+-- would be taken for packets.
+--
+-- @since 1.5.1
+decodeInputStreamWithLimits :: ConnectionLimits -> InputStream ByteString -> IO (InputStream Packet)
+decodeInputStreamWithLimits limits inputStream = do
+    progress <- newIORef (MessageSoFar 0)
+    Stream.makeInputStream (readBoundedPacket (messageSizeLimit limits) progress inputStream)
+
+-- | How far the packet stream is into the message it reads.
+data MessageProgress
+    = MessageSoFar !Int64
+      -- ^ The bytes of the message read before its next packet; 0 between messages.
+    | MessageRefused !MessageTooLarge
+
+readBoundedPacket :: Int64 -> IORef MessageProgress -> InputStream ByteString -> IO (Maybe Packet)
+readBoundedPacket limit progress inputStream = do
+    current <- readIORef progress
+    case current of
+        MessageRefused refusal -> throwIO refusal
+        MessageSoFar soFar -> do
+            header <- Stream.readExactly 4 inputStream
+            let bodyLength = packetBodyLength header
+                len = Int.toInt64 bodyLength
+            -- Compared as a difference, as the sum could overflow.
+            if len > limit - soFar
+            then do
+                let refusal = MessageTooLarge limit (saturatingAdd soFar len)
+                writeIORef progress (MessageRefused refusal)
+                throwIO refusal
+            else do
+                body <- readPacketBody [] bodyLength inputStream
+                let next = if len == continuedPacketLength then soFar + len else 0
+                unless (next == soFar) (writeIORef progress (MessageSoFar next))
+                pure (Just (Packet len (header `B.unsafeIndex` 3) body))
+
+-- | The length of a packet whose message continues in the next packet.
+continuedPacketLength :: Int64
+continuedPacketLength = 16777215
+
+packetBodyLength :: ByteString -> Int
+packetBodyLength header =
+        Word8.toInt (header `B.unsafeIndex` 0)
+    .|. Word8.toInt (header `B.unsafeIndex` 1) `shiftL` 8
+    .|. Word8.toInt (header `B.unsafeIndex` 2) `shiftL` 16
+
+saturatingAdd :: Int64 -> Int64 -> Int64
+saturatingAdd augend addend = if augend > maxBound - addend then maxBound else augend + addend
+
+-- | The next @remaining@ bytes, after the chunks already read in reverse.
+readPacketBody :: [ByteString] -> Int -> InputStream ByteString -> IO L.ByteString
+readPacketBody earlierChunks remaining inputStream = if remaining == 0
+    then return $! L.fromChunks (reverse earlierChunks)
+    else do
+        next <- Stream.read inputStream
+        case next of
+            Nothing -> throwIO NetworkException
+            Just chunk -> if B.length chunk >= remaining
+                then do
+                    let (lastChunk, rest) = B.splitAt remaining chunk
+                    unless (B.null rest) (Stream.unRead rest inputStream)
+                    return $! L.fromChunks (reverse (lastChunk : earlierChunks))
+                else do
+                    let remaining' = remaining - B.length chunk
+                    remaining' `seq` readPacketBody (chunk : earlierChunks) remaining' inputStream
 
 -- | Close a MySQL connection.
 --
@@ -769,4 +932,37 @@ instance Exception ExtraResultSets where
         ++ "return (execute_ and executeStmt return none, query_ and queryStmt only the "
         ++ "first). It was read and discarded, so the connection is still usable. Run "
         ++ "statements that return rows through a query function, one result set per call."
+
+-- | The server sent a message larger than the connection's 'messageSizeLimit':
+-- the limit, and the size the message has at least, the bytes of its packets
+-- read so far and the length its next packet announced. It was refused before
+-- more than the limit was read, so the rest of it is still unread and the
+-- connection refuses commands with 'AbandonedReply' or this exception: close
+-- it, and connect with a larger limit if the message was expected. See
+-- Note [Bounded replies].
+--
+-- @since 1.5.1
+data MessageTooLarge = MessageTooLarge !Int64 !Int64
+    deriving (Typeable, Show, Eq)
+instance Exception MessageTooLarge where
+    displayException (MessageTooLarge limit size) =
+        "mysql-haskell: the server sent a message of at least " ++ show size ++ " bytes, more "
+        ++ "than the connection's messageSizeLimit of " ++ show limit ++ " bytes, so it was not "
+        ++ "read. Its unread rest would be taken for the next reply: close the connection, and "
+        ++ "connect with a larger messageSizeLimit if such a message is expected."
+
+-- | The server sent more OK packets in reply to a query than the query holds
+-- statements, the most of which is carried. Neither MySQL nor MariaDB sends
+-- more than one per statement. Reading stopped at the first one too many, so
+-- the connection refuses commands with 'AbandonedReply': close it. See
+-- Note [Bounded replies].
+--
+-- @since 1.5.1
+newtype MoreResultsThanStatements = MoreResultsThanStatements Int64
+    deriving (Typeable, Show, Eq)
+instance Exception MoreResultsThanStatements where
+    displayException (MoreResultsThanStatements statements) =
+        "mysql-haskell: the server sent more OK packets than the query's at most "
+        ++ show statements ++ " statements produce, one per statement. Reading stopped "
+        ++ "there, so the rest of the reply is unread: close the connection."
 

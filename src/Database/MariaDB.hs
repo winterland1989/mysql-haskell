@@ -32,6 +32,9 @@ module Database.MariaDB
     , connectMariaDB
     , connectMariaDBUnixSocket
     , connectMariaDBTLS
+    , connectMariaDBWithLimits
+    , connectMariaDBUnixSocketWithLimits
+    , connectMariaDBTLSWithLimits
       -- * Extended column metadata
     , ColumnMetadata(..)
     , ExtendedMetadata(..)
@@ -104,20 +107,43 @@ hasCapability capability conn = capability `elem` mariadbCapabilities conn
 -- 'NotMariaDB', after closing the connection, when the server does not speak
 -- MariaDB's protocol extensions (MySQL, or MariaDB before 10.2).
 connectMariaDB :: [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
-connectMariaDB requested ci =
-    Connection.connectDetailExtended (capabilityBits requested) ci >>= mariadbConn
+connectMariaDB = connectMariaDBWithLimits defaultConnectionLimits
 
 -- | 'Database.MySQL.Base.connectUnixSocket' asking for these capabilities, and
 -- refusing a MySQL server as 'connectMariaDB' does.
 connectMariaDBUnixSocket :: [MariaDBCapability] -> FilePath -> ConnectInfo -> IO MariaDBConn
-connectMariaDBUnixSocket requested socketPath ci =
-    Connection.connectUnixSocketDetailExtended (capabilityBits requested) socketPath ci >>= mariadbConn
+connectMariaDBUnixSocket = connectMariaDBUnixSocketWithLimits defaultConnectionLimits
 
 -- | 'Database.MySQL.TLS.connect' asking for these capabilities, and refusing a
 -- MySQL server as 'connectMariaDB' does.
 connectMariaDBTLS :: [MariaDBCapability] -> ConnectInfo -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
-connectMariaDBTLS requested ci tlsParams =
-    TLS.connectDetailExtended (capabilityBits requested) ci tlsParams >>= mariadbConn
+connectMariaDBTLS = connectMariaDBTLSWithLimits defaultConnectionLimits
+
+-- | 'connectMariaDB' refusing what the server sends beyond these limits, see
+-- 'ConnectionLimits'.
+--
+-- @since 1.5.1
+connectMariaDBWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
+connectMariaDBWithLimits limits requested connectInfo =
+    Connection.connectDetailExtendedWithLimits limits (capabilityBits requested) connectInfo >>= mariadbConn
+
+-- | 'connectMariaDBUnixSocket' refusing what the server sends beyond these
+-- limits.
+--
+-- @since 1.5.1
+connectMariaDBUnixSocketWithLimits :: ConnectionLimits -> [MariaDBCapability] -> FilePath -> ConnectInfo
+                                   -> IO MariaDBConn
+connectMariaDBUnixSocketWithLimits limits requested socketPath connectInfo =
+    Connection.connectUnixSocketDetailExtendedWithLimits limits (capabilityBits requested) socketPath connectInfo
+    >>= mariadbConn
+
+-- | 'connectMariaDBTLS' refusing what the server sends beyond these limits.
+--
+-- @since 1.5.1
+connectMariaDBTLSWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo
+                            -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
+connectMariaDBTLSWithLimits limits requested connectInfo tlsParams =
+    TLS.connectDetailExtendedWithLimits limits (capabilityBits requested) connectInfo tlsParams >>= mariadbConn
 
 -- | Refuses a server whose greeting does not announce MariaDB's protocol
 -- extensions, after closing the connection. The greeting's capabilities decide

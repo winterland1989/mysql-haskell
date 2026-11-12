@@ -24,6 +24,10 @@ By using this library you will meet:
     * 'WrongParamsCount': you're giving wrong number of params to 'renderParams'.
     * 'ExtraResultSets': a statement produced a result-set the function running it
       could not return.
+    * 'MessageTooLarge': the server sent a message larger than the connection's
+      'messageSizeLimit'; connect again.
+    * 'MoreResultsThanStatements': the server sent more OK packets than the query has
+      statements; connect again.
 
 Both 'UnexpectedPacket' and 'DecodePacketException' may indicate a bug of this library rather your code, so please report!
 
@@ -38,6 +42,14 @@ module Database.MySQL.Base
     , connectDetail
     , connectUnixSocket
     , connectUnixSocketDetail
+      -- ** Limits on what a server sends
+    , ConnectionLimits
+    , messageSizeLimit
+    , defaultConnectionLimits
+    , connectWithLimits
+    , connectDetailWithLimits
+    , connectUnixSocketWithLimits
+    , connectUnixSocketDetailWithLimits
     , close
     , ping
     , resetConnection
@@ -87,6 +99,8 @@ module Database.MySQL.Base
     , DecodePacketException(..)
     , WrongParamsCount(..)
     , ExtraResultSets(..)
+    , MessageTooLarge(..)
+    , MoreResultsThanStatements(..)
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command
@@ -99,10 +113,13 @@ module Database.MySQL.Base
 import           Control.Exception                  (SomeException, catch, fromException,
                                                      mask, onException, throwIO)
 import           Control.Monad
+import           Data.Binary.Get                    (Get)
 import           Data.Bits                          ((.&.))
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
 import qualified Data.ByteString.Lazy               as L
+import qualified Data.ByteString.Lazy.Char8         as LC
+import           Data.Int                           (Int64)
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Data.Maybe                         (isJust)
 import           Data.Proxy                         (Proxy (..))
@@ -120,6 +137,7 @@ import           System.IO.Streams                  (InputStream)
 import qualified System.IO.Streams                  as Stream
 import qualified Data.Vector                        as V
 import qualified Unwitch.Convert.Int                as Int
+import qualified Unwitch.Convert.Word64             as Word64
 
 --------------------------------------------------------------------------------
 
@@ -147,7 +165,8 @@ execute conn qry params = execute_ conn (renderParams qry params)
 -- The result holds one 'OK' per statement, so a query with several statements
 -- gives several per parameter set. A statement that returns rows raises
 -- 'ExtraResultSets' once the whole reply has been read; 'queryMulti' returns
--- those. No parameter sets gives @[]@ without contacting the server.
+-- those. More OKs than the statements sent raise 'MoreResultsThanStatements'.
+-- No parameter sets gives @[]@ without contacting the server.
 --
 -- @since 0.2.0.0
 --
@@ -159,7 +178,7 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList =
         _ : _ -> runCommand conn $ do
             let qry' = L.intercalate ";" $ map (fromQuery . renderParams qry) paramsList
             writeCommand (COM_QUERY qry') os
-            readStatementResults is >>= onlyOKs
+            readStatementOKs (statementBound qry') 0 is
 
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[MySQLValue]] -> IO [OK] #-}
 {-# SPECIALIZE executeMany :: MySQLConn -> Query -> [[Param]]      -> IO [OK] #-}
@@ -170,14 +189,15 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList =
 -- SQL dump, or a table migration plan.
 --
 -- A statement that returns rows raises 'ExtraResultSets' once the whole reply
--- has been read; 'queryMulti_' returns those.
+-- has been read; 'queryMulti_' returns those. More OKs than the query has
+-- statements raise 'MoreResultsThanStatements'.
 --
 -- @since 0.8.4.0
 --
 executeMany_ :: MySQLConn -> Query -> IO [OK]
-executeMany_ conn@(MySQLConn is os _ _) qry = runCommand conn $ do
-    writeCommand (COM_QUERY (fromQuery qry)) os
-    readStatementResults is >>= onlyOKs
+executeMany_ conn@(MySQLConn is os _ _) (Query qry) = runCommand conn $ do
+    writeCommand (COM_QUERY qry) os
+    readStatementOKs (statementBound qry) 0 is
 
 -- | Execute a MySQL query which don't return a result-set.
 --
@@ -238,7 +258,7 @@ queryVector_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
     case reply of
         WithoutResultSet -> (,) V.empty <$> Stream.nullInput
         ResultSetColumns len -> do
-            fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+            fields <- readColumnDefVector len is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef state RowsUnread
             rows <- resultSetRows is state (decodeTextRowVectorPacket (V.map columnKind fields))
@@ -366,6 +386,14 @@ queryStmtRawRows conn stid params = do
 rawRowOrThrow :: (ByteString -> Either RowError (RawRow protocol)) -> ByteString -> IO (RawRow protocol)
 rawRowOrThrow toRawRow row = either (throwRowError row) pure (toRawRow row)
 
+-- | The column definitions that follow a column count.
+--
+-- Decision: read into a list first. 'V.replicateM' allocates a vector of the
+-- count's size before reading any definition, so a count the server made up
+-- would cost that much memory without being sent; see Note [Bounded replies].
+readColumnDefVector :: Int -> InputStream Packet -> IO (V.Vector ColumnDef)
+readColumnDefVector count inputStream = V.fromList <$> replicateM count ((decodeFromPacket <=< readPacket) inputStream)
+
 -- | The bodies of a text-protocol result set's row packets.
 queryRowBodies_ :: MySQLConn -> Query -> IO ([ColumnDef], InputStream ByteString)
 queryRowBodies_ conn@(MySQLConn is os _ state) (Query qry) = runCommand conn $ do
@@ -413,13 +441,14 @@ data StatementResult
 --
 -- Unlike 'query_' the rows are read up front, as each result-set has to be read
 -- off the connection before the next one arrives. A failing statement raises its
--- 'ERRException'; the server runs no statement after it.
+-- 'ERRException'; the server runs no statement after it. More OKs than the
+-- query has statements raise 'MoreResultsThanStatements'.
 --
 -- @since 1.3.3
 queryMulti_ :: MySQLConn -> Query -> IO [StatementResult]
 queryMulti_ conn@(MySQLConn is os _ _) (Query qry) = runCommand conn $ do
     writeCommand (COM_QUERY qry) os
-    readStatementResults is
+    readStatementResults (statementBound qry) 0 is
 
 -- | 'queryMulti_' with parameters, filled in as 'query' does.
 --
@@ -430,27 +459,59 @@ queryMulti conn qry params = queryMulti_ conn (renderParams qry params)
 {-# SPECIALIZE queryMulti :: MySQLConn -> Query -> [MySQLValue] -> IO [StatementResult] #-}
 {-# SPECIALIZE queryMulti :: MySQLConn -> Query -> [Param]      -> IO [StatementResult] #-}
 
--- | Read a reply's results until one comes without SERVER_MORE_RESULTS_EXISTS.
-readStatementResults :: InputStream Packet -> IO [StatementResult]
-readStatementResults is = do
-    p <- readPacket is
-    if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
-        | isOK  p -> do
-            ok <- decodeFromPacket p
+-- | Read a reply's results until one comes without SERVER_MORE_RESULTS_EXISTS,
+-- given the most statements the query holds and the OKs read so far. See
+-- Note [Bounded replies].
+readStatementResults :: Int64 -> Int64 -> InputStream Packet -> IO [StatementResult]
+readStatementResults statements oksRead inputStream = do
+    packet <- readPacket inputStream
+    if  | isERR packet -> decodeFromPacket packet >>= throwIO . ERRException
+        | isOK  packet -> do
+            ok <- decodeStatementOK statements oksRead packet
             if isThereMore ok
-            then (StatementOK ok :) <$> readStatementResults is
+            then (StatementOK ok :) <$> readStatementResults statements (oksRead + 1) inputStream
             else pure [StatementOK ok]
         | otherwise -> do
-            (result, eof) <- readResultSet is p
+            (result, eof) <- readResultSet inputStream packet
             if isThereMoreAfterEOF eof
-            then (result :) <$> readStatementResults is
+            then (result :) <$> readStatementResults statements oksRead inputStream
             else pure [result]
+
+-- | 'readStatementResults' for a reply that should hold only 'OK's. A
+-- result-set raises 'ExtraResultSets' once the whole reply has been read,
+-- skipping it and what follows rather than keeping it.
+readStatementOKs :: Int64 -> Int64 -> InputStream Packet -> IO [OK]
+readStatementOKs statements oksRead inputStream = do
+    packet <- readPacket inputStream
+    if  | isERR packet -> decodeFromPacket packet >>= throwIO . ERRException
+        | isOK  packet -> do
+            ok <- decodeStatementOK statements oksRead packet
+            if isThereMore ok
+            then (ok :) <$> readStatementOKs statements (oksRead + 1) inputStream
+            else pure [ok]
+        | otherwise -> do
+            eof <- skipResultSet inputStream packet
+            when (isThereMoreAfterEOF eof) (void (skipFurtherResults SomeResultSet inputStream))
+            throwIO ExtraResultSets
+
+-- | Decode one more of a reply's OK packets, refusing it when the statements
+-- have all given theirs.
+decodeStatementOK :: Int64 -> Int64 -> Packet -> IO OK
+decodeStatementOK statements oksRead packet =
+    if oksRead >= statements
+    then throwIO (MoreResultsThanStatements statements)
+    else decodeFromPacket packet
+
+-- | The most statements a query holds: each but the last ends at a semicolon.
+-- Semicolons inside strings, comments or compound statements only raise it.
+statementBound :: L.ByteString -> Int64
+statementBound queryText = LC.count ';' queryText + 1
 
 -- | Read the text-protocol result-set this column-count packet starts, with the
 -- EOF packet that closes it.
 readResultSet :: InputStream Packet -> Packet -> IO (StatementResult, EOF)
 readResultSet is columnCountPacket = do
-    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    columnCount <- getFromPacket getColumnCount columnCountPacket
     fields <- replicateM columnCount ((decodeFromPacket <=< readPacket) is)
     _ <- readPacket is -- eof packet after the column definitions
     (rows, eof) <- readTextRows (map columnKind fields) [] is
@@ -466,14 +527,6 @@ readTextRows columns earlierRows is = do
         | otherwise -> do
             row <- decodeTextRowPacket columns q
             readTextRows columns (row : earlierRows) is
-
--- | The 'OK's of a reply that should hold nothing else; a result-set among them
--- raises 'ExtraResultSets', after the whole reply has been read.
-onlyOKs :: [StatementResult] -> IO [OK]
-onlyOKs results = case results of
-    [] -> pure []
-    StatementOK ok : rest -> (ok :) <$> onlyOKs rest
-    StatementRows _ _ : _ -> throwIO ExtraResultSets
 
 -- | How the server answered a statement sent through a query function.
 data QueryReply
@@ -498,7 +551,17 @@ readQueryReply is = do
         | isOK  p -> do
             ok <- decodeFromPacket p
             if isThereMore ok then readQueryReply is else pure WithoutResultSet
-        | otherwise -> ResultSetColumns <$> getFromPacket getLenEncInt p
+        | otherwise -> ResultSetColumns <$> getFromPacket getColumnCount p
+
+-- | A result-set's column count. MySQL and MariaDB hold it in an unsigned int,
+-- so a larger count means a broken packet, and reading on would take every
+-- packet after it for a column definition. See Note [Bounded replies].
+getColumnCount :: Get Int
+getColumnCount = do
+    count <- getLenEncWord64
+    if count > 4294967295
+    then fail ("column count " ++ show count ++ " is above 4294967295, the most a server sends")
+    else maybe (fail ("column count " ++ show count ++ " does not fit in an Int")) pure (Word64.toInt count)
 
 -- | A text-protocol row packet decoded with 'decodeTextRow', raising
 -- 'DecodePacketFailed' as 'getFromPacket' does.
@@ -610,7 +673,7 @@ skipFurtherResults seen is = do
 -- EOF packet.
 skipResultSet :: InputStream Packet -> Packet -> IO EOF
 skipResultSet is columnCountPacket = do
-    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    columnCount <- getFromPacket getColumnCount columnCountPacket
     replicateM_ columnCount (readPacket is)
     _ <- readPacket is -- eof packet after the column definitions
     skipRows is
@@ -735,7 +798,7 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
     case reply of
         WithoutResultSet -> (,) V.empty <$> Stream.nullInput
         ResultSetColumns len -> do
-            fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
+            fields <- readColumnDefVector len is
             _ <- readPacket is -- eof packet, we don't verify this though
             writeIORef state RowsUnread
             rows <- resultSetRows is state

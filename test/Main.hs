@@ -10,6 +10,7 @@ import qualified Ed25519Scramble
 import qualified StringLiterals
 import qualified Word24
 import qualified TCPStreams
+import qualified BoundedReplies
 import qualified BoundsCheck
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
@@ -43,6 +44,7 @@ main = do
       , Sha256Scramble.tests
       , Ed25519Scramble.tests
       , BoundsCheck.tests
+      , BoundedReplies.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
       , DirectDecoding.tests
