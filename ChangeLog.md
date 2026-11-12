@@ -6,7 +6,7 @@
   `NONE`, and one with checksums while the server's setting is `NONE`, by
   following each file's own setting as a replica does; the new
   `decodeBinLogPacketFollowing` decodes a packet that way
-  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+  [#115](https://github.com/winterland1989/mysql-haskell/pull/115)
 
 ## 1.5.0 -- 2026.11.11 
 
