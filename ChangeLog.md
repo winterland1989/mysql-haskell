@@ -1,5 +1,13 @@
 # Revision history for mysql-haskell
 
+## 1.5.1 -- unreleased
+
+* The binlog dump reads a binlog file written while `binlog_checksum` was
+  `NONE`, and one with checksums while the server's setting is `NONE`, by
+  following each file's own setting as a replica does; the new
+  `decodeBinLogPacketFollowing` decodes a packet that way
+  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+
 ## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours

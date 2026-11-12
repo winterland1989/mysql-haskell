@@ -5,6 +5,7 @@ import           Database.MySQL.Base
 import           System.Environment (lookupEnv)
 import           Test.Tasty (TestTree, defaultMain, testGroup)
 import qualified AbandonedReplies
+import qualified BinLogChecksumSwitch
 import qualified BinLogRowEvents
 import qualified CABundle
 import qualified CachingSha2
@@ -53,6 +54,7 @@ main = do
         , NonUtf8Results.tests
         , UnsignedInsertId.tests
         , BinLogRowEvents.tests
+        , BinLogChecksumSwitch.tests
         , CABundle.tests
         , ZeroDateRoundtrip.typedDecoderTests
         , ResetConnection.tests

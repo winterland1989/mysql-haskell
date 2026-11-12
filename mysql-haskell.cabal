@@ -200,6 +200,7 @@ test-suite test
     text,
     time,
     unordered-containers < 1.0,
+    unwitch,
     vector
 
   default-extensions:
@@ -217,6 +218,7 @@ test-suite integration
     BinaryRowNew
     BinLog
     BinLogNew
+    BinLogChecksumSwitch
     BinLogRowEvents
     CABundle
     CachingSha2
