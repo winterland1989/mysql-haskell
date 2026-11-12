@@ -4,6 +4,7 @@
 
 * Prepared statements read through a server-side cursor, a batch of rows at a
   time, with `queryStmtCursor` and `queryStmtRowsCursor`
+  [#118](https://github.com/winterland1989/mysql-haskell/pull/118)
 
 ## 1.5.0 -- 2026.11.11 
 
