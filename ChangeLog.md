@@ -8,7 +8,7 @@ them in chunks, so a long BLOB or TEXT value is never held in memory whole.
 
 * Prepared statement parameters streamed from an `InputStream`
   (COM_STMT_SEND_LONG_DATA)
-  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+  [#117](https://github.com/winterland1989/mysql-haskell/pull/117)
 
 ## 1.5.0 -- 2026.11.11 
 
