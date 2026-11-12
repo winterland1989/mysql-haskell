@@ -135,7 +135,8 @@ data ReplyState
     | RowsUnread
       -- ^ A result set's rows are still to be read from its stream.
     | ReplyAbandoned
-      -- ^ Reading a reply stopped part-way; the connection refuses commands.
+      -- ^ Sending a command or reading its reply stopped part-way; the
+      -- connection refuses commands.
     deriving (Show, Eq)
 
 -- Note [Abandoned replies]
@@ -738,18 +739,19 @@ instance Exception NetworkException
 data UnconsumedResultSet = UnconsumedResultSet deriving (Typeable, Show)
 instance Exception UnconsumedResultSet
 
--- | Reading the reply to an earlier command on this connection stopped part-way,
--- for example on a 'System.Timeout.timeout'. The rest of that reply is still
--- unread and would be taken for the reply to the next command, so the
--- connection refuses commands: close it and connect again.
+-- | Sending an earlier command on this connection, or reading its reply,
+-- stopped part-way, for example on a 'System.Timeout.timeout' or on an
+-- exception from a stream given to 'Database.MySQL.Base.executeStmtStreamed'.
+-- What is left of that exchange would be mixed up with the next command, so
+-- the connection refuses commands: close it and connect again.
 --
 -- @since 1.4.0
 data AbandonedReply = AbandonedReply deriving (Typeable, Show)
 instance Exception AbandonedReply where
     displayException AbandonedReply =
-        "mysql-haskell: reading the reply to an earlier command on this connection stopped "
-        ++ "part-way (for example on a timeout), so the rest of it is still unread and "
-        ++ "would be taken for this command's reply. Close the connection and connect again."
+        "mysql-haskell: sending an earlier command on this connection or reading its reply "
+        ++ "stopped part-way (for example on a timeout), so what is left of it would be "
+        ++ "mixed up with this command. Close the connection and connect again."
 
 data ERRException = ERRException ERR deriving (Typeable, Show)
 instance Exception ERRException

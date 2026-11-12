@@ -16,12 +16,13 @@ By using this library you will meet:
 
     * 'NetworkException':  underline network is broken.
     * 'UnconsumedResultSet':  you should consume previous resultset before sending new command.
-    * 'AbandonedReply': reading an earlier reply stopped part-way, e.g. on a timeout;
-      connect again.
+    * 'AbandonedReply': sending an earlier command or reading its reply stopped
+      part-way, e.g. on a timeout; connect again.
     * 'ERRException':  you receive a 'ERR' packet when you shouldn't.
     * 'UnexpectedPacket':  you receive a unexpected packet when you shouldn't.
     * 'DecodePacketException': there's a packet we can't decode.
-    * 'WrongParamsCount': you're giving wrong number of params to 'renderParams'.
+    * 'WrongParamsCount': you're giving wrong number of params to 'renderParams',
+      or more than a prepared statement can take to 'executeStmtStreamed'.
     * 'ExtraResultSets': a statement produced a result-set the function running it
       could not return.
 
@@ -61,6 +62,10 @@ module Database.MySQL.Base
     , queryStmtVector
     , closeStmt
     , resetStmt
+      -- * Prepared statements with parameters read from streams
+    , StreamedParam(..)
+    , executeStmtStreamed
+    , queryStmtStreamed
       -- * Decoding rows without 'MySQLValue'
       -- | Rows decoded straight into Haskell values with the decoders of
       -- "Database.MySQL.Decoder", or handed over raw for libraries that decode
@@ -114,6 +119,7 @@ import           Database.MySQL.Protocol.Command
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet
 import           Database.MySQL.Protocol.RawRow
+import           Database.MySQL.Protocol.StreamedParam
 
 import           Database.MySQL.Query
 import           System.IO.Streams                  (InputStream)
@@ -695,6 +701,11 @@ executeStmt conn stid params =
 executeCommand :: MySQLConn -> Command -> IO OK
 executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
     writeCommand cmd os
+    readExecuteReply is
+
+-- | The reply 'executeCommand' reads.
+readExecuteReply :: InputStream Packet -> IO OK
+readExecuteReply is = do
     p <- readPacket is
     if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
         | isOK  p -> do
@@ -714,7 +725,12 @@ executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
 queryStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmt conn@(MySQLConn is os _ state) stid params = runCommand conn $ do
     writeCommand (COM_STMT_EXECUTE stid params (makeNullMap params)) os
-    reply <- readQueryReply is
+    readQueryReply is >>= binaryValueRows is state
+
+-- | The rows of a prepared statement's result-set, decoded into 'MySQLValue's.
+binaryValueRows :: InputStream Packet -> IORef ReplyState -> QueryReply
+                -> IO ([ColumnDef], InputStream [MySQLValue])
+binaryValueRows is state reply =
     case reply of
         WithoutResultSet -> (,) [] <$> Stream.nullInput
         ResultSetColumns len -> do
@@ -741,6 +757,58 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
             rows <- resultSetRows is state
                 (fmap V.fromList . binaryValuesPacket (Decoder.binaryValueColumns (V.toList fields)))
             return (fields, rows)
+
+-- | 'executeStmt' with parameters that may be read from streams, so a long
+-- BLOB or TEXT value goes to the server in chunks as they are read, instead of
+-- being built in memory as one 'MySQLValue':
+--
+-- > stmt <- prepareStmt conn "INSERT INTO file (name, content) VALUES (?, ?)"
+-- > Stream.withFileAsInput "backup.tar" $ \content ->
+-- >     executeStmtStreamed conn stmt [InlineParam (MySQLText "backup.tar"), StreamedBytes content]
+--
+-- The server refuses a streamed value longer than its @max_allowed_packet@
+-- with an 'ERRException' (code 1105) once the value is sent. The limit holds
+-- for each streamed value on its own, where the values 'executeStmt' sends
+-- must fit in one @max_allowed_packet@ together. After an 'ERRException' the
+-- statement is reset, as 'resetStmt' does, so it can be executed again.
+--
+-- An exception while the values are sent, also one from a stream or a
+-- timeout, leaves the connection refusing commands with 'AbandonedReply': the
+-- server may hold part of a command or of the streamed data, which it would
+-- take for the next command or for the parameters of the statement's next
+-- execute. More than 65535 parameters throw 'WrongParamsCount' without
+-- sending anything. See Note [Streamed parameters].
+--
+-- @since 1.5.1
+executeStmtStreamed :: MySQLConn -> StmtID -> [StreamedParam] -> IO OK
+executeStmtStreamed conn@(MySQLConn is os _ _) stid params = do
+    numbered <- maybe (throwIO WrongParamsCount) pure (numberParams params)
+    runCommand conn $ do
+        writeStreamedExecute stid numbered os
+        readExecuteReply is `catch` resetAfterFailedExecute conn stid
+
+-- | 'queryStmt' with parameters that may be read from streams, sent as
+-- 'executeStmtStreamed' sends them and with the same limit and failures.
+--
+-- @since 1.5.1
+queryStmtStreamed :: MySQLConn -> StmtID -> [StreamedParam] -> IO ([ColumnDef], InputStream [MySQLValue])
+queryStmtStreamed conn@(MySQLConn is os _ state) stid params = do
+    numbered <- maybe (throwIO WrongParamsCount) pure (numberParams params)
+    runCommand conn $ do
+        writeStreamedExecute stid numbered os
+        reply <- readQueryReply is `catch` resetAfterFailedExecute conn stid
+        binaryValueRows is state reply
+
+-- | Rethrow the failure of an execute with streamed parameters after a
+-- COM_STMT_RESET. The server keeps the streamed data of an execute that failed
+-- before running, and its error for data longer than max_allowed_packet
+-- answers every later execute of the statement until a reset.
+resetAfterFailedExecute :: MySQLConn -> StmtID -> ERRException -> IO a
+resetAfterFailedExecute (MySQLConn is os _ _) stid failure = do
+    writeCommand (COM_STMT_RESET stid) os
+    -- Only an unknown statement fails the reset, and the execute reported that.
+    _ <- readPacket is
+    throwIO failure
 
 -- | Run querys inside a transaction, querys will be rolled back if exception arise.
 --

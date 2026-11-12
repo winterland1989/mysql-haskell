@@ -1,5 +1,15 @@
 # Revision history for mysql-haskell
 
+## 1.5.1 -- unreleased
+
+New functions only; existing code is unaffected. `executeStmtStreamed` and
+`queryStmtStreamed` read prepared statement parameters from streams and send
+them in chunks, so a long BLOB or TEXT value is never held in memory whole.
+
+* Prepared statement parameters streamed from an `InputStream`
+  (COM_STMT_SEND_LONG_DATA)
+  [#PR](https://github.com/winterland1989/mysql-haskell/pull/PR)
+
 ## 1.5.0 -- 2026.11.11 
 
 Security fixes and new functions. A major version because two behaviours
