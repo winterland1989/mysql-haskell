@@ -1,6 +1,7 @@
 module ConnectInfoShow (tests) where
 
 import           Database.MySQL.Base (ConnectInfo (..))
+import           Database.MySQL.Connection (defaultConnectionLimits, messageSizeLimit)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -20,7 +21,8 @@ connectInfo = ConnectInfo
     , ciUser = "app"
     , ciPassword = "correct horse battery staple"
     , ciCharset = 224
+    , ciLimits = defaultConnectionLimits { messageSizeLimit = 1048576 }
     }
 
 shown :: String
-shown = "ConnectInfo {ciHost = \"db.example.test\", ciPort = 3307, ciDatabase = \"shop\", ciUser = \"app\", ciPassword = <redacted>, ciCharset = 224}"
+shown = "ConnectInfo {ciHost = \"db.example.test\", ciPort = 3307, ciDatabase = \"shop\", ciUser = \"app\", ciPassword = <redacted>, ciCharset = 224, ciLimits = ConnectionLimits {messageSizeLimit = 1048576}}"

@@ -32,12 +32,6 @@ module Database.MySQL.Connection
     , ConnectionLimits
     , messageSizeLimit
     , defaultConnectionLimits
-    , connectWithLimits
-    , connectDetailWithLimits
-    , connectDetailExtendedWithLimits
-    , connectUnixSocketWithLimits
-    , connectUnixSocketDetailWithLimits
-    , connectUnixSocketDetailExtendedWithLimits
     , withoutNegotiated
     , authenticatedConnection
       -- * Authentication
@@ -181,7 +175,17 @@ data ConnectInfo = ConnectInfo
     , ciUser     :: ByteString
     , ciPassword :: ByteString
     , ciCharset  :: Word8
+    , ciLimits   :: !ConnectionLimits
+      -- ^ Bounds on what the server can make the client read, see
+      -- t'ConnectionLimits'. To refuse messages over 64 MiB:
+      --
+      -- > defaultConnectInfo { ciLimits = defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 } }
+      --
+      -- @since 1.6.0
     }
+
+-- Decision: ciLimits is strict, so a record construction that leaves it out is
+-- a compile error, where a lazy field only warns and fails at connect time.
 
 -- | Record syntax with the password left out, so a logged 'ConnectInfo'
 -- cannot leak it.
@@ -190,7 +194,7 @@ data ConnectInfo = ConnectInfo
 -- does not tell whether the account has one either. It is not a Haskell
 -- expression, unlike a placeholder string, which would read as a password.
 instance Show ConnectInfo where
-    showsPrec precedence (ConnectInfo host port database user _password charset) =
+    showsPrec precedence (ConnectInfo host port database user _password charset limits) =
         showParen (precedence >= 11)
             $ showString "ConnectInfo {ciHost = " . shows host
             . showString ", ciPort = " . shows port
@@ -198,6 +202,7 @@ instance Show ConnectInfo where
             . showString ", ciUser = " . shows user
             . showString ", ciPassword = <redacted>"
             . showString ", ciCharset = " . shows charset
+            . showString ", ciLimits = " . shows limits
             . showChar '}'
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
@@ -208,14 +213,14 @@ instance Show ConnectInfo where
 --  with @SELECT id, collation_name FROM information_schema.collations ORDER BY id;@
 --
 defaultConnectInfo :: ConnectInfo
-defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8_general_ci
+defaultConnectInfo = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8_general_ci defaultConnectionLimits
 
 -- | 'defaultConnectInfo' with charset set to @utf8mb4_unicode_ci@
 --
 -- This is recommanded on any MySQL server version >= 5.5.3.
 --
 defaultConnectInfoMB4 :: ConnectInfo
-defaultConnectInfoMB4 = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8mb4_unicode_ci
+defaultConnectInfoMB4 = ConnectInfo "127.0.0.1" 3306 "" "root" "" utf8mb4_unicode_ci defaultConnectionLimits
 
 utf8_general_ci :: Word8
 utf8_general_ci = 33
@@ -223,13 +228,10 @@ utf8_general_ci = 33
 utf8mb4_unicode_ci :: Word8
 utf8mb4_unicode_ci = 224
 
--- | Bounds on what a server can make the client read, given to the
--- @WithLimits@ connect functions; see Note [Bounded replies]. Change a limit
--- by updating 'defaultConnectionLimits':
+-- | Bounds on what a server can make the client read, set in 'ciLimits'; see
+-- Note [Bounded replies]. Change a limit by updating 'defaultConnectionLimits':
 --
 -- > defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 }
---
--- The constructor is not exported, so that limits can be added later.
 --
 -- @since 1.6.0
 data ConnectionLimits = ConnectionLimits
@@ -238,6 +240,10 @@ data ConnectionLimits = ConnectionLimits
       -- one together with the packets continuing it. A larger message raises
       -- t'MessageTooLarge' before more than the limit is read of it.
     } deriving (Show, Eq)
+
+-- Decision: the constructor is not exported, only the type, its fields and
+-- 'defaultConnectionLimits', so a later limit can be added with a default
+-- without breaking code that sets the others.
 
 -- | A 'messageSizeLimit' of 1 GiB plus 64 KiB, which refuses no reply a
 -- server sends and no binlog event a replica accepts.
@@ -278,9 +284,10 @@ defaultConnectionLimits = ConnectionLimits { messageSizeLimit = 1073741824 + 655
 --   bounded: no count follows from the query, and a limit set at connect
 --   time cannot reach them.
 --
--- Decision: the message limit lives in the packet stream, as 'MySQLConn' is
--- an exported record a new field would break. For the same reason the other
--- bounds are fixed rather than part of 'ConnectionLimits'.
+-- Decision: 'ciLimits' reaches the packet stream the connect functions build,
+-- which sees every packet. 'MySQLConn', which code outside this package builds
+-- too, does not carry it, so the functions reading a reply bound the counts by
+-- fixed values rather than by 'ConnectionLimits'.
 
 --------------------------------------------------------------------------------
 
@@ -294,12 +301,12 @@ bUFSIZE = 16384
 -- | Establish a MySQL connection.
 --
 connect :: ConnectInfo -> IO MySQLConn
-connect = connectWithLimits defaultConnectionLimits
+connect = fmap snd . connectDetail
 
 -- | Establish a MySQL connection with 'Greeting' back, so you can find server's version .etc.
 --
 connectDetail :: ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetail = connectDetailWithLimits defaultConnectionLimits
+connectDetail = fmap withoutNegotiated . connectDetailExtended noExtendedCapabilities
 
 -- | 'connectDetail' asking a MariaDB server for extended capabilities, also
 -- returning those the server agreed to. Asking for none gives exactly
@@ -307,18 +314,23 @@ connectDetail = connectDetailWithLimits defaultConnectionLimits
 --
 -- @since 1.4.0
 connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectDetailExtended = connectDetailExtendedWithLimits defaultConnectionLimits
+connectDetailExtended requested ci =
+    bracketOnError
+        (TCP.connectSocket (ciHost ci) (ciPort ci) >>= TCP.socketToConnection bUFSIZE)
+        TCP.close
+        (handshakePlain requested ci)
 
 -- | Connect to MySQL via a Unix domain socket.
 --
 connectUnixSocket :: FilePath -> ConnectInfo -> IO MySQLConn
-connectUnixSocket = connectUnixSocketWithLimits defaultConnectionLimits
+connectUnixSocket socketPath ci = fmap snd (connectUnixSocketDetail socketPath ci)
 
 -- | Connect to MySQL via a Unix domain socket with 'Greeting' back,
 -- so you can find server's version .etc.
 --
 connectUnixSocketDetail :: FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
-connectUnixSocketDetail = connectUnixSocketDetailWithLimits defaultConnectionLimits
+connectUnixSocketDetail socketPath =
+    fmap withoutNegotiated . connectUnixSocketDetailExtended noExtendedCapabilities socketPath
 
 -- | 'connectUnixSocketDetail' asking for extended capabilities, as
 -- 'connectDetailExtended' does.
@@ -326,55 +338,8 @@ connectUnixSocketDetail = connectUnixSocketDetailWithLimits defaultConnectionLim
 -- @since 1.4.0
 connectUnixSocketDetailExtended :: ExtendedCapabilities -> FilePath -> ConnectInfo
                                 -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectUnixSocketDetailExtended = connectUnixSocketDetailExtendedWithLimits defaultConnectionLimits
-
--- | 'connect' refusing what the server sends beyond these limits.
---
--- > conn <- connectWithLimits defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 } defaultConnectInfo
---
--- @since 1.6.0
-connectWithLimits :: ConnectionLimits -> ConnectInfo -> IO MySQLConn
-connectWithLimits limits = fmap snd . connectDetailWithLimits limits
-
--- | 'connectDetail' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectDetailWithLimits :: ConnectionLimits -> ConnectInfo -> IO (Greeting, MySQLConn)
-connectDetailWithLimits limits =
-    fmap withoutNegotiated . connectDetailExtendedWithLimits limits noExtendedCapabilities
-
--- | 'connectDetailExtended' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo
-                                -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectDetailExtendedWithLimits limits requested connectInfo =
-    bracketOnError
-        (TCP.connectSocket (ciHost connectInfo) (ciPort connectInfo) >>= TCP.socketToConnection bUFSIZE)
-        TCP.close
-        (handshakePlain limits requested connectInfo)
-
--- | 'connectUnixSocket' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectUnixSocketWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO MySQLConn
-connectUnixSocketWithLimits limits socketPath = fmap snd . connectUnixSocketDetailWithLimits limits socketPath
-
--- | 'connectUnixSocketDetail' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectUnixSocketDetailWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
-connectUnixSocketDetailWithLimits limits socketPath =
-    fmap withoutNegotiated . connectUnixSocketDetailExtendedWithLimits limits noExtendedCapabilities socketPath
-
--- | 'connectUnixSocketDetailExtended' refusing what the server sends beyond
--- these limits.
---
--- @since 1.6.0
-connectUnixSocketDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> FilePath -> ConnectInfo
-                                          -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectUnixSocketDetailExtendedWithLimits limits requested socketPath connectInfo =
-    bracketOnError (openUnixSocket socketPath) TCP.close (handshakePlain limits requested connectInfo)
+connectUnixSocketDetailExtended requested socketPath ci =
+    bracketOnError (openUnixSocket socketPath) TCP.close (handshakePlain requested ci)
 
 openUnixSocket :: FilePath -> IO TCP.TCPConnection
 openUnixSocket socketPath = bracketOnError
@@ -389,9 +354,9 @@ withoutNegotiated :: (Greeting, ExtendedCapabilities, MySQLConn) -> (Greeting, M
 withoutNegotiated (greet, _, conn) = (greet, conn)
 
 -- | Authenticate over a connection without TLS, TCP or Unix socket alike.
-handshakePlain :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo -> TCP.TCPConnection
+handshakePlain :: ExtendedCapabilities -> ConnectInfo -> TCP.TCPConnection
                -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-handshakePlain limits requested (ConnectInfo _host _port db user pass charset) c = do
+handshakePlain requested (ConnectInfo _host _port db user pass charset limits) c = do
     is' <- decodeInputStreamWithLimits limits (TCP.source c)
     p <- readPacket is'
     (greet, offered) <- getFromPacket getGreetingExtended p

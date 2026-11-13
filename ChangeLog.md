@@ -7,11 +7,13 @@
   `clientUseServerNameIndication = False` on the `ClientParams` to send none.
   `show` of a `ConnectInfo` hides the password
   [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
-* Limits on what a server can make the client read: a message above
-  `messageSizeLimit` (1 GiB plus 64 KiB unless set through the new
-  `WithLimits` connect functions) raises `MessageTooLarge`, and a column count
+* `ConnectInfo` gains a strict field `ciLimits` bounding what a server can
+  make the client read: a message above its `messageSizeLimit` (1 GiB plus
+  64 KiB in `defaultConnectInfo`) raises `MessageTooLarge`, and a column count
   no server sends or more OK packets than the query has statements are refused
-  instead of read without end
+  instead of read without end. Code that applies the `ConnectInfo`
+  constructor, positionally or with record syntax, or matches it positionally,
+  must add the field; code updating `defaultConnectInfo` is unaffected
   [#116](https://github.com/winterland1989/mysql-haskell/pull/116)
 
 ## 1.5.0 -- 2026.11.11 

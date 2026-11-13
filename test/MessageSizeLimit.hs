@@ -7,8 +7,8 @@ import qualified Data.ByteString.Lazy.Char8 as LC
 import           Data.Int                   (Int64)
 import qualified Data.Text                  as T
 import           Database.MySQL.Base
-import           Database.MySQL.Connection  (ConnectionLimits, MessageTooLarge (..), connectUnixSocketWithLimits,
-                                             connectWithLimits, defaultConnectionLimits, messageSizeLimit)
+import           Database.MySQL.Connection  (ConnectionLimits, MessageTooLarge (..), defaultConnectionLimits,
+                                             messageSizeLimit)
 import qualified Database.MySQL.TLS         as TLS
 import qualified System.IO.Streams          as Stream
 import           Test.Tasty
@@ -43,15 +43,15 @@ limitOf :: Int64 -> ConnectionLimits
 limitOf limit = defaultConnectionLimits { messageSizeLimit = limit }
 
 tcp :: ConnectionLimits -> IO MySQLConn
-tcp limits = connectWithLimits limits testConnectInfo
+tcp limits = connect testConnectInfo { ciLimits = limits }
 
 unix :: FilePath -> ConnectionLimits -> IO MySQLConn
-unix socketPath limits = connectUnixSocketWithLimits limits socketPath testConnectInfo
+unix socketPath limits = connectUnixSocket socketPath testConnectInfo { ciLimits = limits }
 
 tls :: FilePath -> ConnectionLimits -> IO MySQLConn
 tls caPath limits = do
     params <- TLS.makeClientParams (TLS.CustomCAStore caPath)
-    TLS.connectWithLimits limits testConnectInfo (params, "Winter")
+    TLS.connect testConnectInfo { ciLimits = limits } (params, "Winter")
 
 -- | Selecting a value of this many bytes raises this refusal, after which the
 -- connection refuses commands.

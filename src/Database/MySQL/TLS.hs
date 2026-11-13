@@ -15,9 +15,6 @@ module Database.MySQL.TLS (
       connect
     , connectDetail
     , connectDetailExtended
-    , connectWithLimits
-    , connectDetailWithLimits
-    , connectDetailExtendedWithLimits
     , module Data.TLSSetting
     ) where
 
@@ -29,9 +26,7 @@ import           Data.Word                      (Word8)
 import qualified Data.Connection                as Conn
 import           Data.TLSSetting
 import           Data.TLSSetting.ServerIdentification (identifyServer)
-import           Database.MySQL.Connection      hiding (connect, connectDetail, connectDetailExtended,
-                                                         connectWithLimits, connectDetailWithLimits,
-                                                         connectDetailExtendedWithLimits)
+import           Database.MySQL.Connection      hiding (connect, connectDetail, connectDetailExtended)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet
 import           System.IO.Streams               (InputStream)
@@ -49,10 +44,10 @@ import qualified System.IO.Streams.TLS          as TLS
 -- an IP address or the 'TLS.ClientParams' turn SNI off.
 --
 connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
-connect = connectWithLimits defaultConnectionLimits
+connect c cp = fmap snd (connectDetail c cp)
 
 connectDetail :: ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
-connectDetail = connectDetailWithLimits defaultConnectionLimits
+connectDetail c cp = fmap withoutNegotiated (connectDetailExtended noExtendedCapabilities c cp)
 
 -- | 'connectDetail' asking a MariaDB server for extended capabilities, also
 -- returning those the server agreed to. Asking for none gives exactly
@@ -61,36 +56,15 @@ connectDetail = connectDetailWithLimits defaultConnectionLimits
 -- @since 1.4.0
 connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String)
                       -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectDetailExtended = connectDetailExtendedWithLimits defaultConnectionLimits
-
--- | 'connect' refusing what the server sends beyond these limits, see
--- t'Database.MySQL.Connection.ConnectionLimits'.
---
--- @since 1.6.0
-connectWithLimits :: ConnectionLimits -> ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
-connectWithLimits limits connectInfo tlsParams = fmap snd (connectDetailWithLimits limits connectInfo tlsParams)
-
--- | 'connectDetail' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectDetailWithLimits :: ConnectionLimits -> ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
-connectDetailWithLimits limits connectInfo tlsParams =
-    fmap withoutNegotiated (connectDetailExtendedWithLimits limits noExtendedCapabilities connectInfo tlsParams)
-
--- | 'connectDetailExtended' refusing what the server sends beyond these limits.
---
--- @since 1.6.0
-connectDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo
-                                -> (TLS.ClientParams, String) -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-connectDetailExtendedWithLimits limits requested connectInfo tlsParams =
+connectDetailExtended requested ci tlsParams =
     bracketOnError
-        (TCP.connectSocket (ciHost connectInfo) (ciPort connectInfo) >>= TCP.socketToConnection bUFSIZE)
+        (TCP.connectSocket (ciHost ci) (ciPort ci) >>= TCP.socketToConnection bUFSIZE)
         TCP.close
-        (handshakeTLS limits requested connectInfo tlsParams)
+        (handshakeTLS requested ci tlsParams)
 
-handshakeTLS :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String)
-             -> TCP.TCPConnection -> IO (Greeting, ExtendedCapabilities, MySQLConn)
-handshakeTLS limits requested (ConnectInfo _host _port db user pass charset) (cparams, subName) c = do
+handshakeTLS :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParams, String) -> TCP.TCPConnection
+             -> IO (Greeting, ExtendedCapabilities, MySQLConn)
+handshakeTLS requested (ConnectInfo _host _port db user pass charset limits) (cparams, subName) c = do
     is' <- decodeInputStreamWithLimits limits (TCP.source c)
     p <- readPacket is'
     (greet, offered) <- getFromPacket getGreetingExtended p
