@@ -166,7 +166,24 @@ data ConnectInfo = ConnectInfo
     , ciUser     :: ByteString
     , ciPassword :: ByteString
     , ciCharset  :: Word8
-    } deriving Show
+    }
+
+-- | Record syntax with the password left out, so a logged 'ConnectInfo'
+-- cannot leak it.
+--
+-- Decision: the password shows as @<redacted>@ even when empty, so the output
+-- does not tell whether the account has one either. It is not a Haskell
+-- expression, unlike a placeholder string, which would read as a password.
+instance Show ConnectInfo where
+    showsPrec precedence (ConnectInfo host port database user _password charset) =
+        showParen (precedence >= 11)
+            $ showString "ConnectInfo {ciHost = " . shows host
+            . showString ", ciPort = " . shows port
+            . showString ", ciDatabase = " . shows database
+            . showString ", ciUser = " . shows user
+            . showString ", ciPassword = <redacted>"
+            . showString ", ciCharset = " . shows charset
+            . showChar '}'
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --

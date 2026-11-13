@@ -1,7 +1,12 @@
 # Revision history for mysql-haskell
 
-## 1.5.1 -- unreleased
+## 1.6.0 -- unreleased
 
+* TLS handshakes now send the server name (SNI) unless it is an IP address, so
+  proxies and managed databases that route by it work; set
+  `clientUseServerNameIndication = False` on the `ClientParams` to send none.
+  `show` of a `ConnectInfo` hides the password
+  [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
 * Prepared statements read through a server-side cursor, a batch of rows at a
   time, with `queryStmtCursor` and `queryStmtRowsCursor`
   [#118](https://github.com/winterland1989/mysql-haskell/pull/118)

@@ -815,7 +815,7 @@ finishStmtColumns is os stid = do
 -- > (_, rows) <- queryStmtCursor conn statement [MySQLInt32 10001] 1000
 -- > count <- Streams.fold (\seen _ -> seen + 1) (0 :: Int) rows
 --
--- @since 1.5.1
+-- @since 1.6.0
 queryStmtCursor :: MySQLConn -> StmtID -> [MySQLValue] -> Word32 -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmtCursor conn stid params rowsPerFetch = do
     (fields, rows) <- cursorRows conn stid params rowsPerFetch
@@ -827,7 +827,7 @@ queryStmtCursor conn stid params rowsPerFetch = do
 -- not decode raises 'Decoder.FieldError' when its row is read. Neither skips
 -- rows, as the connection takes commands between fetches anyway.
 --
--- @since 1.5.1
+-- @since 1.6.0
 queryStmtRowsCursor :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> Word32
                     -> IO ([ColumnDef], InputStream a)
 queryStmtRowsCursor decoder conn stid params rowsPerFetch = do

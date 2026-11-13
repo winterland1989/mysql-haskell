@@ -94,6 +94,7 @@ library
   autogen-modules:    Paths_mysql_haskell
   hs-source-dirs:     src
   other-modules:
+    Data.TLSSetting.ServerIdentification
     Database.MySQL.Cursor
     Database.MySQL.Query
   build-depends:
@@ -155,6 +156,7 @@ test-suite test
     BinLogChecksum
     BinLogEventCodes
     BoundsCheck
+    ConnectInfoShow
     DecoderRoundtrip
     DirectDecoding
     Ed25519Scramble
@@ -174,6 +176,7 @@ test-suite test
     StringLiterals
     TCPStreams
     TextRowDecoding
+    TLSServerName
     TypedValue
     Word24
     ZeroDates
@@ -201,6 +204,7 @@ test-suite test
     tasty-quickcheck >=0.8 && < 1.0,
     text,
     time,
+    tls,
     unordered-containers < 1.0,
     vector
 
