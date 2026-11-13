@@ -7,6 +7,8 @@ import qualified Data.ByteString.Lazy.Char8 as LC
 import           Data.Int                   (Int64)
 import qualified Data.Text                  as T
 import           Database.MySQL.Base
+import           Database.MySQL.Connection  (ConnectionLimits, MessageTooLarge (..), connectUnixSocketWithLimits,
+                                             connectWithLimits, defaultConnectionLimits, messageSizeLimit)
 import qualified Database.MySQL.TLS         as TLS
 import qualified System.IO.Streams          as Stream
 import           Test.Tasty

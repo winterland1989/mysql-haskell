@@ -236,7 +236,7 @@ data ConnectionLimits = ConnectionLimits
     { messageSizeLimit :: !Int64
       -- ^ The largest message the server may send, in bytes: one packet, or
       -- one together with the packets continuing it. A larger message raises
-      -- 'MessageTooLarge' before more than the limit is read of it.
+      -- t'MessageTooLarge' before more than the limit is read of it.
     } deriving (Show, Eq)
 
 -- | A 'messageSizeLimit' of 1 GiB plus 64 KiB, which refuses no reply a
@@ -681,7 +681,7 @@ decodeInputStream :: InputStream ByteString -> IO (InputStream Packet)
 decodeInputStream = decodeInputStreamWithLimits defaultConnectionLimits
 
 -- | The packets of a connection's byte stream. A message larger than the
--- 'messageSizeLimit' raises 'MessageTooLarge' before more than the limit is
+-- 'messageSizeLimit' raises t'MessageTooLarge' before more than the limit is
 -- read of it, and so does every read after that, as the message's unread rest
 -- would be taken for packets.
 --

@@ -64,7 +64,7 @@ connectDetailExtended :: ExtendedCapabilities -> ConnectInfo -> (TLS.ClientParam
 connectDetailExtended = connectDetailExtendedWithLimits defaultConnectionLimits
 
 -- | 'connect' refusing what the server sends beyond these limits, see
--- 'ConnectionLimits'.
+-- t'Database.MySQL.Connection.ConnectionLimits'.
 --
 -- @since 1.6.0
 connectWithLimits :: ConnectionLimits -> ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn

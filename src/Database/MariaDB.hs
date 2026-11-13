@@ -107,23 +107,23 @@ hasCapability capability conn = capability `elem` mariadbCapabilities conn
 -- 'NotMariaDB', after closing the connection, when the server does not speak
 -- MariaDB's protocol extensions (MySQL, or MariaDB before 10.2).
 connectMariaDB :: [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
-connectMariaDB = connectMariaDBWithLimits defaultConnectionLimits
+connectMariaDB = connectMariaDBWithLimits Connection.defaultConnectionLimits
 
 -- | 'Database.MySQL.Base.connectUnixSocket' asking for these capabilities, and
 -- refusing a MySQL server as 'connectMariaDB' does.
 connectMariaDBUnixSocket :: [MariaDBCapability] -> FilePath -> ConnectInfo -> IO MariaDBConn
-connectMariaDBUnixSocket = connectMariaDBUnixSocketWithLimits defaultConnectionLimits
+connectMariaDBUnixSocket = connectMariaDBUnixSocketWithLimits Connection.defaultConnectionLimits
 
 -- | 'Database.MySQL.TLS.connect' asking for these capabilities, and refusing a
 -- MySQL server as 'connectMariaDB' does.
 connectMariaDBTLS :: [MariaDBCapability] -> ConnectInfo -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
-connectMariaDBTLS = connectMariaDBTLSWithLimits defaultConnectionLimits
+connectMariaDBTLS = connectMariaDBTLSWithLimits Connection.defaultConnectionLimits
 
 -- | 'connectMariaDB' refusing what the server sends beyond these limits, see
--- 'ConnectionLimits'.
+-- t'Database.MySQL.Connection.ConnectionLimits'.
 --
 -- @since 1.6.0
-connectMariaDBWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
+connectMariaDBWithLimits :: Connection.ConnectionLimits -> [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
 connectMariaDBWithLimits limits requested connectInfo =
     Connection.connectDetailExtendedWithLimits limits (capabilityBits requested) connectInfo >>= mariadbConn
 
@@ -131,7 +131,7 @@ connectMariaDBWithLimits limits requested connectInfo =
 -- limits.
 --
 -- @since 1.6.0
-connectMariaDBUnixSocketWithLimits :: ConnectionLimits -> [MariaDBCapability] -> FilePath -> ConnectInfo
+connectMariaDBUnixSocketWithLimits :: Connection.ConnectionLimits -> [MariaDBCapability] -> FilePath -> ConnectInfo
                                    -> IO MariaDBConn
 connectMariaDBUnixSocketWithLimits limits requested socketPath connectInfo =
     Connection.connectUnixSocketDetailExtendedWithLimits limits (capabilityBits requested) socketPath connectInfo
@@ -140,7 +140,7 @@ connectMariaDBUnixSocketWithLimits limits requested socketPath connectInfo =
 -- | 'connectMariaDBTLS' refusing what the server sends beyond these limits.
 --
 -- @since 1.6.0
-connectMariaDBTLSWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo
+connectMariaDBTLSWithLimits :: Connection.ConnectionLimits -> [MariaDBCapability] -> ConnectInfo
                             -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
 connectMariaDBTLSWithLimits limits requested connectInfo tlsParams =
     TLS.connectDetailExtendedWithLimits limits (capabilityBits requested) connectInfo tlsParams >>= mariadbConn

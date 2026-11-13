@@ -12,8 +12,10 @@ import           Data.Int                   (Int64)
 import           Data.IORef                 (newIORef)
 import           Data.Word                  (Word8)
 import           Database.MySQL.Base
-import           Database.MySQL.Connection  (MySQLConn (..), ReplyState (..),
-                                             decodeInputStreamWithLimits, readPacket)
+import           Database.MySQL.Connection  (MessageTooLarge (..), MoreResultsThanStatements (..),
+                                             MySQLConn (..), ReplyState (..),
+                                             decodeInputStreamWithLimits, defaultConnectionLimits,
+                                             messageSizeLimit, readPacket)
 import           System.IO.Streams          (InputStream)
 import qualified System.IO.Streams          as Stream
 import           Test.Tasty

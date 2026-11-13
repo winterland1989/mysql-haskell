@@ -24,10 +24,10 @@ By using this library you will meet:
     * 'WrongParamsCount': you're giving wrong number of params to 'renderParams'.
     * 'ExtraResultSets': a statement produced a result-set the function running it
       could not return.
-    * 'MessageTooLarge': the server sent a message larger than the connection's
-      'messageSizeLimit'; connect again.
-    * 'MoreResultsThanStatements': the server sent more OK packets than the query has
-      statements; connect again.
+    * t'Database.MySQL.Connection.MessageTooLarge': the server sent a message larger
+      than the connection's 'Database.MySQL.Connection.messageSizeLimit'; connect again.
+    * t'Database.MySQL.Connection.MoreResultsThanStatements': the server sent more OK
+      packets than the query has statements; connect again.
 
 Both 'UnexpectedPacket' and 'DecodePacketException' may indicate a bug of this library rather your code, so please report!
 
@@ -42,14 +42,6 @@ module Database.MySQL.Base
     , connectDetail
     , connectUnixSocket
     , connectUnixSocketDetail
-      -- ** Limits on what a server sends
-    , ConnectionLimits
-    , messageSizeLimit
-    , defaultConnectionLimits
-    , connectWithLimits
-    , connectDetailWithLimits
-    , connectUnixSocketWithLimits
-    , connectUnixSocketDetailWithLimits
     , close
     , ping
     , resetConnection
@@ -99,8 +91,6 @@ module Database.MySQL.Base
     , DecodePacketException(..)
     , WrongParamsCount(..)
     , ExtraResultSets(..)
-    , MessageTooLarge(..)
-    , MoreResultsThanStatements(..)
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command
@@ -165,7 +155,8 @@ execute conn qry params = execute_ conn (renderParams qry params)
 -- The result holds one 'OK' per statement, so a query with several statements
 -- gives several per parameter set. A statement that returns rows raises
 -- 'ExtraResultSets' once the whole reply has been read; 'queryMulti' returns
--- those. More OKs than the statements sent raise 'MoreResultsThanStatements'.
+-- those. More OKs than the statements sent raise
+-- t'Database.MySQL.Connection.MoreResultsThanStatements'.
 -- No parameter sets gives @[]@ without contacting the server.
 --
 -- @since 0.2.0.0
@@ -190,7 +181,7 @@ executeMany conn@(MySQLConn is os _ _) qry paramsList =
 --
 -- A statement that returns rows raises 'ExtraResultSets' once the whole reply
 -- has been read; 'queryMulti_' returns those. More OKs than the query has
--- statements raise 'MoreResultsThanStatements'.
+-- statements raise t'Database.MySQL.Connection.MoreResultsThanStatements'.
 --
 -- @since 0.8.4.0
 --
@@ -442,7 +433,7 @@ data StatementResult
 -- Unlike 'query_' the rows are read up front, as each result-set has to be read
 -- off the connection before the next one arrives. A failing statement raises its
 -- 'ERRException'; the server runs no statement after it. More OKs than the
--- query has statements raise 'MoreResultsThanStatements'.
+-- query has statements raise t'Database.MySQL.Connection.MoreResultsThanStatements'.
 --
 -- @since 1.3.3
 queryMulti_ :: MySQLConn -> Query -> IO [StatementResult]
