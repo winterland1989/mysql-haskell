@@ -195,11 +195,11 @@ bound, as GitHub's index is incomplete).
 
 | Package | Latest | Bound lets 2.0 in | Uses | Breaks on |
 | --- | --- | --- | --- | --- |
-| hasqlator-mysql | 0.2.2, January 2026 | yes | `Database.MySQL.Base`, `putTextField` | the rename, unless `Base` stays as a shim |
+| hasqlator-mysql | 0.2.2, January 2026 | yes | `Database.MySQL.Base`, `putTextField`, `Streams.toList` on a result (`Hasqlator.hs:338`) | the rename, the io-streams removal |
 | hasqly-mysql | 0.0.1, 2020 | yes | `Base` (hiding `Query`, `Command`), `putTextField` | the rename |
-| mysql-haskell-nem | 0.1.0.0, 2016, in Stackage nightly | yes | `Base`, `ColumnDef(..)` in imports, `columnName`, `StmtID`; no use of `ColumnDef`'s constructor | the rename |
-| users-mysql-haskell | 0.5.2.0, 2016 | yes | `Base` | the rename (its tests already fail: they build a 5-field `ConnectInfo`) |
-| persistent-mysql-pure (Jappie) | 1.0.4, March 2026 | no (`< 2.0`) | `Base`, `Protocol.Escape`, `TLS`, a pattern match on `ConnectInfo`'s constructor (`Database/Persist/MySQL.hs:1289`), `putTextField`, `okAffectedRows` | the rename, the hidden constructor, the hidden `Escape` module |
+| mysql-haskell-nem | 0.1.0.0, 2016, in Stackage nightly | yes | `Base`, `ColumnDef(..)` in imports, `columnName`, `StmtID`, and `InputStream` in its own API (`Nem.hs:24`, `:38`); no use of `ColumnDef`'s constructor | the rename, the io-streams removal |
+| users-mysql-haskell | 0.5.2.0, 2016 | yes | `Base`, `System.IO.Streams.List.toList` on results (`Web/Users/MySQL.hs:321`) | the rename, the io-streams removal (its tests already fail: they build a 5-field `ConnectInfo`) |
+| persistent-mysql-pure (Jappie) | 1.0.4, March 2026 | no (`< 2.0`) | `Base`, `Protocol.Escape`, `TLS`, a pattern match on `ConnectInfo`'s constructor (`Database/Persist/MySQL.hs:1289`), `putTextField`, `okAffectedRows`, `Streams.read` and `skipToEof` on results (`:253` to `:275`) | the rename, the hidden constructor, the hidden `Escape` module, the io-streams removal |
 | persistent-mysql-haskell, strongswan-sql, mysql-haskell-openssl | 2019 to 2020 | no | | nothing new; their bounds already exclude current 1.x, and mysql-haskell-openssl, the only Hackage user of `MySQLConn`'s constructor and the `Connection` plumbing, is already incompatible with it (`MySQLConn` changed arity) |
 
 On GitHub, outside copies of mysql-haskell:
@@ -228,12 +228,26 @@ and its fields exported, `import Database.MySQL (ConnectInfo (..))` and
 building the record or matching on it fails (GHC-01928). A `hiding (Command)`
 of a name no longer exported is only a `-Wdodgy-imports` warning.
 
-With `Database.MySQL.Base` kept for 2.0 as a deprecated module that
-re-exports `Database.MySQL` (one line in the Haddock index), no live Hackage
-package breaks except persistent-mysql-pure, which needs a new release
-anyway for its bound, its constructor match and its `Escape` import. That
-shim bends the rule that a name has one public home, for one major version;
-3.0 removes it.
+The module changes and the abstract constructors alone would leave the four
+unbounded packages working if `Database.MySQL.Base` survived as a deprecated
+module. The io-streams removal does not: hasqlator-mysql, mysql-haskell-nem
+and users-mysql-haskell read results as `InputStream`s, and so does
+persistent-mysql-pure; only hasqly-mysql does not. Every live user therefore
+has to change something for 2.0, unless a compatibility layer keeps the old
+types.
+
+The proposal for that layer is a separate package, mysql-haskell-io-streams,
+with a deprecated `Database.MySQL.Base` that has the 1.x signatures,
+returning `InputStream`s converted from `RowStream`. It keeps io-streams out
+of the core package, keeps the core's rule that a name has one public home,
+and turns the 2.0 upgrade of the four unbounded packages into one added
+dependency. persistent-mysql-pure needs a new release anyway (its `< 2.0`
+bound, its constructor match, its `Escape` import), and moves to the new
+API directly.
+
+The alternative is two major versions: 2.0 for the modules and the
+constructors, 3.0 for io-streams. It breaks users twice for a smaller
+first step.
 
 ## Order of work
 
@@ -242,9 +256,10 @@ shim bends the rule that a name has one public home, for one major version;
 2. 2.0, one pull request per item, so each can be reviewed alone:
    1. the module moves and the hidden modules (mechanical, the largest diff);
    2. the abstract constructors;
-   3. the deprecated `Database.MySQL.Base` shim, and persistent-mysql-pure
-      moved to the new names in the same week;
-   4. the io-streams replacement, gated on the benchmarks;
+   3. the io-streams replacement, gated on the benchmarks;
+   4. the mysql-haskell-io-streams compatibility package with the
+      deprecated `Database.MySQL.Base`, released together with 2.0, and
+      persistent-mysql-pure moved to the new API in the same week;
    5. the fields on `MySQLConn` and the fixes they unlock.
 3. The 2.0 changelog carries a table from every removed or moved name to
    its replacement. 1.6.x keeps getting fixes for a while after 2.0.
