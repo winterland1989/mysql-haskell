@@ -27,6 +27,7 @@ import qualified RoundtripBit
 import qualified RoundtripYear
 import qualified RowDecoderQueries
 import qualified SelectOne
+import qualified StreamedParameters
 import qualified TLSClientCertificate
 import qualified TLSConnection
 import qualified UnixSocket
@@ -58,6 +59,7 @@ main = do
         , CABundle.tests
         , ZeroDateRoundtrip.typedDecoderTests
         , ResetConnection.tests
+        , StreamedParameters.tests
         ]
         -- binlog_transaction_compression is MySQL 8.0.20+ only.
         ++ [ BinLogRowEvents.compressedTransactionTests | isMySql80 ]

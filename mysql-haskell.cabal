@@ -95,6 +95,7 @@ library
   hs-source-dirs:     src
   other-modules:
     Data.TLSSetting.ServerIdentification
+    Database.MySQL.Protocol.StreamedParam
     Database.MySQL.Query
   build-depends:
     -- The CRC32 table of binlog event checksums.
@@ -159,6 +160,7 @@ test-suite test
     DecoderRoundtrip
     DirectDecoding
     Ed25519Scramble
+    EscapedSend
     FieldRoundtrip
     FloatingPointText
     HandshakeGolden
@@ -244,6 +246,7 @@ test-suite integration
     RowDecoderQueries
     RoundtripYear
     SelectOne
+    StreamedParameters
     TestUser
     TextRow
     TLSClientCertificate
