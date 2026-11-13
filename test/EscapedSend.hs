@@ -11,6 +11,7 @@ import           Control.Exception         (bracket, try)
 import           Control.Monad             (replicateM, void)
 import qualified Data.ByteString           as B
 import qualified Data.ByteString.Lazy      as L
+import           Data.Int                  (Int64)
 import           Data.IORef                (IORef, atomicModifyIORef', atomicWriteIORef, newIORef,
                                             readIORef)
 import           Data.Word                 (Word8)
@@ -28,6 +29,10 @@ data Trial = Trial
     }
 
 data ExecuteProgress = ExecuteRunning | ExecuteReturned
+
+-- | A written packet's command byte and length. Its data is dropped: kept, the
+-- long data commands of 200 trials of 2 MB chunks held gigabytes.
+data WrittenPacket = WrittenPacket !(Maybe Word8) !Int64
 
 tests :: TestTree
 tests = testGroup "a send racing its producer's return"
@@ -63,14 +68,17 @@ raceOnce chunk = do
     takeMVar finished
     (beforeExecute, fromExecute) <- break (startsWith 0x17) . reverse <$> readIORef written
     total <- readIORef accepted
-    pure Trial
+    -- Forced here, or replicateM keeps every trial's packets until the assertion.
+    pure $! Trial
         { acceptedBytes = total
         , bytesBeforeExecute = sum (map longDataBytes (filter (startsWith 0x18) beforeExecute))
         , commandsAfterExecute = length (filter (startsWith 0x18) fromExecute)
         }
 
-recordPacket :: IORef [Packet] -> Packet -> IO ()
-recordPacket written packet = atomicModifyIORef' written (\packets -> (packet : packets, ()))
+recordPacket :: IORef [WrittenPacket] -> Packet -> IO ()
+recordPacket written packet =
+    let summary = WrittenPacket (fmap fst (L.uncons (pBody packet))) (pLen packet)
+    in summary `seq` atomicModifyIORef' written (\packets -> (summary : packets, ()))
 
 -- | Fork a sender and return once it has sent its first chunk, so that it is
 -- still sending when the parameter is finished.
@@ -103,12 +111,12 @@ addAccepted :: IORef Integer -> B.ByteString -> IO ()
 addAccepted accepted chunk = atomicModifyIORef' accepted (\total -> (total + toInteger (B.length chunk), ()))
 
 -- | The data of a long data command, after its 7 header bytes.
-longDataBytes :: Packet -> Integer
-longDataBytes packet = toInteger (pLen packet) - 7
+longDataBytes :: WrittenPacket -> Integer
+longDataBytes (WrittenPacket _ len) = toInteger len - 7
 
 -- | The command byte of a packet's payload; every command here fits one packet.
-startsWith :: Word8 -> Packet -> Bool
-startsWith commandByte packet = fmap fst (L.uncons (pBody packet)) == Just commandByte
+startsWith :: Word8 -> WrittenPacket -> Bool
+startsWith commandByte (WrittenPacket firstByte _) = firstByte == Just commandByte
 
 withCapabilities :: Int -> IO a -> IO a
 withCapabilities count action =
