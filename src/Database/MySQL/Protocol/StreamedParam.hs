@@ -17,12 +17,12 @@ module Database.MySQL.Protocol.StreamedParam
     , ChunkAfterProducerReturned (..)
     ) where
 
+import           Control.Concurrent.MVar            (MVar, modifyMVar, modifyMVar_, newMVar)
 import           Control.Exception                  (Exception (..), onException, throwIO)
 import           Control.Monad                      (unless)
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
-import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (encodeUtf8)
@@ -68,15 +68,16 @@ import           Database.MySQL.Protocol.Packet     (Packet)
 --
 -- A producer is handed a send function and calls it with each chunk in turn;
 -- the value ends when the producer returns, and an empty chunk is nothing to
--- send. The send function is only valid while the producer runs, from its
--- thread: called after the producer returned it throws
--- 'ChunkAfterProducerReturned'. An exception from the producer propagates and
--- leaves the connection refusing commands with
--- 'Database.MySQL.Base.AbandonedReply'.
+-- send. The send function is meant for the producer's thread while the
+-- producer runs: called after the producer returned, also from another thread
+-- racing its return, it throws 'ChunkAfterProducerReturned' and sends nothing.
+-- An exception from the producer propagates and leaves the connection
+-- refusing commands with 'Database.MySQL.Base.AbandonedReply'.
 --
--- A file, 64 KiB at a time:
+-- A file, 64 KiB at a time, with @import qualified Data.ByteString as B@,
+-- @import Control.Monad (unless)@ and @import System.IO@:
 --
--- > fileChunks :: Handle -> (ByteString -> IO ()) -> IO ()
+-- > fileChunks :: Handle -> (B.ByteString -> IO ()) -> IO ()
 -- > fileChunks handle send = do
 -- >     chunk <- B.hGetSome handle 65536
 -- >     unless (B.null chunk) (send chunk >> fileChunks handle send)
@@ -85,14 +86,15 @@ import           Database.MySQL.Protocol.Packet     (Packet)
 -- >     executeStmtStreamed conn stmt [StreamedBytes (fileChunks handle)]
 --
 -- A lazy 'Data.ByteString.Lazy.ByteString', also one read lazily with
--- 'Data.ByteString.Lazy.readFile':
+-- 'Data.ByteString.Lazy.readFile', with @import qualified Data.ByteString.Lazy
+-- as L@:
 --
 -- > StreamedBytes (\send -> mapM_ send (L.toChunks value))
 --
 -- A conduit source, here with @import qualified Conduit as C@ (conduit 1.3):
 --
 -- > StreamedBytes $ \send ->
--- >     C.runConduitRes (C.sourceFile path C..| C.mapM_C (liftIO . send))
+-- >     C.runConduitRes (C.sourceFile path C..| C.mapM_C (C.liftIO . send))
 --
 -- A streamly @Stream IO ByteString@, with @import qualified
 -- Streamly.Data.Stream as Stream@ and @import qualified Streamly.Data.Fold as
@@ -160,33 +162,46 @@ data ProducerStatus = ProducerRunning | ProducerReturned
 
 writeLongData :: StmtID -> Word16 -> ((ByteString -> IO ()) -> IO ()) -> (Packet -> IO ()) -> IO ()
 writeLongData stid position producer writePacket = do
-    sink <- newIORef (Sink ProducerRunning 0 [])
+    sink <- newMVar (Sink ProducerRunning 0 [])
     producer (sendChunk stid position writePacket sink) `onException` closeSink sink
-    Sink _ _ pending <- readIORef sink
-    closeSink sink
+    pending <- closeSink sink
     -- Sent also when empty: an empty value needs a command too, or the server
     -- would look for this parameter's value in the execute command.
     writeLongDataPiece stid position (reverse pending) writePacket
 
-closeSink :: IORef Sink -> IO ()
-closeSink sink = writeIORef sink (Sink ProducerReturned 0 [])
+-- | Refuse further sends, returning the chunks not yet sent.
+--
+-- Decision: a send holds the sink's MVar while it gathers and writes, and
+-- closing takes it too, so a send from another thread either completes before
+-- the last command and the execute command are written or throws. With an
+-- IORef read at a send's start and written at its end, a close in between was
+-- overwritten: about 270 of 300 EscapedSend trials wrote long data after the
+-- execute.
+closeSink :: MVar Sink -> IO [ByteString]
+closeSink sink = modifyMVar sink takePending
 
--- | The send function a producer gets: gather the chunk into the pending
--- command, writing the commands it completes.
-sendChunk :: StmtID -> Word16 -> (Packet -> IO ()) -> IORef Sink -> ByteString -> IO ()
-sendChunk stid position writePacket sink chunk = do
-    Sink status pendingLength pending <- readIORef sink
+takePending :: Sink -> IO (Sink, [ByteString])
+takePending (Sink _ _ pending) = pure (Sink ProducerReturned 0 [], pending)
+
+-- | The send function a producer gets.
+sendChunk :: StmtID -> Word16 -> (Packet -> IO ()) -> MVar Sink -> ByteString -> IO ()
+sendChunk stid position writePacket sink chunk =
+    modifyMVar_ sink (gatherChunk stid position writePacket chunk)
+
+-- | Gather the chunk into the pending command, writing the commands it completes.
+gatherChunk :: StmtID -> Word16 -> (Packet -> IO ()) -> ByteString -> Sink -> IO Sink
+gatherChunk stid position writePacket chunk (Sink status pendingLength pending) =
     case status of
         ProducerReturned -> throwIO (ChunkAfterProducerReturned position)
         ProducerRunning ->
-            if  | B.null chunk -> pure ()
+            if  | B.null chunk -> pure (Sink ProducerRunning pendingLength pending)
                 | pendingLength + B.length chunk < longDataPieceSize ->
-                    writeIORef sink (Sink ProducerRunning (pendingLength + B.length chunk) (chunk : pending))
+                    pure (Sink ProducerRunning (pendingLength + B.length chunk) (chunk : pending))
                 | otherwise -> do
                     let (completing, rest) = B.splitAt (longDataPieceSize - pendingLength) chunk
                     writeLongDataPiece stid position (reverse (completing : pending)) writePacket
                     leftover <- writeWholePieces stid position rest writePacket
-                    writeIORef sink (Sink ProducerRunning (B.length leftover) [leftover])
+                    pure (Sink ProducerRunning (B.length leftover) [leftover])
 
 -- | A send function given to a 'StreamedBytes' or 'StreamedText' producer was
 -- called after the producer returned, for the parameter at this position

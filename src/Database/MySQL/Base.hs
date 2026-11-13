@@ -763,7 +763,8 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
 
 -- | 'executeStmt' with parameters that may be produced in chunks, so a long
 -- BLOB or TEXT value goes to the server as it is read, instead of being built
--- in memory as one 'MySQLValue'. A file, read lazily:
+-- in memory as one 'MySQLValue'. A file, read lazily, with @import qualified
+-- Data.ByteString.Lazy as L@:
 --
 -- > stmt <- prepareStmt conn "INSERT INTO file (name, content) VALUES (?, ?)"
 -- > content <- L.readFile "backup.tar"

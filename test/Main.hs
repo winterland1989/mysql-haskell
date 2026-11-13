@@ -13,6 +13,7 @@ import qualified TCPStreams
 import qualified TLSServerName
 import qualified BoundsCheck
 import qualified ConnectInfoShow
+import qualified EscapedSend
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
 import qualified DirectDecoding
@@ -46,6 +47,7 @@ main = do
       , Ed25519Scramble.tests
       , BoundsCheck.tests
       , ConnectInfoShow.tests
+      , EscapedSend.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
       , DirectDecoding.tests
