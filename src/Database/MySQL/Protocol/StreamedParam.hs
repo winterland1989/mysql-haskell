@@ -45,7 +45,7 @@ import           Database.MySQL.Protocol.Packet     (Packet)
 -- and the first value.
 --
 -- Decision: one function streams the data and executes, taking each parameter
--- as a value or a stream, instead of a separate sendLongData beside an execute
+-- as a value or a producer, instead of a separate sendLongData beside an execute
 -- told which parameters were sent. Apart, every caller has to keep the two in
 -- step, and data sent for an execute that never came would shift the values
 -- of the statement's next execute.
@@ -160,15 +160,13 @@ writeWholePieces stid position bytes writePacket =
 -- | The data one long data command carries; only a parameter's last one
 -- carries less.
 --
--- Decision: a streamed value goes in commands of 1 MiB whatever the size of
--- the producer's chunks, gathering short chunks and splitting long ones.
--- Gathered, because one command per 4 KiB chunk (network's suggested @recv@
--- size) cost ten times the client's instructions of 1 MiB commands, and
--- twice the time on MariaDB 11.4.9. Split, because the server closes the
--- connection on a command longer than max_allowed_packet, while long data
--- outgrowing it in many commands only fails the execute; 1 MiB is below every
--- default max_allowed_packet since MySQL 5.6 (4 MiB; 16 MiB on MariaDB,
--- 64 MiB on MySQL 8.0).
+-- Decision: a streamed value goes in commands of 1 MiB whatever the
+-- producer's chunk size. Short chunks are gathered: a command per 4 KiB chunk
+-- (network's suggested @recv@ size) cost ten times the client's instructions
+-- and, on MariaDB 11.4.9, 1.2 to 2 times the wall time, while 64 KiB commands
+-- were no faster than 1 MiB ones. Long ones are split: the server closes the
+-- connection on a command longer than max_allowed_packet, and 1 MiB is below
+-- its default since MySQL 5.6 (4 MiB; 16 MiB on MariaDB, 64 MiB on MySQL 8.0).
 longDataPieceSize :: Int
 longDataPieceSize = 1048576
 
