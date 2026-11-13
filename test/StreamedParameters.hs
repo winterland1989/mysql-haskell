@@ -23,6 +23,9 @@ tests = testGroup "streamed parameters"
         withStreamTable $ \c -> do
             let value = patterned (50 * mebibyte)
             assertStoredAlike c (chunksOf mebibyte value)
+    , testCase "short and long chunks mixed are stored in order" $
+        withStreamTable $ \c ->
+            assertStoredAlike c (chunksOfSizes (cycle [1, 4093, 700001, 2 * mebibyte + 5]) (patterned (20 * mebibyte)))
     , testCase "a chunk longer than a packet is stored whole" $
         withStreamTable $ \c ->
             assertStoredAlike c [patterned (17 * mebibyte + 3)]
@@ -183,6 +186,12 @@ patterned size = B.take size (B.concat (replicate (size `div` 251 + 1) (B.pack [
 chunksOf :: Int -> B.ByteString -> [B.ByteString]
 chunksOf size bytes =
     if B.null bytes then [] else B.take size bytes : chunksOf size (B.drop size bytes)
+
+chunksOfSizes :: [Int] -> B.ByteString -> [B.ByteString]
+chunksOfSizes sizes bytes =
+    if B.null bytes then [] else case sizes of
+        [] -> [bytes]
+        size : later -> B.take size bytes : chunksOfSizes later (B.drop size bytes)
 
 mebibyte :: Int
 mebibyte = 1048576

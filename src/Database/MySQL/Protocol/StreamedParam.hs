@@ -126,47 +126,58 @@ writeParamData stid writePacket (position, param) = case param of
     StreamedText nextChunk -> writeLongData stid position (encodeUtf8 <$> nextChunk) writePacket
 
 writeLongData :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> IO ()
-writeLongData stid position nextChunk writePacket = do
-    first <- nextChunk
-    -- Also an empty value needs a command, or the server would look for this
-    -- parameter's value in the execute command.
-    writePieces stid position first writePacket
-    unless (B.null first) (writeChunks stid position nextChunk writePacket)
+writeLongData stid position nextChunk writePacket =
+    gatherPiece stid position nextChunk writePacket 0 []
 
-writeChunks :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> IO ()
-writeChunks stid position nextChunk writePacket = do
+-- | Gather chunks into the next command, which holds @pendingLength@ bytes in
+-- @pending@ (last chunk first) so far.
+gatherPiece :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> Int -> [ByteString] -> IO ()
+gatherPiece stid position nextChunk writePacket pendingLength pending = do
     chunk <- nextChunk
-    unless (B.null chunk) $ do
-        writePieces stid position chunk writePacket
-        writeChunks stid position nextChunk writePacket
+    if  | B.null chunk ->
+            -- Sent also when empty: an empty value needs a command too, or the
+            -- server would look for this parameter's value in the execute command.
+            writeLongDataPiece stid position (reverse pending) writePacket
+        | pendingLength + B.length chunk < longDataPieceSize ->
+            gatherPiece stid position nextChunk writePacket
+                (pendingLength + B.length chunk) (chunk : pending)
+        | otherwise -> do
+            let (completing, rest) = B.splitAt (longDataPieceSize - pendingLength) chunk
+            writeLongDataPiece stid position (reverse (completing : pending)) writePacket
+            leftover <- writeWholePieces stid position rest writePacket
+            gatherPiece stid position nextChunk writePacket (B.length leftover) [leftover]
 
-writePieces :: StmtID -> Word16 -> ByteString -> (Packet -> IO ()) -> IO ()
-writePieces stid position chunk writePacket =
-    if B.length chunk <= longDataPieceSize
-    then writeLongDataPiece stid position chunk writePacket
+-- | Send whole commands' worth of these bytes, returning the shorter rest.
+writeWholePieces :: StmtID -> Word16 -> ByteString -> (Packet -> IO ()) -> IO ByteString
+writeWholePieces stid position bytes writePacket =
+    if B.length bytes < longDataPieceSize
+    then pure bytes
     else do
-        let (piece, rest) = B.splitAt longDataPieceSize chunk
-        writeLongDataPiece stid position piece writePacket
-        writePieces stid position rest writePacket
+        let (piece, rest) = B.splitAt longDataPieceSize bytes
+        writeLongDataPiece stid position [piece] writePacket
+        writeWholePieces stid position rest writePacket
 
--- | The most data one long data command carries.
+-- | The data one long data command carries; only a parameter's last one
+-- carries less.
 --
--- Decision: a chunk is split into commands of at most 1 MiB, below every
+-- Decision: a streamed value goes in commands of 1 MiB whatever the size of
+-- the producer's chunks, gathering short chunks and splitting long ones.
+-- Gathered, because one command per 4 KiB chunk (network's suggested @recv@
+-- size) cost ten times the client's instructions of 1 MiB commands, and
+-- twice the time on MariaDB 11.4.9. Split, because the server closes the
+-- connection on a command longer than max_allowed_packet, while long data
+-- outgrowing it in many commands only fails the execute; 1 MiB is below every
 -- default max_allowed_packet since MySQL 5.6 (4 MiB; 16 MiB on MariaDB,
--- 64 MiB on MySQL 8.0). The server refuses a command longer than
--- max_allowed_packet by closing the connection, while long data that
--- outgrows it in many commands only fails the execute. Sending each chunk
--- whole, in as many packets as it needs, would make the caller's chunk size
--- decide which of the two happens.
+-- 64 MiB on MySQL 8.0).
 longDataPieceSize :: Int
 longDataPieceSize = 1048576
 
-writeLongDataPiece :: StmtID -> Word16 -> ByteString -> (Packet -> IO ()) -> IO ()
+writeLongDataPiece :: StmtID -> Word16 -> [ByteString] -> (Packet -> IO ()) -> IO ()
 writeLongDataPiece stid position piece = writePayload $ runPut $ do
     putWord8 0x18
     putWord32le stid
     putWord16le position
-    putByteString piece
+    mapM_ putByteString piece
 
 -- | COM_STMT_EXECUTE for these parameters, written as for
 -- 'Database.MySQL.Protocol.Command.COM_STMT_EXECUTE' but without the values
