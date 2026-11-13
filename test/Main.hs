@@ -11,7 +11,9 @@ import qualified StringLiterals
 import qualified Word24
 import qualified TCPStreams
 import qualified BoundedReplies
+import qualified TLSServerName
 import qualified BoundsCheck
+import qualified ConnectInfoShow
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
 import qualified DirectDecoding
@@ -45,12 +47,14 @@ main = do
       , Ed25519Scramble.tests
       , BoundsCheck.tests
       , BoundedReplies.tests
+      , ConnectInfoShow.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
       , DirectDecoding.tests
       , DecoderRoundtrip.tests
       , FloatingPointText.tests
       , HandshakeGolden.tests
+      , TLSServerName.tests
       , PacketClassification.tests
       , Placeholders.tests
       , StringLiterals.tests

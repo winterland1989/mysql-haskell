@@ -181,7 +181,24 @@ data ConnectInfo = ConnectInfo
     , ciUser     :: ByteString
     , ciPassword :: ByteString
     , ciCharset  :: Word8
-    } deriving Show
+    }
+
+-- | Record syntax with the password left out, so a logged 'ConnectInfo'
+-- cannot leak it.
+--
+-- Decision: the password shows as @<redacted>@ even when empty, so the output
+-- does not tell whether the account has one either. It is not a Haskell
+-- expression, unlike a placeholder string, which would read as a password.
+instance Show ConnectInfo where
+    showsPrec precedence (ConnectInfo host port database user _password charset) =
+        showParen (precedence >= 11)
+            $ showString "ConnectInfo {ciHost = " . shows host
+            . showString ", ciPort = " . shows port
+            . showString ", ciDatabase = " . shows database
+            . showString ", ciUser = " . shows user
+            . showString ", ciPassword = <redacted>"
+            . showString ", ciCharset = " . shows charset
+            . showChar '}'
 
 -- | A simple 'ConnectInfo' targeting localhost with @user=root@ and empty password.
 --
@@ -214,7 +231,7 @@ utf8mb4_unicode_ci = 224
 --
 -- The constructor is not exported, so that limits can be added later.
 --
--- @since 1.5.1
+-- @since 1.6.0
 data ConnectionLimits = ConnectionLimits
     { messageSizeLimit :: !Int64
       -- ^ The largest message the server may send, in bytes: one packet, or
@@ -225,7 +242,7 @@ data ConnectionLimits = ConnectionLimits
 -- | A 'messageSizeLimit' of 1 GiB plus 64 KiB, which refuses no reply a
 -- server sends and no binlog event a replica accepts.
 --
--- @since 1.5.1
+-- @since 1.6.0
 defaultConnectionLimits :: ConnectionLimits
 defaultConnectionLimits = ConnectionLimits { messageSizeLimit = 1073741824 + 65536 }
 
@@ -315,20 +332,20 @@ connectUnixSocketDetailExtended = connectUnixSocketDetailExtendedWithLimits defa
 --
 -- > conn <- connectWithLimits defaultConnectionLimits { messageSizeLimit = 64 * 1024 * 1024 } defaultConnectInfo
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectWithLimits :: ConnectionLimits -> ConnectInfo -> IO MySQLConn
 connectWithLimits limits = fmap snd . connectDetailWithLimits limits
 
 -- | 'connectDetail' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectDetailWithLimits :: ConnectionLimits -> ConnectInfo -> IO (Greeting, MySQLConn)
 connectDetailWithLimits limits =
     fmap withoutNegotiated . connectDetailExtendedWithLimits limits noExtendedCapabilities
 
 -- | 'connectDetailExtended' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo
                                 -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectDetailExtendedWithLimits limits requested connectInfo =
@@ -339,13 +356,13 @@ connectDetailExtendedWithLimits limits requested connectInfo =
 
 -- | 'connectUnixSocket' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectUnixSocketWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO MySQLConn
 connectUnixSocketWithLimits limits socketPath = fmap snd . connectUnixSocketDetailWithLimits limits socketPath
 
 -- | 'connectUnixSocketDetail' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectUnixSocketDetailWithLimits :: ConnectionLimits -> FilePath -> ConnectInfo -> IO (Greeting, MySQLConn)
 connectUnixSocketDetailWithLimits limits socketPath =
     fmap withoutNegotiated . connectUnixSocketDetailExtendedWithLimits limits noExtendedCapabilities socketPath
@@ -353,7 +370,7 @@ connectUnixSocketDetailWithLimits limits socketPath =
 -- | 'connectUnixSocketDetailExtended' refusing what the server sends beyond
 -- these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectUnixSocketDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> FilePath -> ConnectInfo
                                           -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectUnixSocketDetailExtendedWithLimits limits requested socketPath connectInfo =
@@ -668,7 +685,7 @@ decodeInputStream = decodeInputStreamWithLimits defaultConnectionLimits
 -- read of it, and so does every read after that, as the message's unread rest
 -- would be taken for packets.
 --
--- @since 1.5.1
+-- @since 1.6.0
 decodeInputStreamWithLimits :: ConnectionLimits -> InputStream ByteString -> IO (InputStream Packet)
 decodeInputStreamWithLimits limits inputStream = do
     progress <- newIORef (MessageSoFar 0)
@@ -941,7 +958,7 @@ instance Exception ExtraResultSets where
 -- it, and connect with a larger limit if the message was expected. See
 -- Note [Bounded replies].
 --
--- @since 1.5.1
+-- @since 1.6.0
 data MessageTooLarge = MessageTooLarge !Int64 !Int64
     deriving (Typeable, Show, Eq)
 instance Exception MessageTooLarge where
@@ -957,7 +974,7 @@ instance Exception MessageTooLarge where
 -- the connection refuses commands with 'AbandonedReply': close it. See
 -- Note [Bounded replies].
 --
--- @since 1.5.1
+-- @since 1.6.0
 newtype MoreResultsThanStatements = MoreResultsThanStatements Int64
     deriving (Typeable, Show, Eq)
 instance Exception MoreResultsThanStatements where

@@ -122,7 +122,7 @@ connectMariaDBTLS = connectMariaDBTLSWithLimits defaultConnectionLimits
 -- | 'connectMariaDB' refusing what the server sends beyond these limits, see
 -- 'ConnectionLimits'.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectMariaDBWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo -> IO MariaDBConn
 connectMariaDBWithLimits limits requested connectInfo =
     Connection.connectDetailExtendedWithLimits limits (capabilityBits requested) connectInfo >>= mariadbConn
@@ -130,7 +130,7 @@ connectMariaDBWithLimits limits requested connectInfo =
 -- | 'connectMariaDBUnixSocket' refusing what the server sends beyond these
 -- limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectMariaDBUnixSocketWithLimits :: ConnectionLimits -> [MariaDBCapability] -> FilePath -> ConnectInfo
                                    -> IO MariaDBConn
 connectMariaDBUnixSocketWithLimits limits requested socketPath connectInfo =
@@ -139,7 +139,7 @@ connectMariaDBUnixSocketWithLimits limits requested socketPath connectInfo =
 
 -- | 'connectMariaDBTLS' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectMariaDBTLSWithLimits :: ConnectionLimits -> [MariaDBCapability] -> ConnectInfo
                             -> (Network.TLS.ClientParams, String) -> IO MariaDBConn
 connectMariaDBTLSWithLimits limits requested connectInfo tlsParams =

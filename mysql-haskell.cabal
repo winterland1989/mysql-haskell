@@ -93,7 +93,9 @@ library
   other-modules:      Paths_mysql_haskell
   autogen-modules:    Paths_mysql_haskell
   hs-source-dirs:     src
-  other-modules:      Database.MySQL.Query
+  other-modules:
+    Data.TLSSetting.ServerIdentification
+    Database.MySQL.Query
   build-depends:
     -- The CRC32 table of binlog event checksums.
     array >=0.5 && <0.6,
@@ -154,6 +156,7 @@ test-suite test
     BinLogEventCodes
     BoundedReplies
     BoundsCheck
+    ConnectInfoShow
     DecoderRoundtrip
     DirectDecoding
     Ed25519Scramble
@@ -173,6 +176,7 @@ test-suite test
     StringLiterals
     TCPStreams
     TextRowDecoding
+    TLSServerName
     TypedValue
     Word24
     ZeroDates
@@ -200,6 +204,7 @@ test-suite test
     tasty-quickcheck >=0.8 && < 1.0,
     text,
     time,
+    tls,
     unordered-containers < 1.0,
     vector
 

@@ -28,6 +28,7 @@ import qualified Data.ByteString.Lazy           as L
 import           Data.Word                      (Word8)
 import qualified Data.Connection                as Conn
 import           Data.TLSSetting
+import           Data.TLSSetting.ServerIdentification (identifyServer)
 import           Database.MySQL.Connection      hiding (connect, connectDetail, connectDetailExtended,
                                                          connectWithLimits, connectDetailWithLimits,
                                                          connectDetailExtendedWithLimits)
@@ -42,6 +43,10 @@ import qualified System.IO.Streams.TLS          as TLS
 --------------------------------------------------------------------------------
 
 -- | Provide a 'TLS.ClientParams' and a subject name to establish a TLS connection.
+--
+-- The server's certificate must be valid for the subject name. Since 1.6.0 the
+-- subject name is also sent as the server name indication (SNI) unless it is
+-- an IP address or the 'TLS.ClientParams' turn SNI off.
 --
 connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connect = connectWithLimits defaultConnectionLimits
@@ -61,20 +66,20 @@ connectDetailExtended = connectDetailExtendedWithLimits defaultConnectionLimits
 -- | 'connect' refusing what the server sends beyond these limits, see
 -- 'ConnectionLimits'.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectWithLimits :: ConnectionLimits -> ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connectWithLimits limits connectInfo tlsParams = fmap snd (connectDetailWithLimits limits connectInfo tlsParams)
 
 -- | 'connectDetail' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectDetailWithLimits :: ConnectionLimits -> ConnectInfo -> (TLS.ClientParams, String) -> IO (Greeting, MySQLConn)
 connectDetailWithLimits limits connectInfo tlsParams =
     fmap withoutNegotiated (connectDetailExtendedWithLimits limits noExtendedCapabilities connectInfo tlsParams)
 
 -- | 'connectDetailExtended' refusing what the server sends beyond these limits.
 --
--- @since 1.5.1
+-- @since 1.6.0
 connectDetailExtendedWithLimits :: ConnectionLimits -> ExtendedCapabilities -> ConnectInfo
                                 -> (TLS.ClientParams, String) -> IO (Greeting, ExtendedCapabilities, MySQLConn)
 connectDetailExtendedWithLimits limits requested connectInfo tlsParams =
@@ -92,10 +97,7 @@ handshakeTLS limits requested (ConnectInfo _host _port db user pass charset) (cp
     let negotiated = negotiateExtended requested greet offered
     if supportTLS (greetingCaps greet)
     then do
-        let cparams' = cparams {
-                    TLS.clientUseServerNameIndication = False
-                ,   TLS.clientServerIdentification = (subName, "")
-                }
+        let cparams' = identifyServer subName "" cparams
         let (sock, sockAddr) = Conn.connExtraInfo c
         sendPacket c (sslRequestPacket negotiated charset)
         bracketOnError (TLS.contextNew sock cparams')

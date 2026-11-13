@@ -1,7 +1,12 @@
 # Revision history for mysql-haskell
 
-## 1.5.1 -- unreleased
+## 1.6.0 -- unreleased
 
+* TLS handshakes now send the server name (SNI) unless it is an IP address, so
+  proxies and managed databases that route by it work; set
+  `clientUseServerNameIndication = False` on the `ClientParams` to send none.
+  `show` of a `ConnectInfo` hides the password
+  [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
 * Limits on what a server can make the client read: a message above
   `messageSizeLimit` (1 GiB plus 64 KiB unless set through the new
   `WithLimits` connect functions) raises `MessageTooLarge`, and a column count
