@@ -198,7 +198,7 @@ decodeBinLogPacket checksum semiAck fileName packet =
 -- announced as @\@master_binlog_checksum@ before it started. See
 -- Note [Binlog event checksums].
 --
--- @since 1.5.1
+-- @since 1.6.0
 decodeBinLogPacketFollowing
     :: BinLogChecksumAlgorithm  -- ^ of the events before this one
     -> Bool                     -- ^ whether the packet has a semi-sync header
@@ -237,7 +237,7 @@ decodeBinLogPacketFollowing before semiAck fileName packet = do
 -- event names. Every algorithm but NONE is read as CRC32, the only other one
 -- MySQL and MariaDB have.
 --
--- @since 1.5.1
+-- @since 1.6.0
 data BinLogChecksumAlgorithm
     = BinLogChecksumNone
     | BinLogChecksumCRC32

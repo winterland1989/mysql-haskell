@@ -10,7 +10,9 @@ import qualified Ed25519Scramble
 import qualified StringLiterals
 import qualified Word24
 import qualified TCPStreams
+import qualified TLSServerName
 import qualified BoundsCheck
+import qualified ConnectInfoShow
 import qualified FieldRoundtrip
 import qualified TextRowDecoding
 import qualified DirectDecoding
@@ -43,12 +45,14 @@ main = do
       , Sha256Scramble.tests
       , Ed25519Scramble.tests
       , BoundsCheck.tests
+      , ConnectInfoShow.tests
       , FieldRoundtrip.tests
       , TextRowDecoding.tests
       , DirectDecoding.tests
       , DecoderRoundtrip.tests
       , FloatingPointText.tests
       , HandshakeGolden.tests
+      , TLSServerName.tests
       , PacketClassification.tests
       , Placeholders.tests
       , StringLiterals.tests

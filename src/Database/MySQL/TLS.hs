@@ -25,6 +25,7 @@ import qualified Data.ByteString.Lazy           as L
 import           Data.Word                      (Word8)
 import qualified Data.Connection                as Conn
 import           Data.TLSSetting
+import           Data.TLSSetting.ServerIdentification (identifyServer)
 import           Database.MySQL.Connection      hiding (connect, connectDetail, connectDetailExtended)
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.Packet
@@ -37,6 +38,10 @@ import qualified System.IO.Streams.TLS          as TLS
 --------------------------------------------------------------------------------
 
 -- | Provide a 'TLS.ClientParams' and a subject name to establish a TLS connection.
+--
+-- The server's certificate must be valid for the subject name. Since 1.6.0 the
+-- subject name is also sent as the server name indication (SNI) unless it is
+-- an IP address or the 'TLS.ClientParams' turn SNI off.
 --
 connect :: ConnectInfo -> (TLS.ClientParams, String) -> IO MySQLConn
 connect c cp = fmap snd (connectDetail c cp)
@@ -66,10 +71,7 @@ handshakeTLS requested (ConnectInfo _host _port db user pass charset) (cparams, 
     let negotiated = negotiateExtended requested greet offered
     if supportTLS (greetingCaps greet)
     then do
-        let cparams' = cparams {
-                    TLS.clientUseServerNameIndication = False
-                ,   TLS.clientServerIdentification = (subName, "")
-                }
+        let cparams' = identifyServer subName "" cparams
         let (sock, sockAddr) = Conn.connExtraInfo c
         sendPacket c (sslRequestPacket negotiated charset)
         bracketOnError (TLS.contextNew sock cparams')

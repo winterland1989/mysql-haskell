@@ -1,7 +1,12 @@
 # Revision history for mysql-haskell
 
-## 1.5.1 -- unreleased
+## 1.6.0 -- unreleased
 
+* TLS handshakes now send the server name (SNI) unless it is an IP address, so
+  proxies and managed databases that route by it work; set
+  `clientUseServerNameIndication = False` on the `ClientParams` to send none.
+  `show` of a `ConnectInfo` hides the password
+  [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
 * The binlog dump reads a binlog file written while `binlog_checksum` was
   `NONE`, and one with checksums while the server's setting is `NONE`, by
   following each file's own setting as a replica does; the new
