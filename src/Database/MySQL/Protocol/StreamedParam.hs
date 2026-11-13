@@ -63,7 +63,7 @@ import qualified System.IO.Streams                  as Stream
 -- whole value. The server does, and refuses a streamed value longer than its
 -- @max_allowed_packet@.
 --
--- @since 1.5.1
+-- @since 1.6.0
 data StreamedParam
     = InlineParam !MySQLValue
       -- ^ A value sent with the execute command, as 'Database.MySQL.Base.executeStmt' sends it.

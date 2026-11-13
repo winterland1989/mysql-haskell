@@ -779,7 +779,7 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
 -- execute. More than 65535 parameters throw 'WrongParamsCount' without
 -- sending anything. See Note [Streamed parameters].
 --
--- @since 1.5.1
+-- @since 1.6.0
 executeStmtStreamed :: MySQLConn -> StmtID -> [StreamedParam] -> IO OK
 executeStmtStreamed conn@(MySQLConn is os _ _) stid params = do
     numbered <- maybe (throwIO WrongParamsCount) pure (numberParams params)
@@ -790,7 +790,7 @@ executeStmtStreamed conn@(MySQLConn is os _ _) stid params = do
 -- | 'queryStmt' with parameters that may be read from streams, sent as
 -- 'executeStmtStreamed' sends them and with the same limit and failures.
 --
--- @since 1.5.1
+-- @since 1.6.0
 queryStmtStreamed :: MySQLConn -> StmtID -> [StreamedParam] -> IO ([ColumnDef], InputStream [MySQLValue])
 queryStmtStreamed conn@(MySQLConn is os _ state) stid params = do
     numbered <- maybe (throwIO WrongParamsCount) pure (numberParams params)

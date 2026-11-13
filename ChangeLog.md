@@ -1,13 +1,16 @@
 # Revision history for mysql-haskell
 
-## 1.5.1 -- unreleased
+## 1.6.0 -- unreleased
 
-New functions only; existing code is unaffected. `executeStmtStreamed` and
-`queryStmtStreamed` read prepared statement parameters from streams and send
-them in chunks, so a long BLOB or TEXT value is never held in memory whole.
-
-* Prepared statement parameters streamed from an `InputStream`
-  (COM_STMT_SEND_LONG_DATA)
+* TLS handshakes now send the server name (SNI) unless it is an IP address, so
+  proxies and managed databases that route by it work; set
+  `clientUseServerNameIndication = False` on the `ClientParams` to send none.
+  `show` of a `ConnectInfo` hides the password
+  [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
+* `executeStmtStreamed` and `queryStmtStreamed` read prepared statement
+  parameters from `InputStream`s and send them in chunks
+  (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is never held in
+  memory whole
   [#117](https://github.com/winterland1989/mysql-haskell/pull/117)
 
 ## 1.5.0 -- 2026.11.11 

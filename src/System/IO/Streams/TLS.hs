@@ -26,6 +26,7 @@ import           Data.Connection
 import qualified Data.ByteString       as B
 import qualified Data.ByteString.Char8 as BC
 import           Data.TLSSetting
+import           Data.TLSSetting.ServerIdentification (identifyServer)
 import qualified Network.Socket        as N
 import           Network.TLS           (ClientParams, Context, ServerParams)
 import qualified Network.TLS           as TLS
@@ -62,6 +63,9 @@ closeTLS ctx = (TLS.bye ctx >> TLS.contextClose ctx) -- sometimes socket was clo
 -- | Convenience function for initiating an TLS connection to the given
 -- @('HostName', 'PortNumber')@ combination.
 --
+-- The subject name is sent as the server name indication (SNI) unless it is
+-- an IP address or the 'ClientParams' turn SNI off.
+--
 -- This operation may throw 'TLS.TLSException' on failure.
 --
 connectTLS :: ClientParams         -- ^ check "Data.TLSSetting"
@@ -72,7 +76,7 @@ connectTLS :: ClientParams         -- ^ check "Data.TLSSetting"
            -> IO (Context, N.SockAddr)
 connectTLS prms subname host port = do
     let subname' = maybe host id subname
-        prms' = prms { TLS.clientServerIdentification = (subname', BC.pack (show port)) }
+        prms' = identifyServer subname' (BC.pack (show port)) prms
     (sock, addr) <- TCP.connectSocket host port
     E.bracketOnError (TLS.contextNew sock prms') closeTLS $ \ ctx -> do
         TLS.handshake ctx
