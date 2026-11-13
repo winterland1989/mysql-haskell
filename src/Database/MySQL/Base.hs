@@ -61,6 +61,9 @@ module Database.MySQL.Base
     , queryStmtVector
     , closeStmt
     , resetStmt
+      -- * Reading rows through a server-side cursor
+    , queryStmtCursor
+    , queryStmtRowsCursor
       -- * Decoding rows without 'MySQLValue'
       -- | Rows decoded straight into Haskell values with the decoders of
       -- "Database.MySQL.Decoder", or handed over raw for libraries that decode
@@ -106,7 +109,9 @@ import qualified Data.ByteString.Lazy               as L
 import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Data.Maybe                         (isJust)
 import           Data.Proxy                         (Proxy (..))
+import           Data.Word                          (Word32)
 import           Database.MySQL.Connection
+import           Database.MySQL.Cursor
 import qualified Database.MySQL.Decoder             as Decoder
 import           Database.MySQL.Protocol.Auth
 import           Database.MySQL.Protocol.ColumnDef
@@ -185,7 +190,7 @@ executeMany_ conn@(MySQLConn is os _ _) qry = runCommand conn $ do
 -- ones are read and discarded ('executeMany_' returns them all).
 --
 execute_ :: MySQLConn -> Query -> IO OK
-execute_ conn (Query qry) = executeCommand conn (COM_QUERY qry)
+execute_ conn (Query qry) = executeCommand conn (COM_QUERY qry) skipResultSet
 
 -- | Execute a MySQL query which return a result-set with parameters.
 --
@@ -389,7 +394,7 @@ queryStmtRowBodies conn@(MySQLConn is os _ state) stid params = runCommand conn 
         WithoutResultSet -> (,) [] <$> Stream.nullInput
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
-            _ <- readPacket is -- eof packet, we don't verify this though
+            finishStmtColumns is os stid
             writeIORef state RowsUnread
             rows <- resultSetRows is state binaryRowBody
             return (fields, rows)
@@ -615,6 +620,15 @@ skipResultSet is columnCountPacket = do
     _ <- readPacket is -- eof packet after the column definitions
     skipRows is
 
+-- | 'skipResultSet' for the first result-set of a prepared statement, whose
+-- rows can wait in a cursor, see Note [Statements that keep a cursor].
+skipStmtResultSet :: (Packet -> IO ()) -> StmtID -> InputStream Packet -> Packet -> IO EOF
+skipStmtResultSet os stid is columnCountPacket = do
+    columnCount <- getFromPacket getLenEncInt columnCountPacket
+    replicateM_ columnCount (readPacket is)
+    finishStmtColumns is os stid
+    skipRows is
+
 -- | Read a result-set's rows up to and including the EOF packet that ends them.
 skipRows :: InputStream Packet -> IO EOF
 skipRows is = do
@@ -685,15 +699,16 @@ resetStmt conn@(MySQLConn is os _ _) stid = runCommand conn $ do
 -- | Execute prepared query statement with parameters, expecting no resultset.
 --
 executeStmt :: MySQLConn -> StmtID -> [MySQLValue] -> IO OK
-executeStmt conn stid params =
-  executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params))
+executeStmt conn@(MySQLConn _ os _ _) stid params =
+  executeCommand conn (COM_STMT_EXECUTE stid params (makeNullMap params)) (skipStmtResultSet os stid)
 
 -- | Send a statement that should answer with an 'OK' and read its whole reply,
 -- see 'skipFurtherResults'. A result-set, also as the first reply (a SELECT or
--- a CALL running one), is read off the connection and raises 'ExtraResultSets',
--- unless a later statement fails: its 'ERRException' is raised instead.
-executeCommand :: MySQLConn -> Command -> IO OK
-executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
+-- a CALL running one), is read off the connection with @skipFirst@ and raises
+-- 'ExtraResultSets', unless a later statement fails: its 'ERRException' is
+-- raised instead.
+executeCommand :: MySQLConn -> Command -> (InputStream Packet -> Packet -> IO EOF) -> IO OK
+executeCommand conn@(MySQLConn is os _ _) cmd skipFirst = runCommand conn $ do
     writeCommand cmd os
     p <- readPacket is
     if  | isERR p -> decodeFromPacket p >>= throwIO . ERRException
@@ -702,7 +717,7 @@ executeCommand conn@(MySQLConn is os _ _) cmd = runCommand conn $ do
             finishAfterOK is ok
             pure ok
         | otherwise -> do
-            eof <- skipResultSet is p
+            eof <- skipFirst is p
             when (isThereMoreAfterEOF eof) (void (skipFurtherResults SomeResultSet is))
             throwIO ExtraResultSets
 
@@ -719,7 +734,7 @@ queryStmt conn@(MySQLConn is os _ state) stid params = runCommand conn $ do
         WithoutResultSet -> (,) [] <$> Stream.nullInput
         ResultSetColumns len -> do
             fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
-            _ <- readPacket is -- eof packet, we don't verify this though
+            finishStmtColumns is os stid
             writeIORef state RowsUnread
             rows <- resultSetRows is state (binaryValuesPacket (Decoder.binaryValueColumns fields))
             return (fields, rows)
@@ -736,11 +751,128 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
         WithoutResultSet -> (,) V.empty <$> Stream.nullInput
         ResultSetColumns len -> do
             fields <- V.replicateM len $ (decodeFromPacket <=< readPacket) is
-            _ <- readPacket is -- eof packet, we don't verify this though
+            finishStmtColumns is os stid
             writeIORef state RowsUnread
             rows <- resultSetRows is state
                 (fmap V.fromList . binaryValuesPacket (Decoder.binaryValueColumns (V.toList fields)))
             return (fields, rows)
+
+-- | Read the packet that ends a prepared statement's column definitions, and
+-- fetch the rows if they wait in a cursor, see
+-- Note [Statements that keep a cursor].
+finishStmtColumns :: InputStream Packet -> (Packet -> IO ()) -> StmtID -> IO ()
+finishStmtColumns is os stid = do
+    columnsEnd <- readPacket is
+    when (isOK columnsEnd) (writePayload (fetchPayload stid maxBound) os)
+
+-- Note [Statements that keep a cursor]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A MySQL statement whose first execution asked for a cursor answers every
+-- later execution through one, also those that do not ask: its column
+-- definitions end in an OK packet in place of the EOF packet, and the rows wait
+-- in an open cursor instead of following. Seen on MySQL 8.0.45, whose
+-- Prepared_statement::execute, like the one on MySQL's trunk, keeps the result
+-- object of a statement's first execution for the ones after it. MariaDB
+-- answers such an execution as usual. Waiting for the rows would hang.
+--
+-- Rows left in that cursor without a single fetch stay there, ahead of the
+-- next execution's rows: a queryStmt from 9998 after an executeStmt from 9998
+-- gave 9998, 9999, 9998, 9999. A fetch of any size, a COM_STMT_RESET or an
+-- execution asking for a cursor ends them.
+--
+-- Decision: an execution without a cursor that finds its rows in one fetches
+-- them all in the same exchange with one COM_STMT_FETCH, after whose last row
+-- the server closes the cursor: queryStmt and its relatives hand them out, and
+-- executeStmt skips them as it skips any result-set's rows. A COM_STMT_RESET
+-- after executeStmt would end them too, but queryStmt needs the fetch anyway,
+-- so one workaround serves both.
+
+-- | 'queryStmt' reading the rows through a server-side cursor, at most
+-- @rowsPerFetch@ of them per round trip, so a large result is held in memory
+-- one batch at a time while the server keeps the rest. A @rowsPerFetch@ of 0
+-- throws an 'IOError' before anything is sent.
+--
+-- A batch is fetched only once the one before it has been read, and every
+-- fetch is a command of its own, so between reads the connection takes other
+-- commands, also queries and other statements' cursors. Like those commands, a
+-- fetch throws 'UnconsumedResultSet' while another result-set's rows are
+-- unread, and 'AbandonedReply' after a reply was interrupted. A fetch the
+-- server refuses raises 'ERRException' and ends the stream.
+--
+-- The cursor belongs to the statement. Stopping early leaves the connection
+-- usable, and 'resetStmt' or 'closeStmt' releases the rows the server still
+-- holds; reading the stream after that raises 'ERRException'. Executing the
+-- statement again also ends this cursor and opens a new one, whose rows this
+-- stream would then hand out, so finish with a stream before that.
+--
+-- A statement without a result-set gives no columns and no rows, as with
+-- 'queryStmt', though MySQL refuses one that is not DML, such as a
+-- @CREATE TABLE@, with 'ERRException'. A statement the server opens no cursor
+-- for, a @CALL@ on both servers or an @EXPLAIN@ on MariaDB, sends its rows at
+-- once; they are read before this returns, as libmysqlclient does.
+--
+-- > statement <- prepareStmt conn "SELECT emp_no, first_name FROM employees WHERE emp_no > ?"
+-- > (_, rows) <- queryStmtCursor conn statement [MySQLInt32 10001] 1000
+-- > count <- Streams.fold (\seen _ -> seen + 1) (0 :: Int) rows
+--
+-- @since 1.6.0
+queryStmtCursor :: MySQLConn -> StmtID -> [MySQLValue] -> Word32 -> IO ([ColumnDef], InputStream [MySQLValue])
+queryStmtCursor conn stid params rowsPerFetch = do
+    (fields, rows) <- cursorRows conn stid params rowsPerFetch
+    (,) fields <$> Stream.mapM (binaryValuesPacket (Decoder.binaryValueColumns fields)) rows
+
+-- | 'queryStmtCursor' with each row decoded by a 'Decoder.RowDecoder', as
+-- 'queryStmtRows' does. A result-set the decoder does not fit raises
+-- 'Decoder.ColumnMismatch' before any row is fetched, and a field that does
+-- not decode raises 'Decoder.FieldError' when its row is read. Neither skips
+-- rows, as the connection takes commands between fetches anyway.
+--
+-- @since 1.6.0
+queryStmtRowsCursor :: Decoder.RowDecoder a -> MySQLConn -> StmtID -> [MySQLValue] -> Word32
+                    -> IO ([ColumnDef], InputStream a)
+queryStmtRowsCursor decoder conn stid params rowsPerFetch = do
+    (fields, rows) <- cursorRows conn stid params rowsPerFetch
+    case fields of
+        [] -> (,) [] <$> Stream.nullInput
+        _ -> case Decoder.prepareRowDecoder @BinaryProtocol decoder (V.fromList fields) of
+            Left mismatch -> throwIO mismatch
+            Right prepared -> (,) fields <$> Stream.mapM (decodeCursorRow prepared) rows
+
+decodeCursorRow :: Decoder.PreparedRow BinaryProtocol a -> Packet -> IO a
+decodeCursorRow prepared packet = do
+    row <- binaryRowBody packet
+    either throwIO pure (Decoder.runPreparedRow prepared row)
+
+-- | Run a prepared statement with a read-only cursor and hand out its row
+-- packets, fetched @rowsPerFetch@ at a time. See Note [Server-side cursors] in
+-- "Database.MySQL.Cursor".
+cursorRows :: MySQLConn -> StmtID -> [MySQLValue] -> Word32 -> IO ([ColumnDef], InputStream Packet)
+cursorRows conn@(MySQLConn is os _ _) stid params rowsPerFetch = do
+    requireRowsPerFetch rowsPerFetch
+    (fields, firstBatch) <- runCommand conn $ do
+        writePayload (cursorExecutePayload stid params) os
+        reply <- readQueryReply is
+        case reply of
+            WithoutResultSet -> pure ([], CursorBatch [] NoRowsLeft)
+            ResultSetColumns len -> do
+                fields <- replicateM len $ (decodeFromPacket <=< readPacket) is
+                columnsEnd <- readPacket is
+                unless (isEOF columnsEnd) (throwIO (UnexpectedPacket columnsEnd))
+                status <- eofStatus <$> decodeFromPacket columnsEnd
+                if cursorExists status
+                then pure (fields, CursorBatch [] RowsOnServer)
+                else (\rows -> (fields, CursorBatch rows NoRowsLeft)) <$> readUncursoredRows is []
+    (,) fields <$> cursorRowStream conn stid rowsPerFetch firstBatch
+
+-- | Read the rows of a statement the server opened no cursor for, up to their
+-- EOF packet and the results after it, see 'finishAfterEOF'; the rows read so
+-- far are kept in reverse.
+readUncursoredRows :: InputStream Packet -> [Packet] -> IO [Packet]
+readUncursoredRows is earlier = do
+    q <- readPacket is
+    if  | isEOF q -> finishAfterEOF is q >> pure (reverse earlier)
+        | isERR q -> decodeFromPacket q >>= throwIO . ERRException
+        | otherwise -> readUncursoredRows is (q : earlier)
 
 -- | Run querys inside a transaction, querys will be rolled back if exception arise.
 --

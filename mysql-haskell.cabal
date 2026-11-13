@@ -95,6 +95,7 @@ library
   hs-source-dirs:     src
   other-modules:
     Data.TLSSetting.ServerIdentification
+    Database.MySQL.Cursor
     Database.MySQL.Query
   build-depends:
     -- The CRC32 table of binlog event checksums.
@@ -242,6 +243,7 @@ test-suite integration
     RowDecoderQueries
     RoundtripYear
     SelectOne
+    StatementCursor
     TestUser
     TextRow
     TLSClientCertificate
