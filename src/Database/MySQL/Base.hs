@@ -25,6 +25,8 @@ By using this library you will meet:
       or more than a prepared statement can take to 'executeStmtStreamed'.
     * 'ExtraResultSets': a statement produced a result-set the function running it
       could not return.
+    * 'ChunkAfterProducerReturned': a 'StreamedParam' producer's send function was
+      called after the producer returned.
 
 Both 'UnexpectedPacket' and 'DecodePacketException' may indicate a bug of this library rather your code, so please report!
 
@@ -92,6 +94,7 @@ module Database.MySQL.Base
     , DecodePacketException(..)
     , WrongParamsCount(..)
     , ExtraResultSets(..)
+    , ChunkAfterProducerReturned(..)
       -- * MySQL protocol
     , module  Database.MySQL.Protocol.Auth
     , module  Database.MySQL.Protocol.Command
@@ -760,14 +763,15 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
 
 -- | 'executeStmt' with parameters that may be produced in chunks, so a long
 -- BLOB or TEXT value goes to the server as it is read, instead of being built
--- in memory as one 'MySQLValue'. A file, read 64 KiB at a time:
+-- in memory as one 'MySQLValue'. A file, read lazily:
 --
 -- > stmt <- prepareStmt conn "INSERT INTO file (name, content) VALUES (?, ?)"
--- > withFile "backup.tar" ReadMode $ \handle ->
--- >     executeStmtStreamed conn stmt
--- >         [InlineParam (MySQLText "backup.tar"), StreamedBytes (B.hGetSome handle 65536)]
+-- > content <- L.readFile "backup.tar"
+-- > executeStmtStreamed conn stmt
+-- >     [InlineParam (MySQLText "backup.tar"), StreamedBytes (\send -> mapM_ send (L.toChunks content))]
 --
--- 'StreamedParam' has the producers' contract and more examples.
+-- 'StreamedParam' has the producers' contract, and examples for conduit,
+-- streamly, pipes and io-streams.
 --
 -- The server refuses a streamed value longer than its @max_allowed_packet@
 -- with an 'ERRException' (code 1105) once the value is sent. The limit holds

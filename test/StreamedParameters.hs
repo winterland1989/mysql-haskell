@@ -5,10 +5,9 @@
 module StreamedParameters (tests) where
 
 import           Control.Exception   (try)
-import           Control.Monad       (void)
+import           Control.Monad       (forM_, void)
 import qualified Data.ByteString     as B
-import           Data.IORef          (IORef, atomicModifyIORef', newIORef)
-import           Data.Maybe          (fromMaybe)
+import           Data.IORef          (newIORef, readIORef, writeIORef)
 import qualified Data.Text           as T
 import           Data.Word           (Word16)
 import           Database.MySQL.Base
@@ -32,52 +31,62 @@ tests = testGroup "streamed parameters"
     , testCase "two streamed parameters keep their own values" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, content, other) VALUES (?, ?, ?)"
-            first <- bytesFrom ["first ", "value"]
-            second <- bytesFrom ["second value"]
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes first, StreamedBytes second])
+            void (executeStmtStreamed c stmt
+                [InlineParam (MySQLInt32 1), StreamedBytes (forM_ ["first ", "value"]), StreamedBytes (forM_ ["second value"])])
             selectAll c "SELECT content, other FROM streamed_param"
                 >>= assertEqual "stored values" [[MySQLBytes "first value", MySQLBytes "second value"]]
     , testCase "values around a streamed parameter keep their places" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, content, label, other) VALUES (?, ?, ?, ?)"
-            content <- bytesFrom ["streamed"]
             void (executeStmtStreamed c stmt
-                [InlineParam (MySQLInt32 7), StreamedBytes content, InlineParam (MySQLText "after"), InlineParam MySQLNull])
+                [ InlineParam (MySQLInt32 7), StreamedBytes (forM_ ["streamed"])
+                , InlineParam (MySQLText "after"), InlineParam MySQLNull ])
             selectAll c "SELECT id, content, label, other FROM streamed_param"
                 >>= assertEqual "stored values" [[MySQLInt32 7, MySQLBytes "streamed", MySQLText "after", MySQLNull]]
-    , testCase "an empty first chunk gives an empty value, not NULL" $
+    , testCase "a producer that sends nothing gives an empty value, not NULL" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
-            content <- bytesFrom []
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes content])
+            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes (\_ -> pure ())])
             selectAll c "SELECT content FROM streamed_param" >>= assertEqual "stored value" [[MySQLBytes ""]]
+    , testCase "empty chunks are nothing to send" $
+        withStreamTable $ \c -> do
+            stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
+            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes (forM_ ["", "val", "", "ue", ""])])
+            selectAll c "SELECT content FROM streamed_param" >>= assertEqual "stored value" [[MySQLBytes "value"]]
     , testCase "streamed text is stored as the text it was" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, note) VALUES (?, ?)"
-            note <- producerOf T.empty (map T.pack ["caf", "\233 ", "\9749"])
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedText note])
+            void (executeStmtStreamed c stmt
+                [InlineParam (MySQLInt32 1), StreamedText (forM_ (map T.pack ["caf", "\233 ", "\9749"]))])
             selectAll c "SELECT note FROM streamed_param" >>= assertEqual "stored text" [[MySQLText (T.pack "caf\233 \9749")]]
-    , testCase "a producer is not called after the empty chunk that ends its value" $
-        withStreamTable $ \c -> do
-            stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
-            chunks <- newIORef ["value", B.empty]
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes (chunkOrFail chunks)])
-            selectAll c "SELECT content FROM streamed_param" >>= assertEqual "stored value" [[MySQLBytes "value"]]
     , testCase "queryStmtStreamed returns the statement's rows" $
         withTestConnection $ \c -> do
             stmt <- prepareStmt c "SELECT HEX(?), ?"
-            content <- bytesFrom ["ab", "c"]
-            (_, rows) <- queryStmtStreamed c stmt [StreamedBytes content, InlineParam (MySQLText "inline")]
+            (_, rows) <- queryStmtStreamed c stmt [StreamedBytes (forM_ ["ab", "c"]), InlineParam (MySQLText "inline")]
             Stream.toList rows >>= assertEqual "rows" [[MySQLText "616263", MySQLText "inline"]]
+    , testCase "a send after the producer returned throws and sends nothing" $
+        withTestConnection $ \c -> do
+            stmt <- prepareStmt c "SELECT HEX(?), HEX(?)"
+            escaped <- newIORef (\_ -> pure ())
+            (_, rows) <- queryStmtStreamed c stmt
+                [InlineParam (MySQLBytes "a"), StreamedBytes (\send -> writeIORef escaped send >> send "b")]
+            Stream.toList rows >>= assertEqual "rows" [[MySQLText "61", MySQLText "62"]]
+            send <- readIORef escaped
+            late <- try (send "late")
+            case late of
+                Left failure -> assertEqual "the exception" (ChunkAfterProducerReturned 1) failure
+                Right () -> assertFailure "the chunk was taken after its producer returned"
+            -- Long data from the late chunk would take the place of this execute's
+            -- second value.
+            (_, again) <- queryStmt c stmt [MySQLBytes "c", MySQLBytes "d"]
+            Stream.toList again >>= assertEqual "rows" [[MySQLText "63", MySQLText "64"]]
     , testCase "after a streamed execute the statement takes values inline and after a reset streams again" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
-            streamed <- bytesFrom ["streamed"]
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes streamed])
+            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes (forM_ ["streamed"])])
             void (executeStmt c stmt [MySQLInt32 2, MySQLBytes "inline"])
             resetStmt c stmt
-            again <- bytesFrom ["after reset"]
-            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 3), StreamedBytes again])
+            void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 3), StreamedBytes (forM_ ["after reset"])])
             selectAll c "SELECT id, content FROM streamed_param ORDER BY id"
                 >>= assertEqual "stored rows"
                     [ [MySQLInt32 1, MySQLBytes "streamed"]
@@ -86,18 +95,17 @@ tests = testGroup "streamed parameters"
     , testCase "a refused execute leaves the statement executable" $
         withStreamTable $ \c -> do
             stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
-            extra <- bytesFrom ["for a third parameter the statement lacks"]
             -- ER_WRONG_ARGUMENTS, which the server repeats for every later
             -- execute of the statement until it is reset
             assertRefused 1210 (executeStmtStreamed c stmt
-                [InlineParam (MySQLInt32 1), InlineParam (MySQLBytes "x"), StreamedBytes extra])
+                [ InlineParam (MySQLInt32 1), InlineParam (MySQLBytes "x")
+                , StreamedBytes (forM_ ["for a third parameter the statement lacks"]) ])
             void (executeStmt c stmt [MySQLInt32 2, MySQLBytes "next"])
             selectAll c "SELECT id, content FROM streamed_param" >>= assertEqual "stored rows" [[MySQLInt32 2, MySQLBytes "next"]]
     , testCase "an unknown statement is refused and the connection stays usable" $
         withTestConnection $ \c -> do
-            content <- bytesFrom ["for no statement"]
             -- ER_UNKNOWN_STMT_HANDLER, also the answer to the reset that follows it
-            assertRefused 1243 (executeStmtStreamed c 4000000000 [StreamedBytes content])
+            assertRefused 1243 (executeStmtStreamed c 4000000000 [StreamedBytes (forM_ ["for no statement"])])
             selectAll c "SELECT 'next'" >>= assertEqual "the next query's rows" [[MySQLText "next"]]
     , testCase "more parameters than a statement can have are refused before sending" $
         withTestConnection $ \c -> do
@@ -112,7 +120,7 @@ tests = testGroup "streamed parameters"
             limit <- maxAllowedPacket c
             stmt <- prepareStmt c "SELECT HEX(?)"
             -- The same chunk over and over, so the client holds 1 MiB of it.
-            tooLong <- bytesFrom (replicate (limit `div` mebibyte + 1) (B.replicate mebibyte 0x61))
+            let tooLong = forM_ (replicate (limit `div` mebibyte + 1) (B.replicate mebibyte 0x61))
             -- ER_UNKNOWN_ERROR, "longer than 'max_allowed_packet' bytes"
             assertRefused 1105 (queryStmtStreamed c stmt [StreamedBytes tooLong] >>= Stream.toList . snd)
             (_, rows) <- queryStmt c stmt [MySQLBytes "ok"]
@@ -120,8 +128,7 @@ tests = testGroup "streamed parameters"
     , testCase "a producer that throws part-way makes the connection refuse commands" $
         withTestConnection $ \c -> do
             stmt <- prepareStmt c "SELECT HEX(?)"
-            chunks <- newIORef ["sent", "also sent"]
-            outcome <- try (queryStmtStreamed c stmt [StreamedBytes (chunkOrFail chunks)] >>= Stream.toList . snd)
+            outcome <- try (queryStmtStreamed c stmt [StreamedBytes failingProducer] >>= Stream.toList . snd)
             case outcome of
                 Left (failure :: IOError) -> assertEqual "the producer's exception" "user error (producer failed)" (show failure)
                 Right rows -> assertFailure ("the statement ran on part of its value: " ++ show rows)
@@ -136,8 +143,7 @@ tests = testGroup "streamed parameters"
 assertStoredAlike :: MySQLConn -> [B.ByteString] -> Assertion
 assertStoredAlike c chunks = do
     stmt <- prepareStmt c "INSERT INTO streamed_param (id, content) VALUES (?, ?)"
-    content <- bytesFrom chunks
-    void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes content])
+    void (executeStmtStreamed c stmt [InlineParam (MySQLInt32 1), StreamedBytes (forM_ chunks)])
     void (executeStmt c stmt [MySQLInt32 2, MySQLBytes (B.concat chunks)])
     stored <- selectAll c "SELECT CAST(LENGTH(content) AS CHAR), SHA2(content, 256) FROM streamed_param ORDER BY id"
     case stored of
@@ -152,24 +158,11 @@ withStreamTable action = withTestConnection $ \c -> do
                      \other LONGBLOB, label TEXT, note LONGTEXT CHARACTER SET utf8mb4)")
     action c
 
-bytesFrom :: [B.ByteString] -> IO (IO B.ByteString)
-bytesFrom = producerOf B.empty
-
--- | Each call gives the next of these chunks, then @end@ for good.
-producerOf :: a -> [a] -> IO (IO a)
-producerOf end chunks = do
-    remaining <- newIORef chunks
-    pure (fromMaybe end <$> atomicModifyIORef' remaining popChunk)
-
--- | The next of these chunks, throwing once they are used up.
-chunkOrFail :: IORef [B.ByteString] -> IO B.ByteString
-chunkOrFail chunks =
-    atomicModifyIORef' chunks popChunk >>= maybe (ioError (userError "producer failed")) pure
-
-popChunk :: [a] -> ([a], Maybe a)
-popChunk chunks = case chunks of
-    [] -> ([], Nothing)
-    chunk : later -> (later, Just chunk)
+failingProducer :: (B.ByteString -> IO ()) -> IO ()
+failingProducer send = do
+    send "sent"
+    send "also sent"
+    ioError (userError "producer failed")
 
 maxAllowedPacket :: MySQLConn -> IO Int
 maxAllowedPacket c = do

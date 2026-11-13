@@ -14,12 +14,15 @@ module Database.MySQL.Protocol.StreamedParam
     , NumberedParams
     , numberParams
     , writeStreamedExecute
+    , ChunkAfterProducerReturned (..)
     ) where
 
+import           Control.Exception                  (Exception (..), onException, throwIO)
 import           Control.Monad                      (unless)
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
+import           Data.IORef                         (IORef, newIORef, readIORef, writeIORef)
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
 import           Data.Text.Encoding                 (encodeUtf8)
@@ -58,42 +61,63 @@ import           Database.MySQL.Protocol.Packet     (Packet)
 -- on both servers above, and read in their sql_prepare.cc.
 
 -- | A parameter of 'Database.MySQL.Base.executeStmtStreamed' and
--- 'Database.MySQL.Base.queryStmtStreamed': a value, or an action producing
--- one in chunks that are sent to the server as they come, so the client need
--- not hold the whole value. The server does, and refuses a streamed value
--- longer than its @max_allowed_packet@.
+-- 'Database.MySQL.Base.queryStmtStreamed': a value, or a producer of one in
+-- chunks, which go to the server as they come, so the client need not hold
+-- the whole value. The server does, and refuses a streamed value longer than
+-- its @max_allowed_packet@.
 --
--- Each call of the action returns the next chunk, and an empty chunk ends the
--- value: the convention of 'Data.ByteString.hGetSome', network's @recv@ and
--- http-client's @brRead@, which plug in directly. The action is not called
--- again after it returned an empty chunk, so a producer must not return one
--- before the end; the value would be stored cut short.
+-- A producer is handed a send function and calls it with each chunk in turn;
+-- the value ends when the producer returns, and an empty chunk is nothing to
+-- send. The send function is only valid while the producer runs, from its
+-- thread: called after the producer returned it throws
+-- 'ChunkAfterProducerReturned'. An exception from the producer propagates and
+-- leaves the connection refusing commands with
+-- 'Database.MySQL.Base.AbandonedReply'.
 --
--- A lazy 'Data.ByteString.Lazy.ByteString', whose chunks are never empty, can
--- be handed over chunk by chunk (also one read lazily with
--- 'Data.ByteString.Lazy.readFile'):
+-- A file, 64 KiB at a time:
 --
--- > chunks <- newIORef (L.toChunks lazyBytes)
--- > let nextChunk = atomicModifyIORef' chunks $ \rest -> case rest of
--- >         []            -> ([], B.empty)
--- >         chunk : later -> (later, chunk)
--- > executeStmtStreamed conn stmt [StreamedBytes nextChunk]
+-- > fileChunks :: Handle -> (ByteString -> IO ()) -> IO ()
+-- > fileChunks handle send = do
+-- >     chunk <- B.hGetSome handle 65536
+-- >     unless (B.null chunk) (send chunk >> fileChunks handle send)
+-- >
+-- > withFile "backup.tar" ReadMode $ \handle ->
+-- >     executeStmtStreamed conn stmt [StreamedBytes (fileChunks handle)]
 --
--- An io-streams @InputStream@ may give empty chunks before its end, which
--- have to be skipped:
+-- A lazy 'Data.ByteString.Lazy.ByteString', also one read lazily with
+-- 'Data.ByteString.Lazy.readFile':
 --
--- > nextChunk :: InputStream ByteString -> IO ByteString
--- > nextChunk input = Streams.read input >>= \next -> case next of
--- >     Nothing    -> pure B.empty
--- >     Just chunk -> if B.null chunk then nextChunk input else pure chunk
+-- > StreamedBytes (\send -> mapM_ send (L.toChunks value))
+--
+-- A conduit source, here with @import qualified Conduit as C@ (conduit 1.3):
+--
+-- > StreamedBytes $ \send ->
+-- >     C.runConduitRes (C.sourceFile path C..| C.mapM_C (liftIO . send))
+--
+-- A streamly @Stream IO ByteString@, with @import qualified
+-- Streamly.Data.Stream as Stream@ and @import qualified Streamly.Data.Fold as
+-- Fold@ (streamly-core 0.2):
+--
+-- > StreamedBytes (\send -> Stream.fold (Fold.drainMapM send) chunks)
+--
+-- A pipes @Producer ByteString IO ()@, with @import qualified Pipes as P@
+-- (pipes 4.3):
+--
+-- > StreamedBytes (\send -> P.runEffect (P.for chunks (P.lift . send)))
+--
+-- An io-streams @InputStream ByteString@, with @import qualified
+-- System.IO.Streams as Streams@ (io-streams 1.5):
+--
+-- > StreamedBytes $ \send ->
+-- >     Streams.makeOutputStream (mapM_ send) >>= Streams.connect input
 --
 -- @since 1.6.0
 data StreamedParam
     = InlineParam !MySQLValue
       -- ^ A value sent with the execute command, as 'Database.MySQL.Base.executeStmt' sends it.
-    | StreamedBytes !(IO ByteString)
+    | StreamedBytes !((ByteString -> IO ()) -> IO ())
       -- ^ A binary string, as 'MySQLBytes' is sent.
-    | StreamedText !(IO Text)
+    | StreamedText !((Text -> IO ()) -> IO ())
       -- ^ A string, encoded as UTF-8 as 'MySQLText' is.
 
 -- | Parameters with their positions in the statement, which the long data
@@ -122,30 +146,62 @@ writeStreamedExecute stid (NumberedParams numbered) writePacket = do
 writeParamData :: StmtID -> (Packet -> IO ()) -> (Word16, StreamedParam) -> IO ()
 writeParamData stid writePacket (position, param) = case param of
     InlineParam _ -> pure ()
-    StreamedBytes nextChunk -> writeLongData stid position nextChunk writePacket
-    StreamedText nextChunk -> writeLongData stid position (encodeUtf8 <$> nextChunk) writePacket
+    StreamedBytes producer -> writeLongData stid position producer writePacket
+    StreamedText producer -> writeLongData stid position (encodingChunks producer) writePacket
 
-writeLongData :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> IO ()
-writeLongData stid position nextChunk writePacket =
-    gatherPiece stid position nextChunk writePacket 0 []
+encodingChunks :: ((Text -> IO ()) -> IO ()) -> (ByteString -> IO ()) -> IO ()
+encodingChunks producer send = producer (send . encodeUtf8)
 
--- | Gather chunks into the next command, which holds @pendingLength@ bytes in
--- @pending@ (last chunk first) so far.
-gatherPiece :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> Int -> [ByteString] -> IO ()
-gatherPiece stid position nextChunk writePacket pendingLength pending = do
-    chunk <- nextChunk
-    if  | B.null chunk ->
-            -- Sent also when empty: an empty value needs a command too, or the
-            -- server would look for this parameter's value in the execute command.
-            writeLongDataPiece stid position (reverse pending) writePacket
-        | pendingLength + B.length chunk < longDataPieceSize ->
-            gatherPiece stid position nextChunk writePacket
-                (pendingLength + B.length chunk) (chunk : pending)
-        | otherwise -> do
-            let (completing, rest) = B.splitAt (longDataPieceSize - pendingLength) chunk
-            writeLongDataPiece stid position (reverse (completing : pending)) writePacket
-            leftover <- writeWholePieces stid position rest writePacket
-            gatherPiece stid position nextChunk writePacket (B.length leftover) [leftover]
+-- | The chunks a producer sent that are not yet in a command, @pendingLength@
+-- bytes with the last chunk first.
+data Sink = Sink !ProducerStatus !Int [ByteString]
+
+data ProducerStatus = ProducerRunning | ProducerReturned
+
+writeLongData :: StmtID -> Word16 -> ((ByteString -> IO ()) -> IO ()) -> (Packet -> IO ()) -> IO ()
+writeLongData stid position producer writePacket = do
+    sink <- newIORef (Sink ProducerRunning 0 [])
+    producer (sendChunk stid position writePacket sink) `onException` closeSink sink
+    Sink _ _ pending <- readIORef sink
+    closeSink sink
+    -- Sent also when empty: an empty value needs a command too, or the server
+    -- would look for this parameter's value in the execute command.
+    writeLongDataPiece stid position (reverse pending) writePacket
+
+closeSink :: IORef Sink -> IO ()
+closeSink sink = writeIORef sink (Sink ProducerReturned 0 [])
+
+-- | The send function a producer gets: gather the chunk into the pending
+-- command, writing the commands it completes.
+sendChunk :: StmtID -> Word16 -> (Packet -> IO ()) -> IORef Sink -> ByteString -> IO ()
+sendChunk stid position writePacket sink chunk = do
+    Sink status pendingLength pending <- readIORef sink
+    case status of
+        ProducerReturned -> throwIO (ChunkAfterProducerReturned position)
+        ProducerRunning ->
+            if  | B.null chunk -> pure ()
+                | pendingLength + B.length chunk < longDataPieceSize ->
+                    writeIORef sink (Sink ProducerRunning (pendingLength + B.length chunk) (chunk : pending))
+                | otherwise -> do
+                    let (completing, rest) = B.splitAt (longDataPieceSize - pendingLength) chunk
+                    writeLongDataPiece stid position (reverse (completing : pending)) writePacket
+                    leftover <- writeWholePieces stid position rest writePacket
+                    writeIORef sink (Sink ProducerRunning (B.length leftover) [leftover])
+
+-- | A send function given to a 'StreamedBytes' or 'StreamedText' producer was
+-- called after the producer returned, for the parameter at this position
+-- (counting from 0). Its value had been sent by then, so the chunk was not.
+--
+-- @since 1.6.0
+newtype ChunkAfterProducerReturned = ChunkAfterProducerReturned Word16
+    deriving (Show, Eq)
+
+instance Exception ChunkAfterProducerReturned where
+    displayException (ChunkAfterProducerReturned position) =
+        "mysql-haskell: a chunk was sent for streamed parameter " ++ show position
+        ++ " (counting from 0) after its producer returned, when the parameter's value "
+        ++ "had already gone to the server, so the chunk was not sent. The send function "
+        ++ "a StreamedBytes or StreamedText producer gets is only valid while the producer runs."
 
 -- | Send whole commands' worth of these bytes, returning the shorter rest.
 writeWholePieces :: StmtID -> Word16 -> ByteString -> (Packet -> IO ()) -> IO ByteString

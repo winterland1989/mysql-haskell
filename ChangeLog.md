@@ -13,9 +13,10 @@
   `decodeBinLogPacketFollowing` decodes a packet that way
   [#115](https://github.com/winterland1989/mysql-haskell/pull/115)
 * `executeStmtStreamed` and `queryStmtStreamed` take prepared statement
-  parameters from `IO ByteString` or `IO Text` actions and send the value as
-  it is produced (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is
-  never held in memory whole
+  parameters from producers that send the value chunk by chunk
+  (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is never held in
+  memory whole; the haddock wires in files, lazy ByteStrings, conduit,
+  streamly, pipes and io-streams
   [#117](https://github.com/winterland1989/mysql-haskell/pull/117)
 
 ## 1.5.0 -- 2026.11.11 
