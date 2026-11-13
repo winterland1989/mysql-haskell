@@ -1,7 +1,8 @@
 -- | A send function that escaped its 'StreamedBytes' producer, called from
--- another thread while the parameter is being finished, has to throw rather
--- than add long data behind the execute command, where the server would take
--- it for the value of the statement's next execute.
+-- another thread while the parameter is being finished, has to either get its
+-- chunk into the parameter's value, ahead of the execute command, or throw.
+-- Written after the execute command, the server takes the chunk for the
+-- value of the statement's next execute; kept and never written, it is lost.
 module EscapedSend (tests) where
 
 import           Control.Concurrent        (forkIO, getNumCapabilities, setNumCapabilities)
@@ -19,63 +20,91 @@ import qualified System.IO.Streams         as Stream
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-data SenderOutcome
-    = SenderRefused
-    | SentAfterExecute  -- ^ a send begun after executeStmtStreamed returned went through
-    deriving (Show, Eq)
+-- | What one execute with a racing sender left on the connection.
+data Trial = Trial
+    { acceptedBytes        :: !Integer  -- ^ the chunks of sends that returned normally
+    , bytesBeforeExecute   :: !Integer  -- ^ long data written ahead of the execute command
+    , commandsAfterExecute :: !Int      -- ^ long data commands written after it
+    }
 
 data ExecuteProgress = ExecuteRunning | ExecuteReturned
 
 tests :: TestTree
-tests = testCase "a send racing its producer's return throws and never writes after the execute" $
-    withCapabilities 4 $ do
-        trials <- replicateM 300 raceOnce
-        assertEqual "trials with long data written after the execute command"
-            0 (length (filter ((> 0) . fst) trials))
-        assertEqual "trials with a send after the execute that was not refused"
-            0 (length (filter ((== SentAfterExecute) . snd) trials))
+tests = testGroup "a send racing its producer's return"
+    [ raceCase 1 1000 100, raceCase 1 200 2000000, raceCase 4 1000 100, raceCase 4 200 2000000 ]
 
--- | One execute whose producer forks a sender and returns at once: the long
--- data commands written after the execute command, and how the sender ended.
-raceOnce :: IO (Int, SenderOutcome)
-raceOnce = do
+-- | Trials at a fixed number of capabilities, whatever the binary's @-N@, with
+-- chunks shorter and longer than a long data command.
+raceCase :: Int -> Int -> Int -> TestTree
+raceCase capabilities trialCount chunkSize =
+    testCase (show trialCount ++ " trials, " ++ show chunkSize ++ "-byte chunks, "
+              ++ show capabilities ++ " capabilities") $
+        withCapabilities capabilities $ do
+            trials <- replicateM trialCount (raceOnce (B.replicate chunkSize 0x61))
+            assertEqual "trials that (lost a chunk a send had taken, wrote long data after the execute)"
+                (0, 0)
+                (length (filter lostChunks trials), length (filter ((> 0) . commandsAfterExecute) trials))
+
+lostChunks :: Trial -> Bool
+lostChunks trial = acceptedBytes trial /= bytesBeforeExecute trial
+
+-- | One execute whose producer forks a sender and returns while it sends.
+raceOnce :: B.ByteString -> IO Trial
+raceOnce chunk = do
     written <- newIORef []
     reply <- Stream.fromList [encodeToPacket 1 (OK 0 0 2 0)]
     state <- newIORef RepliesRead
-    let conn = MySQLConn reply (recordPacket written) (pure ()) state
-    finished <- newEmptyMVar
+    accepted <- newIORef 0
     progress <- newIORef ExecuteRunning
-    _ <- executeStmtStreamed conn 1 [StreamedBytes (racingProducer progress finished)]
+    finished <- newEmptyMVar
+    let conn = MySQLConn reply (recordPacket written) (pure ()) state
+    _ <- executeStmtStreamed conn 1 [StreamedBytes (racingProducer chunk accepted progress finished)]
     atomicWriteIORef progress ExecuteReturned
-    outcome <- takeMVar finished
-    packets <- reverse <$> readIORef written
-    pure (length (filter (startsWith 0x18) (dropWhile (not . startsWith 0x17) packets)), outcome)
+    takeMVar finished
+    (beforeExecute, fromExecute) <- break (startsWith 0x17) . reverse <$> readIORef written
+    total <- readIORef accepted
+    pure Trial
+        { acceptedBytes = total
+        , bytesBeforeExecute = sum (map longDataBytes (filter (startsWith 0x18) beforeExecute))
+        , commandsAfterExecute = length (filter (startsWith 0x18) fromExecute)
+        }
 
 recordPacket :: IORef [Packet] -> Packet -> IO ()
 recordPacket written packet = atomicModifyIORef' written (\packets -> (packet : packets, ()))
 
 -- | Fork a sender and return once it has sent its first chunk, so that it is
 -- still sending when the parameter is finished.
-racingProducer :: IORef ExecuteProgress -> MVar SenderOutcome -> (B.ByteString -> IO ()) -> IO ()
-racingProducer progress finished send = do
+racingProducer :: B.ByteString -> IORef Integer -> IORef ExecuteProgress -> MVar () -> (B.ByteString -> IO ()) -> IO ()
+racingProducer chunk accepted progress finished send = do
     started <- newEmptyMVar
-    void (forkIO (send chunk >> putMVar started () >> sendUntilRefused progress send >>= putMVar finished))
+    void $ forkIO $ do
+        send chunk
+        addAccepted accepted chunk
+        putMVar started ()
+        sendUntilRefused chunk accepted progress send
+        putMVar finished ()
     takeMVar started
 
--- | Send until refused, or until a send begun after the execute returned goes
--- through.
-sendUntilRefused :: IORef ExecuteProgress -> (B.ByteString -> IO ()) -> IO SenderOutcome
-sendUntilRefused progress send = do
+-- | Send until refused, or until a send begun after the execute returned went
+-- through, which the byte counts then show.
+sendUntilRefused :: B.ByteString -> IORef Integer -> IORef ExecuteProgress -> (B.ByteString -> IO ()) -> IO ()
+sendUntilRefused chunk accepted progress send = do
     before <- readIORef progress
     sent <- try (send chunk)
     case sent of
-        Left (ChunkAfterProducerReturned _) -> pure SenderRefused
-        Right () -> case before of
-            ExecuteReturned -> pure SentAfterExecute
-            ExecuteRunning -> sendUntilRefused progress send
+        Left (ChunkAfterProducerReturned _) -> pure ()
+        Right () -> do
+            addAccepted accepted chunk
+            case before of
+                ExecuteReturned -> pure ()
+                ExecuteRunning -> sendUntilRefused chunk accepted progress send
 
-chunk :: B.ByteString
-chunk = B.replicate 1024 0x61
+addAccepted :: IORef Integer -> B.ByteString -> IO ()
+addAccepted accepted chunk = atomicModifyIORef' accepted (\total -> (total + toInteger (B.length chunk), ()))
+
+-- | The data of a long data command, after its 7 header bytes.
+longDataBytes :: Packet -> Integer
+longDataBytes packet = toInteger (pLen packet) - 7
 
 -- | The command byte of a packet's payload; every command here fits one packet.
 startsWith :: Word8 -> Packet -> Bool
