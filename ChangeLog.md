@@ -7,10 +7,10 @@
   `clientUseServerNameIndication = False` on the `ClientParams` to send none.
   `show` of a `ConnectInfo` hides the password
   [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
-* `executeStmtStreamed` and `queryStmtStreamed` read prepared statement
-  parameters from `InputStream`s and send them in chunks
-  (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is never held in
-  memory whole
+* `executeStmtStreamed` and `queryStmtStreamed` take prepared statement
+  parameters from `IO ByteString` or `IO Text` actions and send each chunk as
+  it comes (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is never
+  held in memory whole
   [#117](https://github.com/winterland1989/mysql-haskell/pull/117)
 
 ## 1.5.0 -- 2026.11.11 

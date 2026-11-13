@@ -7,7 +7,7 @@ Stability   : experimental
 Portability : PORTABLE
 
 The commands that execute a prepared statement with some of its parameters
-read from streams, see Note [Streamed parameters].
+read chunk by chunk, see Note [Streamed parameters].
 -}
 module Database.MySQL.Protocol.StreamedParam
     ( StreamedParam (..)
@@ -20,14 +20,14 @@ import           Control.Monad                      (unless)
 import           Data.Binary.Put
 import           Data.ByteString                    (ByteString)
 import qualified Data.ByteString                    as B
+import           Data.Text                          (Text)
 import qualified Data.Text                          as T
+import           Data.Text.Encoding                 (encodeUtf8)
 import           Data.Word                          (Word16)
 import           Database.MySQL.Connection          (writePayload)
 import           Database.MySQL.Protocol.Command    (StmtID)
 import           Database.MySQL.Protocol.MySQLValue
 import           Database.MySQL.Protocol.Packet     (Packet)
-import           System.IO.Streams                  (InputStream)
-import qualified System.IO.Streams                  as Stream
 
 -- Note [Streamed parameters]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -58,21 +58,43 @@ import qualified System.IO.Streams                  as Stream
 -- on both servers above, and read in their sql_prepare.cc.
 
 -- | A parameter of 'Database.MySQL.Base.executeStmtStreamed' and
--- 'Database.MySQL.Base.queryStmtStreamed': a value, or a stream whose chunks
--- are sent to the server as they are read, so the client need not hold the
--- whole value. The server does, and refuses a streamed value longer than its
--- @max_allowed_packet@.
+-- 'Database.MySQL.Base.queryStmtStreamed': a value, or an action producing
+-- one in chunks that are sent to the server as they come, so the client need
+-- not hold the whole value. The server does, and refuses a streamed value
+-- longer than its @max_allowed_packet@.
+--
+-- Each call of the action returns the next chunk, and an empty chunk ends the
+-- value: the convention of 'Data.ByteString.hGetSome', network's @recv@ and
+-- http-client's @brRead@, which plug in directly. The action is not called
+-- again after it returned an empty chunk, so a producer must not return one
+-- before the end; the value would be stored cut short.
+--
+-- A lazy 'Data.ByteString.Lazy.ByteString', whose chunks are never empty, can
+-- be handed over chunk by chunk (also one read lazily with
+-- 'Data.ByteString.Lazy.readFile'):
+--
+-- > chunks <- newIORef (L.toChunks lazyBytes)
+-- > let nextChunk = atomicModifyIORef' chunks $ \rest -> case rest of
+-- >         []            -> ([], B.empty)
+-- >         chunk : later -> (later, chunk)
+-- > executeStmtStreamed conn stmt [StreamedBytes nextChunk]
+--
+-- An io-streams @InputStream@ may give empty chunks before its end, which
+-- have to be skipped:
+--
+-- > nextChunk :: InputStream ByteString -> IO ByteString
+-- > nextChunk input = Streams.read input >>= \next -> case next of
+-- >     Nothing    -> pure B.empty
+-- >     Just chunk -> if B.null chunk then nextChunk input else pure chunk
 --
 -- @since 1.6.0
 data StreamedParam
     = InlineParam !MySQLValue
       -- ^ A value sent with the execute command, as 'Database.MySQL.Base.executeStmt' sends it.
-    | StreamedBytes !(InputStream ByteString)
+    | StreamedBytes !(IO ByteString)
       -- ^ A binary string, as 'MySQLBytes' is sent.
-    | StreamedText !(InputStream ByteString)
-      -- ^ A string, as 'MySQLText' is sent, in the connection's character set
-      -- (@character_set_client@): UTF-8 on a connection made with
-      -- 'Database.MySQL.Base.defaultConnectInfoMB4'.
+    | StreamedText !(IO Text)
+      -- ^ A string, encoded as UTF-8 as 'MySQLText' is.
 
 -- | Parameters with their positions in the statement, which the long data
 -- commands name as a 'Word16'.
@@ -100,25 +122,23 @@ writeStreamedExecute stid (NumberedParams numbered) writePacket = do
 writeParamData :: StmtID -> (Packet -> IO ()) -> (Word16, StreamedParam) -> IO ()
 writeParamData stid writePacket (position, param) = case param of
     InlineParam _ -> pure ()
-    StreamedBytes chunks -> writeLongData stid position chunks writePacket
-    StreamedText chunks -> writeLongData stid position chunks writePacket
+    StreamedBytes nextChunk -> writeLongData stid position nextChunk writePacket
+    StreamedText nextChunk -> writeLongData stid position (encodeUtf8 <$> nextChunk) writePacket
 
-writeLongData :: StmtID -> Word16 -> InputStream ByteString -> (Packet -> IO ()) -> IO ()
-writeLongData stid position chunks writePacket = do
-    first <- Stream.read chunks
-    case first of
-        -- An empty value still needs a command, or the server would look for
-        -- this parameter's value in the execute command.
-        Nothing -> writeLongDataPiece stid position B.empty writePacket
-        Just chunk -> writeChunks stid position chunk chunks writePacket
+writeLongData :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> IO ()
+writeLongData stid position nextChunk writePacket = do
+    first <- nextChunk
+    -- Also an empty value needs a command, or the server would look for this
+    -- parameter's value in the execute command.
+    writePieces stid position first writePacket
+    unless (B.null first) (writeChunks stid position nextChunk writePacket)
 
-writeChunks :: StmtID -> Word16 -> ByteString -> InputStream ByteString -> (Packet -> IO ()) -> IO ()
-writeChunks stid position chunk chunks writePacket = do
-    writePieces stid position chunk writePacket
-    next <- Stream.read chunks
-    case next of
-        Nothing -> pure ()
-        Just chunk' -> writeChunks stid position chunk' chunks writePacket
+writeChunks :: StmtID -> Word16 -> IO ByteString -> (Packet -> IO ()) -> IO ()
+writeChunks stid position nextChunk writePacket = do
+    chunk <- nextChunk
+    unless (B.null chunk) $ do
+        writePieces stid position chunk writePacket
+        writeChunks stid position nextChunk writePacket
 
 writePieces :: StmtID -> Word16 -> ByteString -> (Packet -> IO ()) -> IO ()
 writePieces stid position chunk writePacket =

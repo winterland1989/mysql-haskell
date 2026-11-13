@@ -758,7 +758,7 @@ instance Exception UnconsumedResultSet
 
 -- | Sending an earlier command on this connection, or reading its reply,
 -- stopped part-way, for example on a 'System.Timeout.timeout' or on an
--- exception from a stream given to 'Database.MySQL.Base.executeStmtStreamed'.
+-- exception from a producer given to 'Database.MySQL.Base.executeStmtStreamed'.
 -- What is left of that exchange would be mixed up with the next command, so
 -- the connection refuses commands: close it and connect again.
 --

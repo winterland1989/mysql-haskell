@@ -62,7 +62,7 @@ module Database.MySQL.Base
     , queryStmtVector
     , closeStmt
     , resetStmt
-      -- * Prepared statements with parameters read from streams
+      -- * Prepared statements with parameters produced in chunks
     , StreamedParam(..)
     , executeStmtStreamed
     , queryStmtStreamed
@@ -758,13 +758,16 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
                 (fmap V.fromList . binaryValuesPacket (Decoder.binaryValueColumns (V.toList fields)))
             return (fields, rows)
 
--- | 'executeStmt' with parameters that may be read from streams, so a long
--- BLOB or TEXT value goes to the server in chunks as they are read, instead of
--- being built in memory as one 'MySQLValue':
+-- | 'executeStmt' with parameters that may be produced in chunks, so a long
+-- BLOB or TEXT value goes to the server as it is read, instead of being built
+-- in memory as one 'MySQLValue'. A file, read 64 KiB at a time:
 --
 -- > stmt <- prepareStmt conn "INSERT INTO file (name, content) VALUES (?, ?)"
--- > Stream.withFileAsInput "backup.tar" $ \content ->
--- >     executeStmtStreamed conn stmt [InlineParam (MySQLText "backup.tar"), StreamedBytes content]
+-- > withFile "backup.tar" ReadMode $ \handle ->
+-- >     executeStmtStreamed conn stmt
+-- >         [InlineParam (MySQLText "backup.tar"), StreamedBytes (B.hGetSome handle 65536)]
+--
+-- 'StreamedParam' has the producers' contract and more examples.
 --
 -- The server refuses a streamed value longer than its @max_allowed_packet@
 -- with an 'ERRException' (code 1105) once the value is sent. The limit holds
@@ -772,7 +775,7 @@ queryStmtVector conn@(MySQLConn is os _ state) stid params = runCommand conn $ d
 -- must fit in one @max_allowed_packet@ together. After an 'ERRException' the
 -- statement is reset, as 'resetStmt' does, so it can be executed again.
 --
--- An exception while the values are sent, also one from a stream or a
+-- An exception while the values are sent, also one from a producer or a
 -- timeout, leaves the connection refusing commands with 'AbandonedReply': the
 -- server may hold part of a command or of the streamed data, which it would
 -- take for the next command or for the parameters of the statement's next
@@ -787,7 +790,7 @@ executeStmtStreamed conn@(MySQLConn is os _ _) stid params = do
         writeStreamedExecute stid numbered os
         readExecuteReply is `catch` resetAfterFailedExecute conn stid
 
--- | 'queryStmt' with parameters that may be read from streams, sent as
+-- | 'queryStmt' with parameters that may be produced in chunks, sent as
 -- 'executeStmtStreamed' sends them and with the same limit and failures.
 --
 -- @since 1.6.0
