@@ -7,10 +7,15 @@
   `clientUseServerNameIndication = False` on the `ClientParams` to send none.
   `show` of a `ConnectInfo` hides the password
   [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
+* The binlog dump reads a binlog file written while `binlog_checksum` was
+  `NONE`, and one with checksums while the server's setting is `NONE`, by
+  following each file's own setting as a replica does; the new
+  `decodeBinLogPacketFollowing` decodes a packet that way
+  [#115](https://github.com/winterland1989/mysql-haskell/pull/115)
 * `executeStmtStreamed` and `queryStmtStreamed` take prepared statement
-  parameters from `IO ByteString` or `IO Text` actions and send each chunk as
-  it comes (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is never
-  held in memory whole
+  parameters from `IO ByteString` or `IO Text` actions and send the value as
+  it is produced (COM_STMT_SEND_LONG_DATA), so a long BLOB or TEXT value is
+  never held in memory whole
   [#117](https://github.com/winterland1989/mysql-haskell/pull/117)
 
 ## 1.5.0 -- 2026.11.11 
