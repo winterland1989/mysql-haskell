@@ -7,6 +7,11 @@
   `clientUseServerNameIndication = False` on the `ClientParams` to send none.
   `show` of a `ConnectInfo` hides the password
   [#114](https://github.com/winterland1989/mysql-haskell/pull/114)
+* The binlog dump reads a binlog file written while `binlog_checksum` was
+  `NONE`, and one with checksums while the server's setting is `NONE`, by
+  following each file's own setting as a replica does; the new
+  `decodeBinLogPacketFollowing` decodes a packet that way
+  [#115](https://github.com/winterland1989/mysql-haskell/pull/115)
 
 ## 1.5.0 -- 2026.11.11 
 

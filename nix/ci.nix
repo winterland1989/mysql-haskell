@@ -17,6 +17,8 @@ in
       server.succeed("mysql -u root -e \"CREATE DATABASE testMySQLHaskell;\"")
       server.succeed("mysql -u root -e \"GRANT ALL ON testMySQLHaskell.* TO 'testMySQLHaskell'@'localhost';\"")
       server.succeed("mysql -u root -e \"GRANT BINLOG MONITOR, REPLICATION SLAVE, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
+      # BinLogChecksumSwitch sets binlog_checksum to write binlog files under both settings.
+      server.succeed("mysql -u root -e \"GRANT SUPER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
       # Account for the ed25519 authentication tests of integration-mariadb.
       server.succeed("mysql -u root -e \"INSTALL SONAME 'auth_ed25519';\"")
       server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskellEd25519'@'localhost' IDENTIFIED VIA ed25519 USING PASSWORD('ed25519Pass123');\"")
@@ -60,6 +62,8 @@ in
       server.succeed("mysql -u root -e \"GRANT REPLICATION SLAVE, REPLICATION CLIENT, CREATE USER ON *.* TO 'testMySQLHaskell'@'localhost';\"")
       # binlog_transaction_compression is a restricted session variable.
       server.succeed("mysql -u root -e \"GRANT SESSION_VARIABLES_ADMIN ON *.* TO 'testMySQLHaskell'@'localhost';\"")
+      # BinLogChecksumSwitch sets binlog_checksum to write binlog files under both settings.
+      server.succeed("mysql -u root -e \"GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO 'testMySQLHaskell'@'localhost';\"")
 
       # User with caching_sha2_password (MySQL 8.0 default) for SHA256 fast auth test
       server.succeed("mysql -u root -e \"CREATE USER 'testMySQLHaskellSha2'@'localhost' IDENTIFIED BY 'testPassword123';\"")
